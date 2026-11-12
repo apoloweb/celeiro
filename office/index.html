@@ -678,10 +678,12 @@ async function telaUsuarios(op){
   function orgAtual(){return ehCorp()?(selOrg.value||null):null;}
   function mostraPrevia(){
     var p=previa(selPerfil.value,orgAtual(),selNivel.disabled?null:(selNivel.value||null));
-    if(p.todos){elPrevia.innerHTML='<strong>Módulos que este usuário vai acessar:</strong> <span class="chips"><span class="chipm">Todos os módulos</span></span>';return;}
+    if(p.todos){elPrevia.innerHTML='<strong>Módulos que este usuário vai acessar:</strong> <span class="chips"><span class="chipm">Todos os módulos</span></span>'+
+      '<span class="sub">O perfil Master é da Celeiro e tem todos os módulos, por isso Organização e Nível de permissão ficam travados. Para escolher organização ou nível, troque o Perfil para Gerencial, Corporativo master ou Corporativo operador.</span>';return;}
     if(ehCorp()&&!orgAtual()){elPrevia.innerHTML='<span class="apoio">Escolha a organização para ver os módulos.</span>';return;}
     elPrevia.innerHTML='<strong>Módulos que este usuário vai acessar:</strong> '+chipsModulos(p.modulos,p.bloqueados)+
-      (p.bloqueados.length?'<span class="sub">Os bloqueados estão no nível, mas não estão habilitados para o perfil em Módulos e permissões.</span>':'');
+      (p.bloqueados.length?'<span class="sub">Os bloqueados estão no nível, mas não estão habilitados para o perfil em Módulos e permissões.</span>':'')+
+      (selPerfil.value==='gerencial'?'<span class="sub">O perfil Gerencial é da equipe Celeiro, por isso não tem organização. Os níveis disponíveis são os criados para "Equipe Celeiro".</span>':'');
   }
   function montaNiveis(manter){
     var perfil=selPerfil.value,org=orgAtual(),atual=manter;
