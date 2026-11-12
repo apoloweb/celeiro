@@ -2787,7 +2787,1040 @@ grant execute on function public.mcp_definir_liberacao(uuid, text, boolean, bool
 grant execute on function public.mcp_liberar_usuario(uuid, boolean)             to authenticated;
 
 -- =====================================================================
--- 12) PRIMEIRO USUÁRIO MASTER
+-- 12) FINANCEIRO
+--    Contas a pagar e a receber, faturas, fluxo de caixa, DRE, balanço e
+--    balancete. Cada organização tem os próprios livros; organizacao_id
+--    nulo = livros da própria Celeiro (só a equipe Celeiro alcança).
+--    - Quem tem o módulo Financeiro vê e altera, dentro do seu alcance.
+--    - A contabilidade é por partidas dobradas, geradas a partir dos
+--      títulos (emissão e pagamento) e dos lançamentos manuais.
+--    - Emitir fatura cria automaticamente o título em contas a receber.
+--    - Nada é apagado: títulos e faturas são cancelados, e ficam no histórico.
+--    - As tabelas não são lidas direto pelo navegador; tudo passa pelas
+--      operações abaixo, que conferem o alcance.
+-- =====================================================================
+
+create table if not exists public.fin_contas (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  codigo         text not null check (codigo ~ '^[0-9]+(\.[0-9]+){0,4}$'),
+  nome           text not null check (char_length(nome) between 1 and 120),
+  tipo           text not null check (tipo in ('ativo','passivo','patrimonio','receita','custo','despesa')),
+  grupo          boolean not null default false,
+  caixa          boolean not null default false,
+  papel          text check (papel in ('clientes','fornecedores')),
+  ativo          boolean not null default true,
+  criado_em      timestamptz not null default now(),
+  constraint fin_contas_caixa_ativo check (not caixa or (tipo = 'ativo' and not grupo))
+);
+create unique index if not exists fin_contas_codigo
+  on public.fin_contas (coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid), codigo);
+
+create table if not exists public.fin_faturas (
+  id                uuid primary key default gen_random_uuid(),
+  organizacao_id    uuid references public.organizacoes(id) on delete cascade,
+  numero            bigint generated always as identity,
+  cliente_tipo      text check (cliente_tipo in ('pf','pj')),
+  cliente_id        uuid,
+  cliente_nome      text not null check (char_length(cliente_nome) between 1 and 200),
+  cliente_documento text not null default '',
+  cliente_endereco  text not null default '',
+  cliente_email     text not null default '',
+  emissao           date not null,
+  vencimento        date not null,
+  conta_id          uuid not null references public.fin_contas(id),
+  itens             jsonb not null,
+  total             numeric(14,2) not null check (total > 0),
+  forma             text not null default '',
+  observacoes       text not null default '',
+  status            text not null default 'emitida' check (status in ('emitida','cancelada')),
+  cancelada_em      timestamptz,
+  criado_por        uuid,
+  criado_em         timestamptz not null default now(),
+  constraint fin_faturas_datas check (vencimento >= emissao)
+);
+create index if not exists fin_faturas_org on public.fin_faturas (organizacao_id, emissao);
+
+create table if not exists public.fin_titulos (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  tipo           text not null check (tipo in ('pagar','receber')),
+  numero         bigint generated always as identity,
+  descricao      text not null check (char_length(descricao) between 1 and 200),
+  pessoa_tipo    text check (pessoa_tipo in ('pf','pj')),
+  pessoa_id      uuid,
+  pessoa_nome    text not null default '',
+  conta_id       uuid not null references public.fin_contas(id),
+  emissao        date not null,
+  vencimento     date not null,
+  valor          numeric(14,2) not null check (valor > 0),
+  status         text not null default 'aberto' check (status in ('aberto','pago','cancelado')),
+  pago_em        date,
+  conta_caixa_id uuid references public.fin_contas(id),
+  forma          text not null default '',
+  fatura_id      uuid references public.fin_faturas(id),
+  observacoes    text not null default '',
+  criado_por     uuid,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now(),
+  constraint fin_titulos_datas check (vencimento >= emissao),
+  constraint fin_titulos_pago check ((status = 'pago') = (pago_em is not null and conta_caixa_id is not null))
+);
+create index if not exists fin_titulos_org on public.fin_titulos (organizacao_id, tipo, vencimento);
+
+create table if not exists public.fin_lancamentos (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  data           date not null,
+  historico      text not null check (char_length(historico) between 1 and 200),
+  conta_debito   uuid not null references public.fin_contas(id),
+  conta_credito  uuid not null references public.fin_contas(id),
+  valor          numeric(14,2) not null check (valor > 0),
+  criado_por     uuid,
+  criado_em      timestamptz not null default now(),
+  constraint fin_lancamentos_contas check (conta_debito <> conta_credito)
+);
+create index if not exists fin_lancamentos_org on public.fin_lancamentos (organizacao_id, data);
+
+alter table public.fin_contas      enable row level security;
+alter table public.fin_faturas     enable row level security;
+alter table public.fin_titulos     enable row level security;
+alter table public.fin_lancamentos enable row level security;
+
+drop trigger if exists auditar_fin_faturas on public.fin_faturas;
+create trigger auditar_fin_faturas
+  after insert or update or delete on public.fin_faturas
+  for each row execute function public.auditar('Financeiro');
+
+drop trigger if exists auditar_fin_titulos on public.fin_titulos;
+create trigger auditar_fin_titulos
+  after insert or update or delete on public.fin_titulos
+  for each row execute function public.auditar('Financeiro');
+
+drop trigger if exists auditar_fin_lancamentos on public.fin_lancamentos;
+create trigger auditar_fin_lancamentos
+  after insert or update or delete on public.fin_lancamentos
+  for each row execute function public.auditar('Financeiro');
+
+drop trigger if exists auditar_fin_contas on public.fin_contas;
+create trigger auditar_fin_contas
+  after update or delete on public.fin_contas
+  for each row execute function public.auditar('Financeiro');
+
+-- O usuário atual alcança os livros desta organização? (nulo = Celeiro)
+create or replace function public.fin_escopo_ok(p_org uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select public.pode_modulo('financeiro')
+     and coalesce(
+       (public.eh_equipe() and (p_org is null or exists (select 1 from public.organizacoes o where o.id = p_org)))
+       or (p_org is not null and p_org = public.minha_org()), false);
+$$;
+
+-- Cria o plano de contas padrão na primeira vez (uso interno)
+create or replace function public.fin_preparar(p_org uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if exists (select 1 from public.fin_contas where organizacao_id is not distinct from p_org) then
+    return;
+  end if;
+  insert into public.fin_contas (organizacao_id, codigo, nome, tipo, grupo, caixa, papel)
+  select p_org, v.codigo, v.nome, v.tipo, v.grupo, v.caixa, v.papel
+  from (values
+    ('1',     'Ativo',                                'ativo',      true,  false, null),
+    ('1.1',   'Ativo circulante',                     'ativo',      true,  false, null),
+    ('1.1.1', 'Caixa',                                'ativo',      false, true,  null),
+    ('1.1.2', 'Banco conta movimento',                'ativo',      false, true,  null),
+    ('1.1.3', 'Clientes a receber',                   'ativo',      false, false, 'clientes'),
+    ('1.2',   'Ativo não circulante',                 'ativo',      true,  false, null),
+    ('1.2.1', 'Imobilizado',                          'ativo',      false, false, null),
+    ('2',     'Passivo',                              'passivo',    true,  false, null),
+    ('2.1',   'Passivo circulante',                   'passivo',    true,  false, null),
+    ('2.1.1', 'Fornecedores a pagar',                 'passivo',    false, false, 'fornecedores'),
+    ('2.1.2', 'Impostos a recolher',                  'passivo',    false, false, null),
+    ('2.1.3', 'Empréstimos e financiamentos',         'passivo',    false, false, null),
+    ('3',     'Patrimônio líquido',                   'patrimonio', true,  false, null),
+    ('3.1',   'Capital social',                       'patrimonio', false, false, null),
+    ('3.2',   'Lucros ou prejuízos acumulados',       'patrimonio', false, false, null),
+    ('4',     'Receitas',                             'receita',    true,  false, null),
+    ('4.1',   'Receita de serviços',                  'receita',    false, false, null),
+    ('4.2',   'Receita de energia',                   'receita',    false, false, null),
+    ('4.3',   'Receita de financiamentos',            'receita',    false, false, null),
+    ('4.4',   'Receita de captação de recursos',      'receita',    false, false, null),
+    ('4.5',   'Receitas financeiras',                 'receita',    false, false, null),
+    ('4.9',   'Outras receitas',                      'receita',    false, false, null),
+    ('5',     'Custos',                               'custo',      true,  false, null),
+    ('5.1',   'Custo dos serviços prestados',         'custo',      false, false, null),
+    ('6',     'Despesas',                             'despesa',    true,  false, null),
+    ('6.1',   'Pessoal',                              'despesa',    false, false, null),
+    ('6.2',   'Aluguel e ocupação',                   'despesa',    false, false, null),
+    ('6.3',   'Serviços de terceiros',                'despesa',    false, false, null),
+    ('6.4',   'Impostos e taxas',                     'despesa',    false, false, null),
+    ('6.5',   'Marketing',                            'despesa',    false, false, null),
+    ('6.6',   'Tecnologia',                           'despesa',    false, false, null),
+    ('6.7',   'Despesas financeiras',                 'despesa',    false, false, null),
+    ('6.9',   'Outras despesas',                      'despesa',    false, false, null)
+  ) as v(codigo, nome, tipo, grupo, caixa, papel);
+  perform public.grava_auditoria('Criou o plano de contas padrão', 'Financeiro', 'fin_contas', null,
+    jsonb_build_object('organizacao_id', p_org), 'banco');
+end;
+$$;
+
+-- Ordena códigos como 1.2.10 depois de 1.2.9
+create or replace function public.fin_ordem(p_codigo text)
+returns int[]
+language sql
+immutable
+set search_path = ''
+as $$
+  select string_to_array(p_codigo, '.')::int[];
+$$;
+
+-- Plano de contas (cria o padrão na primeira vez)
+create or replace function public.fin_plano(p_org uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_preparar(p_org);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', c.id, 'codigo', c.codigo, 'nome', c.nome, 'tipo', c.tipo, 'grupo', c.grupo,
+      'caixa', c.caixa, 'papel', c.papel, 'ativo', c.ativo) order by public.fin_ordem(c.codigo))
+    from public.fin_contas c where c.organizacao_id is not distinct from p_org), '[]'::jsonb);
+end;
+$$;
+
+-- Cria ou altera uma conta do plano
+create or replace function public.fin_conta_salvar(
+  p_id uuid, p_org uuid, p_codigo text, p_nome text, p_tipo text, p_grupo boolean, p_caixa boolean, p_ativo boolean
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_c      public.fin_contas%rowtype;
+  v_codigo text := trim(coalesce(p_codigo, ''));
+  v_nome   text := left(trim(coalesce(p_nome, '')), 120);
+  v_grupo  boolean := coalesce(p_grupo, false);
+  v_caixa  boolean := coalesce(p_caixa, false);
+  v_usada  boolean;
+  v_id     uuid;
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_preparar(p_org);
+  if v_codigo !~ '^[0-9]+(\.[0-9]+){0,4}$' then
+    raise exception 'Código inválido. Use números separados por ponto, como 6.10';
+  end if;
+  if char_length(v_nome) = 0 then
+    raise exception 'Informe o nome da conta';
+  end if;
+  if p_tipo is null or p_tipo not in ('ativo','passivo','patrimonio','receita','custo','despesa') then
+    raise exception 'Tipo de conta inválido';
+  end if;
+  if v_caixa and (p_tipo <> 'ativo' or v_grupo) then
+    raise exception 'Só contas de ativo que recebem lançamentos podem ser de caixa ou banco';
+  end if;
+  if exists (select 1 from public.fin_contas
+             where organizacao_id is not distinct from p_org and codigo = v_codigo and id is distinct from p_id) then
+    raise exception 'Já existe uma conta com este código';
+  end if;
+
+  if p_id is null then
+    insert into public.fin_contas (organizacao_id, codigo, nome, tipo, grupo, caixa)
+    values (p_org, v_codigo, v_nome, p_tipo, v_grupo, v_caixa)
+    returning id into v_id;
+    perform public.grava_auditoria('Criou conta do plano', 'Financeiro', 'fin_contas', v_id::text,
+      jsonb_build_object('codigo', v_codigo, 'nome', v_nome, 'tipo', p_tipo), 'banco');
+    return v_id;
+  end if;
+
+  select * into v_c from public.fin_contas where id = p_id and organizacao_id is not distinct from p_org;
+  if v_c.id is null then
+    raise exception 'Conta não encontrada';
+  end if;
+  v_usada := exists (select 1 from public.fin_titulos where conta_id = p_id or conta_caixa_id = p_id)
+          or exists (select 1 from public.fin_lancamentos where conta_debito = p_id or conta_credito = p_id)
+          or exists (select 1 from public.fin_faturas where conta_id = p_id);
+  if (v_usada or v_c.papel is not null) and (v_c.tipo <> p_tipo or v_c.grupo <> v_grupo) then
+    raise exception 'Esta conta já tem movimento ou é usada pelo sistema: o tipo não pode mudar';
+  end if;
+  if v_c.papel is not null and (v_caixa or not coalesce(p_ativo, true)) then
+    raise exception 'Esta conta é usada pelo sistema e não pode ser desativada';
+  end if;
+  if v_usada and v_c.caixa and not v_caixa then
+    raise exception 'Esta conta já recebeu pagamentos: continua sendo de caixa ou banco';
+  end if;
+  update public.fin_contas
+     set codigo = v_codigo, nome = v_nome, tipo = p_tipo, grupo = v_grupo, caixa = v_caixa,
+         ativo = coalesce(p_ativo, true)
+   where id = p_id;
+  return p_id;
+end;
+$$;
+
+-- Partidas dobradas de uma organização (uso interno): títulos e lançamentos manuais
+create or replace function public.fin_partidas(p_org uuid)
+returns table (data date, conta_id uuid, debito numeric, credito numeric, historico text, origem text, ref uuid)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with t as (
+    select x.*, x.descricao || case when x.pessoa_nome <> '' then ' · ' || x.pessoa_nome else '' end as hist,
+           (select c.id from public.fin_contas c
+             where c.organizacao_id is not distinct from p_org
+               and c.papel = case when x.tipo = 'receber' then 'clientes' else 'fornecedores' end) as contra
+    from public.fin_titulos x
+    where x.organizacao_id is not distinct from p_org and x.status <> 'cancelado'
+  )
+  -- competência: receber = D Clientes / C Receita; pagar = D Despesa / C Fornecedores
+  select t.emissao, case when t.tipo = 'receber' then t.contra else t.conta_id end, t.valor, 0::numeric, t.hist, 'titulo', t.id from t
+  union all
+  select t.emissao, case when t.tipo = 'receber' then t.conta_id else t.contra end, 0::numeric, t.valor, t.hist, 'titulo', t.id from t
+  union all
+  -- pagamento: receber = D Caixa / C Clientes; pagar = D Fornecedores / C Caixa
+  select t.pago_em, case when t.tipo = 'receber' then t.conta_caixa_id else t.contra end, t.valor, 0::numeric, t.hist, 'pagamento', t.id
+  from t where t.status = 'pago'
+  union all
+  select t.pago_em, case when t.tipo = 'receber' then t.contra else t.conta_caixa_id end, 0::numeric, t.valor, t.hist, 'pagamento', t.id
+  from t where t.status = 'pago'
+  union all
+  select l.data, l.conta_debito, l.valor, 0::numeric, l.historico, 'lancamento', l.id
+  from public.fin_lancamentos l where l.organizacao_id is not distinct from p_org
+  union all
+  select l.data, l.conta_credito, 0::numeric, l.valor, l.historico, 'lancamento', l.id
+  from public.fin_lancamentos l where l.organizacao_id is not distinct from p_org;
+$$;
+
+-- Confere um período e devolve erro claro
+create or replace function public.fin_periodo_ok(p_ini date, p_fim date)
+returns void
+language plpgsql
+immutable
+set search_path = ''
+as $$
+begin
+  if p_ini is null or p_fim is null or p_fim < p_ini then
+    raise exception 'Período inválido';
+  end if;
+  if p_fim - p_ini > 3660 then
+    raise exception 'Período longo demais (máximo de 10 anos)';
+  end if;
+end;
+$$;
+
+-- Lê texto de um campo e corta no tamanho
+create or replace function public.fin_texto(p_dados jsonb, p_chave text, p_max int)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select left(trim(coalesce(p_dados ->> p_chave, '')), p_max);
+$$;
+
+-- A pessoa informada existe no Cadastro desta organização?
+create or replace function public.fin_pessoa_ok(p_org uuid, p_tipo text, p_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p_id is null
+      or (p_tipo = 'pf' and exists (select 1 from public.cadastro_pf f where f.id = p_id and f.organizacao_id is not distinct from p_org))
+      or (p_tipo = 'pj' and exists (select 1 from public.cadastro_pj j where j.id = p_id and j.organizacao_id is not distinct from p_org));
+$$;
+
+-- Pessoas do Cadastro para escolher como cliente ou fornecedor
+create or replace function public.fin_pessoas(p_org uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  return coalesce((
+    select jsonb_agg(x order by x ->> 'nome') from (
+      select jsonb_build_object('tipo', 'pf', 'id', f.id, 'nome', f.nome_completo, 'documento', f.cpf,
+               'email', f.email,
+               'endereco', concat_ws(', ', nullif(f.logradouro, ''), nullif(f.numero, ''), nullif(f.bairro, ''),
+                                     nullif(concat_ws('/', nullif(f.cidade, ''), nullif(f.uf, '')), ''))) as x
+      from public.cadastro_pf f
+      where f.organizacao_id is not distinct from p_org and f.situacao = 'ativo'
+      union all
+      select jsonb_build_object('tipo', 'pj', 'id', j.id, 'nome', j.razao_social, 'documento', j.cnpj,
+               'email', j.email,
+               'endereco', concat_ws(', ', nullif(j.logradouro, ''), nullif(j.numero, ''), nullif(j.bairro, ''),
+                                     nullif(concat_ws('/', nullif(j.cidade, ''), nullif(j.uf, '')), '')))
+      from public.cadastro_pj j
+      where j.organizacao_id is not distinct from p_org and j.situacao = 'ativo'
+      limit 2000
+    ) s), '[]'::jsonb);
+end;
+$$;
+
+-- Um título em formato de tela (uso interno)
+create or replace function public.fin_titulo_json(t public.fin_titulos)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'id', t.id, 'tipo', t.tipo,
+    'codigo', case when t.tipo = 'receber' then 'CR-' else 'CP-' end || lpad(t.numero::text, 6, '0'),
+    'descricao', t.descricao, 'pessoa_tipo', t.pessoa_tipo, 'pessoa_id', t.pessoa_id, 'pessoa_nome', t.pessoa_nome,
+    'conta_id', t.conta_id,
+    'conta', (select c.codigo || ' ' || c.nome from public.fin_contas c where c.id = t.conta_id),
+    'emissao', t.emissao, 'vencimento', t.vencimento, 'valor', t.valor, 'status', t.status,
+    'pago_em', t.pago_em, 'conta_caixa_id', t.conta_caixa_id,
+    'conta_caixa', (select c.nome from public.fin_contas c where c.id = t.conta_caixa_id),
+    'forma', t.forma, 'fatura_id', t.fatura_id,
+    'fatura', (select 'FAT-' || lpad(f.numero::text, 6, '0') from public.fin_faturas f where f.id = t.fatura_id),
+    'observacoes', t.observacoes);
+$$;
+
+-- Lista títulos a pagar ou a receber de um período
+-- p_campo: vencimento | emissao | pagamento. p_status: todos | aberto | vencido | pago | cancelado
+create or replace function public.fin_titulos_listar(
+  p_org uuid, p_tipo text, p_ini date, p_fim date, p_campo text, p_status text
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_campo  text := coalesce(nullif(p_campo, ''), 'vencimento');
+  v_status text := coalesce(nullif(p_status, ''), 'todos');
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_periodo_ok(p_ini, p_fim);
+  if p_tipo is null or p_tipo not in ('pagar','receber') then
+    raise exception 'Tipo inválido';
+  end if;
+  if v_campo not in ('vencimento','emissao','pagamento') or v_status not in ('todos','aberto','vencido','pago','cancelado') then
+    raise exception 'Filtro inválido';
+  end if;
+  return coalesce((
+    select jsonb_agg(public.fin_titulo_json(t) order by
+             case v_campo when 'emissao' then t.emissao when 'pagamento' then t.pago_em else t.vencimento end, t.numero)
+    from public.fin_titulos t
+    where t.organizacao_id is not distinct from p_org and t.tipo = p_tipo
+      and (case v_campo when 'emissao' then t.emissao when 'pagamento' then t.pago_em else t.vencimento end) between p_ini and p_fim
+      and (v_status = 'todos'
+           or (v_status = 'vencido' and t.status = 'aberto' and t.vencimento < current_date)
+           or (v_status <> 'vencido' and t.status = v_status))
+  ), '[]'::jsonb);
+end;
+$$;
+
+-- Cria ou altera um título (lançamento manual de contas a pagar ou a receber)
+create or replace function public.fin_titulo_salvar(p_id uuid, p_org uuid, p_dados jsonb)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d      jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_t      public.fin_titulos%rowtype;
+  v_tipo   text := v_d ->> 'tipo';
+  v_desc   text := public.fin_texto(v_d, 'descricao', 200);
+  v_conta  public.fin_contas%rowtype;
+  v_emis   date;
+  v_venc   date;
+  v_valor  numeric(14,2);
+  v_ptipo  text := nullif(v_d ->> 'pessoa_tipo', '');
+  v_pid    uuid := nullif(v_d ->> 'pessoa_id', '')::uuid;
+  v_id     uuid;
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_preparar(p_org);
+  if p_id is not null then
+    select * into v_t from public.fin_titulos where id = p_id and organizacao_id is not distinct from p_org;
+    if v_t.id is null then
+      raise exception 'Título não encontrado';
+    end if;
+    if v_t.status <> 'aberto' then
+      raise exception 'Só títulos em aberto podem ser alterados';
+    end if;
+    if v_t.fatura_id is not null then
+      raise exception 'Este título veio de uma fatura. Para mudar, cancele a fatura e emita outra';
+    end if;
+    v_tipo := v_t.tipo;
+  end if;
+  if v_tipo is null or v_tipo not in ('pagar','receber') then
+    raise exception 'Tipo inválido';
+  end if;
+  if char_length(v_desc) = 0 then
+    raise exception 'Informe a descrição';
+  end if;
+  begin
+    v_emis  := (v_d ->> 'emissao')::date;
+    v_venc  := (v_d ->> 'vencimento')::date;
+    v_valor := round((v_d ->> 'valor')::numeric, 2);
+  exception when others then
+    raise exception 'Confira as datas e o valor';
+  end;
+  if v_emis is null or v_venc is null then
+    raise exception 'Informe a data de competência e o vencimento';
+  end if;
+  if v_venc < v_emis then
+    raise exception 'O vencimento não pode ser anterior à data de competência';
+  end if;
+  if v_valor is null or v_valor <= 0 or v_valor > 999999999999.99 then
+    raise exception 'Informe um valor maior que zero';
+  end if;
+  select * into v_conta from public.fin_contas
+   where id = nullif(v_d ->> 'conta_id', '')::uuid and organizacao_id is not distinct from p_org;
+  if v_conta.id is null or v_conta.grupo or not v_conta.ativo
+     or (v_tipo = 'receber' and v_conta.tipo <> 'receita')
+     or (v_tipo = 'pagar' and v_conta.tipo not in ('custo','despesa')) then
+    raise exception 'Escolha uma categoria de %', case when v_tipo = 'receber' then 'receita' else 'custo ou despesa' end;
+  end if;
+  if v_ptipo is not null and v_ptipo not in ('pf','pj') then
+    raise exception 'Pessoa inválida';
+  end if;
+  if not public.fin_pessoa_ok(p_org, v_ptipo, v_pid) then
+    raise exception 'Pessoa não encontrada no Cadastro desta organização';
+  end if;
+
+  if p_id is null then
+    insert into public.fin_titulos (organizacao_id, tipo, descricao, pessoa_tipo, pessoa_id, pessoa_nome,
+      conta_id, emissao, vencimento, valor, observacoes, criado_por)
+    values (p_org, v_tipo, v_desc, case when v_pid is null then null else v_ptipo end, v_pid,
+      public.fin_texto(v_d, 'pessoa_nome', 200), v_conta.id, v_emis, v_venc, v_valor,
+      public.fin_texto(v_d, 'observacoes', 1000), (select auth.uid()))
+    returning id into v_id;
+    return v_id;
+  end if;
+  update public.fin_titulos
+     set descricao = v_desc, pessoa_tipo = case when v_pid is null then null else v_ptipo end, pessoa_id = v_pid,
+         pessoa_nome = public.fin_texto(v_d, 'pessoa_nome', 200), conta_id = v_conta.id,
+         emissao = v_emis, vencimento = v_venc, valor = v_valor,
+         observacoes = public.fin_texto(v_d, 'observacoes', 1000), atualizado_em = now()
+   where id = p_id;
+  return p_id;
+end;
+$$;
+
+-- Baixa: registra o recebimento ou o pagamento
+create or replace function public.fin_titulo_baixar(p_id uuid, p_data date, p_caixa uuid, p_forma text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_t public.fin_titulos%rowtype;
+begin
+  select * into v_t from public.fin_titulos where id = p_id;
+  if v_t.id is null or not public.fin_escopo_ok(v_t.organizacao_id) then
+    raise exception 'Título não encontrado';
+  end if;
+  if v_t.status <> 'aberto' then
+    raise exception 'Este título não está em aberto';
+  end if;
+  if p_data is null or p_data > current_date then
+    raise exception 'Informe a data do pagamento, que não pode ser futura';
+  end if;
+  if not exists (select 1 from public.fin_contas c
+                 where c.id = p_caixa and c.organizacao_id is not distinct from v_t.organizacao_id and c.caixa and c.ativo) then
+    raise exception 'Escolha a conta de caixa ou banco';
+  end if;
+  update public.fin_titulos
+     set status = 'pago', pago_em = p_data, conta_caixa_id = p_caixa,
+         forma = left(trim(coalesce(p_forma, '')), 40), atualizado_em = now()
+   where id = p_id;
+end;
+$$;
+
+-- Estorno da baixa: o título volta a ficar em aberto
+create or replace function public.fin_titulo_estornar(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_t public.fin_titulos%rowtype;
+begin
+  select * into v_t from public.fin_titulos where id = p_id;
+  if v_t.id is null or not public.fin_escopo_ok(v_t.organizacao_id) then
+    raise exception 'Título não encontrado';
+  end if;
+  if v_t.status <> 'pago' then
+    raise exception 'Só títulos pagos podem ser estornados';
+  end if;
+  update public.fin_titulos
+     set status = 'aberto', pago_em = null, conta_caixa_id = null, forma = '', atualizado_em = now()
+   where id = p_id;
+end;
+$$;
+
+-- Cancela um título em aberto (títulos de fatura são cancelados pela fatura)
+create or replace function public.fin_titulo_cancelar(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_t public.fin_titulos%rowtype;
+begin
+  select * into v_t from public.fin_titulos where id = p_id;
+  if v_t.id is null or not public.fin_escopo_ok(v_t.organizacao_id) then
+    raise exception 'Título não encontrado';
+  end if;
+  if v_t.status <> 'aberto' then
+    raise exception 'Só títulos em aberto podem ser cancelados. Se já foi pago, estorne antes';
+  end if;
+  if v_t.fatura_id is not null then
+    raise exception 'Este título veio de uma fatura. Cancele a fatura';
+  end if;
+  update public.fin_titulos set status = 'cancelado', atualizado_em = now() where id = p_id;
+end;
+$$;
+
+-- Uma fatura em formato de tela (uso interno)
+create or replace function public.fin_fatura_json(f public.fin_faturas)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'id', f.id, 'codigo', 'FAT-' || lpad(f.numero::text, 6, '0'),
+    'cliente_tipo', f.cliente_tipo, 'cliente_id', f.cliente_id, 'cliente_nome', f.cliente_nome,
+    'cliente_documento', f.cliente_documento, 'cliente_endereco', f.cliente_endereco, 'cliente_email', f.cliente_email,
+    'emissao', f.emissao, 'vencimento', f.vencimento, 'conta_id', f.conta_id,
+    'conta', (select c.codigo || ' ' || c.nome from public.fin_contas c where c.id = f.conta_id),
+    'itens', f.itens, 'total', f.total, 'forma', f.forma, 'observacoes', f.observacoes, 'status', f.status,
+    'emitente', coalesce((select jsonb_build_object('nome', o.nome, 'cnpj', o.cnpj)
+                          from public.organizacoes o where o.id = f.organizacao_id),
+                         jsonb_build_object('nome', 'Celeiro Administradora', 'cnpj', '')),
+    'titulo', (select jsonb_build_object('id', t.id, 'codigo', 'CR-' || lpad(t.numero::text, 6, '0'),
+                        'status', t.status, 'pago_em', t.pago_em)
+               from public.fin_titulos t where t.fatura_id = f.id));
+$$;
+
+-- Emite uma fatura e lança o título correspondente em contas a receber
+create or replace function public.fin_fatura_emitir(p_org uuid, p_dados jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d     jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_nome  text := public.fin_texto(v_d, 'cliente_nome', 200);
+  v_ptipo text := nullif(v_d ->> 'cliente_tipo', '');
+  v_pid   uuid := nullif(v_d ->> 'cliente_id', '')::uuid;
+  v_conta public.fin_contas%rowtype;
+  v_emis  date;
+  v_venc  date;
+  v_itens jsonb := '[]'::jsonb;
+  v_i     jsonb;
+  v_q     numeric;
+  v_v     numeric;
+  v_total numeric(14,2) := 0;
+  v_f     public.fin_faturas%rowtype;
+  v_tid   uuid;
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_preparar(p_org);
+  if char_length(v_nome) = 0 then
+    raise exception 'Informe o cliente';
+  end if;
+  if v_ptipo is not null and v_ptipo not in ('pf','pj') then
+    raise exception 'Cliente inválido';
+  end if;
+  if not public.fin_pessoa_ok(p_org, v_ptipo, v_pid) then
+    raise exception 'Cliente não encontrado no Cadastro desta organização';
+  end if;
+  begin
+    v_emis := coalesce(nullif(v_d ->> 'emissao', '')::date, current_date);
+    v_venc := (v_d ->> 'vencimento')::date;
+  exception when others then
+    raise exception 'Confira as datas';
+  end;
+  if v_venc is null or v_venc < v_emis then
+    raise exception 'Informe um vencimento igual ou posterior à emissão';
+  end if;
+  select * into v_conta from public.fin_contas
+   where id = nullif(v_d ->> 'conta_id', '')::uuid and organizacao_id is not distinct from p_org;
+  if v_conta.id is null or v_conta.grupo or not v_conta.ativo or v_conta.tipo <> 'receita' then
+    raise exception 'Escolha uma categoria de receita';
+  end if;
+  if jsonb_typeof(v_d -> 'itens') is distinct from 'array' or jsonb_array_length(v_d -> 'itens') = 0 then
+    raise exception 'Inclua ao menos um item na fatura';
+  end if;
+  if jsonb_array_length(v_d -> 'itens') > 50 then
+    raise exception 'Máximo de 50 itens por fatura';
+  end if;
+  for v_i in select * from jsonb_array_elements(v_d -> 'itens') loop
+    begin
+      v_q := (v_i ->> 'quantidade')::numeric;
+      v_v := (v_i ->> 'valor_unitario')::numeric;
+    exception when others then
+      raise exception 'Confira quantidade e valor dos itens';
+    end;
+    if char_length(public.fin_texto(v_i, 'descricao', 200)) = 0 or v_q is null or v_q <= 0 or v_v is null or v_v < 0 then
+      raise exception 'Cada item precisa de descrição, quantidade maior que zero e valor';
+    end if;
+    v_itens := v_itens || jsonb_build_object(
+      'descricao', public.fin_texto(v_i, 'descricao', 200), 'quantidade', v_q,
+      'valor_unitario', round(v_v, 2), 'total', round(v_q * v_v, 2));
+    v_total := v_total + round(v_q * v_v, 2);
+  end loop;
+  if v_total <= 0 then
+    raise exception 'O total da fatura precisa ser maior que zero';
+  end if;
+
+  insert into public.fin_faturas (organizacao_id, cliente_tipo, cliente_id, cliente_nome, cliente_documento,
+    cliente_endereco, cliente_email, emissao, vencimento, conta_id, itens, total, forma, observacoes, criado_por)
+  values (p_org, case when v_pid is null then null else v_ptipo end, v_pid, v_nome,
+    public.fin_texto(v_d, 'cliente_documento', 20), public.fin_texto(v_d, 'cliente_endereco', 300),
+    public.fin_texto(v_d, 'cliente_email', 200), v_emis, v_venc, v_conta.id, v_itens, v_total,
+    public.fin_texto(v_d, 'forma', 40), public.fin_texto(v_d, 'observacoes', 1000), (select auth.uid()))
+  returning * into v_f;
+
+  -- Lançamento automático em contas a receber
+  insert into public.fin_titulos (organizacao_id, tipo, descricao, pessoa_tipo, pessoa_id, pessoa_nome,
+    conta_id, emissao, vencimento, valor, fatura_id, criado_por)
+  values (p_org, 'receber', 'Fatura FAT-' || lpad(v_f.numero::text, 6, '0'), v_f.cliente_tipo, v_f.cliente_id, v_nome,
+    v_conta.id, v_emis, v_venc, v_total, v_f.id, (select auth.uid()))
+  returning id into v_tid;
+
+  return public.fin_fatura_json(v_f);
+end;
+$$;
+
+-- Cancela a fatura e o título dela (se ainda não foi recebido)
+create or replace function public.fin_fatura_cancelar(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_f public.fin_faturas%rowtype;
+begin
+  select * into v_f from public.fin_faturas where id = p_id;
+  if v_f.id is null or not public.fin_escopo_ok(v_f.organizacao_id) then
+    raise exception 'Fatura não encontrada';
+  end if;
+  if v_f.status = 'cancelada' then
+    return;
+  end if;
+  if exists (select 1 from public.fin_titulos where fatura_id = p_id and status = 'pago') then
+    raise exception 'Esta fatura já foi recebida. Estorne o recebimento antes de cancelar';
+  end if;
+  update public.fin_titulos set status = 'cancelado', atualizado_em = now() where fatura_id = p_id and status = 'aberto';
+  update public.fin_faturas set status = 'cancelada', cancelada_em = now() where id = p_id;
+end;
+$$;
+
+create or replace function public.fin_fatura_ver(p_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_f public.fin_faturas%rowtype;
+begin
+  select * into v_f from public.fin_faturas where id = p_id;
+  if v_f.id is null or not public.fin_escopo_ok(v_f.organizacao_id) then
+    raise exception 'Fatura não encontrada';
+  end if;
+  return public.fin_fatura_json(v_f);
+end;
+$$;
+
+-- Lançamento manual (saldo inicial, capital, transferência entre contas, ajustes)
+create or replace function public.fin_lancamento_salvar(
+  p_org uuid, p_data date, p_historico text, p_debito uuid, p_credito uuid, p_valor numeric
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_id   uuid;
+  v_hist text := left(trim(coalesce(p_historico, '')), 200);
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  if p_data is null then
+    raise exception 'Informe a data';
+  end if;
+  if char_length(v_hist) = 0 then
+    raise exception 'Informe o histórico';
+  end if;
+  if p_valor is null or round(p_valor, 2) <= 0 or p_valor > 999999999999.99 then
+    raise exception 'Informe um valor maior que zero';
+  end if;
+  if p_debito is null or p_credito is null or p_debito = p_credito then
+    raise exception 'Escolha duas contas diferentes';
+  end if;
+  if (select count(*) from public.fin_contas c
+      where c.id in (p_debito, p_credito) and c.organizacao_id is not distinct from p_org
+        and not c.grupo and c.ativo) <> 2 then
+    raise exception 'Escolha contas ativas deste plano que recebem lançamentos';
+  end if;
+  insert into public.fin_lancamentos (organizacao_id, data, historico, conta_debito, conta_credito, valor, criado_por)
+  values (p_org, p_data, v_hist, p_debito, p_credito, round(p_valor, 2), (select auth.uid()))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function public.fin_lancamento_excluir(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid;
+begin
+  if not exists (select 1 from public.fin_lancamentos where id = p_id) then
+    raise exception 'Lançamento não encontrado';
+  end if;
+  select organizacao_id into v_org from public.fin_lancamentos where id = p_id;
+  if not public.fin_escopo_ok(v_org) then
+    raise exception 'Lançamento não encontrado';
+  end if;
+  delete from public.fin_lancamentos where id = p_id;
+end;
+$$;
+
+-- Balancete: por conta, débitos e créditos antes do período e dentro dele, mais os
+-- lançamentos manuais do período. DRE e balanço são montados a partir daqui.
+create or replace function public.fin_balancete(p_org uuid, p_ini date, p_fim date)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_periodo_ok(p_ini, p_fim);
+  perform public.fin_preparar(p_org);
+  return jsonb_build_object(
+    'contas', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', c.id, 'codigo', c.codigo, 'nome', c.nome, 'tipo', c.tipo, 'grupo', c.grupo, 'caixa', c.caixa,
+        'ant_d', coalesce(s.ant_d, 0), 'ant_c', coalesce(s.ant_c, 0),
+        'per_d', coalesce(s.per_d, 0), 'per_c', coalesce(s.per_c, 0)) order by public.fin_ordem(c.codigo))
+      from public.fin_contas c
+      left join (
+        select p.conta_id,
+               sum(p.debito)  filter (where p.data < p_ini) as ant_d,
+               sum(p.credito) filter (where p.data < p_ini) as ant_c,
+               sum(p.debito)  filter (where p.data between p_ini and p_fim) as per_d,
+               sum(p.credito) filter (where p.data between p_ini and p_fim) as per_c
+        from public.fin_partidas(p_org) p group by p.conta_id
+      ) s on s.conta_id = c.id
+      where c.organizacao_id is not distinct from p_org), '[]'::jsonb),
+    'lancamentos', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', l.id, 'data', l.data, 'historico', l.historico, 'valor', l.valor,
+        'debito', (select c.codigo || ' ' || c.nome from public.fin_contas c where c.id = l.conta_debito),
+        'credito', (select c.codigo || ' ' || c.nome from public.fin_contas c where c.id = l.conta_credito))
+        order by l.data desc, l.criado_em desc)
+      from public.fin_lancamentos l
+      where l.organizacao_id is not distinct from p_org and l.data between p_ini and p_fim), '[]'::jsonb));
+end;
+$$;
+
+-- Fluxo de caixa: saldo de caixa antes do período, movimentos realizados no
+-- período e títulos em aberto com vencimento até o fim dele (para o projetado)
+create or replace function public.fin_fluxo(p_org uuid, p_ini date, p_fim date)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_periodo_ok(p_ini, p_fim);
+  perform public.fin_preparar(p_org);
+  return (
+    with cx as (
+      select p.*, c.nome as conta_nome
+      from public.fin_partidas(p_org) p
+      join public.fin_contas c on c.id = p.conta_id and c.caixa
+    )
+    select jsonb_build_object(
+      'saldo_anterior', coalesce((select sum(debito - credito) from cx where data < p_ini), 0),
+      'saldo_hoje',     coalesce((select sum(debito - credito) from cx where data <= current_date), 0),
+      'hoje', current_date,
+      'movimentos', coalesce((
+        select jsonb_agg(jsonb_build_object('data', data, 'historico', historico, 'conta', conta_nome,
+                 'entrada', debito, 'saida', credito, 'origem', origem) order by data, historico)
+        from cx where data between p_ini and p_fim), '[]'::jsonb),
+      'abertos', coalesce((
+        select jsonb_agg(jsonb_build_object(
+                 'codigo', case when t.tipo = 'receber' then 'CR-' else 'CP-' end || lpad(t.numero::text, 6, '0'),
+                 'tipo', t.tipo, 'descricao', t.descricao, 'pessoa_nome', t.pessoa_nome,
+                 'vencimento', t.vencimento, 'valor', t.valor) order by t.vencimento, t.numero)
+        from public.fin_titulos t
+        where t.organizacao_id is not distinct from p_org and t.status = 'aberto' and t.vencimento <= p_fim), '[]'::jsonb))
+  );
+end;
+$$;
+
+-- Dashboard financeiro do período
+create or replace function public.fin_dashboard(p_org uuid, p_ini date, p_fim date)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_periodo_ok(p_ini, p_fim);
+  perform public.fin_preparar(p_org);
+  return (
+    with p as (
+      select x.*, c.tipo, c.caixa, c.nome as conta_nome
+      from public.fin_partidas(p_org) x join public.fin_contas c on c.id = x.conta_id
+    ), t as (
+      select * from public.fin_titulos where organizacao_id is not distinct from p_org and status = 'aberto'
+    ), meses as (
+      select date_trunc('month', p_fim)::date - (n || ' months')::interval as mes from generate_series(5, 0, -1) n
+    )
+    select jsonb_build_object(
+      'saldo_caixa',     coalesce((select sum(debito - credito) from p where caixa and data <= current_date), 0),
+      'receber_aberto',  coalesce((select sum(valor) from t where tipo = 'receber'), 0),
+      'pagar_aberto',    coalesce((select sum(valor) from t where tipo = 'pagar'), 0),
+      'receber_vencido', coalesce((select sum(valor) from t where tipo = 'receber' and vencimento < current_date), 0),
+      'pagar_vencido',   coalesce((select sum(valor) from t where tipo = 'pagar' and vencimento < current_date), 0),
+      'receber_vencido_qtd', (select count(*) from t where tipo = 'receber' and vencimento < current_date),
+      'pagar_vencido_qtd',   (select count(*) from t where tipo = 'pagar' and vencimento < current_date),
+      'recebido',  coalesce((select sum(debito)  from p where caixa and origem = 'pagamento' and data between p_ini and p_fim), 0),
+      'pago',      coalesce((select sum(credito) from p where caixa and origem = 'pagamento' and data between p_ini and p_fim), 0),
+      'receitas',  coalesce((select sum(credito - debito) from p where tipo = 'receita' and data between p_ini and p_fim), 0),
+      'despesas',  coalesce((select sum(debito - credito) from p where tipo in ('custo','despesa') and data between p_ini and p_fim), 0),
+      'meses', (select jsonb_agg(jsonb_build_object(
+                  'mes', to_char(m.mes, 'YYYY-MM'),
+                  'receitas', coalesce((select sum(credito - debito) from p where tipo = 'receita' and date_trunc('month', data) = m.mes), 0),
+                  'despesas', coalesce((select sum(debito - credito) from p where tipo in ('custo','despesa') and date_trunc('month', data) = m.mes), 0),
+                  'entradas', coalesce((select sum(debito)  from p where caixa and date_trunc('month', data) = m.mes), 0),
+                  'saidas',   coalesce((select sum(credito) from p where caixa and date_trunc('month', data) = m.mes), 0)
+                ) order by m.mes) from meses m),
+      'despesas_por_conta', coalesce((
+        select jsonb_agg(jsonb_build_object('conta', conta_nome, 'valor', v) order by v desc)
+        from (select conta_nome, sum(debito - credito) as v from p
+              where tipo in ('custo','despesa') and data between p_ini and p_fim
+              group by conta_nome having sum(debito - credito) > 0 order by 2 desc limit 6) d), '[]'::jsonb),
+      'proximos', coalesce((
+        select jsonb_agg(jsonb_build_object(
+                 'codigo', case when x.tipo = 'receber' then 'CR-' else 'CP-' end || lpad(x.numero::text, 6, '0'),
+                 'tipo', x.tipo, 'descricao', x.descricao, 'pessoa_nome', x.pessoa_nome,
+                 'vencimento', x.vencimento, 'valor', x.valor) order by x.vencimento, x.numero)
+        from (select * from t order by vencimento, numero limit 8) x), '[]'::jsonb))
+  );
+end;
+$$;
+
+revoke all on public.fin_contas, public.fin_faturas, public.fin_titulos, public.fin_lancamentos from anon, authenticated;
+
+revoke all on function public.fin_preparar(uuid)                 from public, anon, authenticated;
+revoke all on function public.fin_partidas(uuid)                 from public, anon, authenticated;
+revoke all on function public.fin_pessoa_ok(uuid, text, uuid)    from public, anon, authenticated;
+revoke all on function public.fin_titulo_json(public.fin_titulos) from public, anon, authenticated;
+revoke all on function public.fin_fatura_json(public.fin_faturas) from public, anon, authenticated;
+
+revoke all on function public.fin_escopo_ok(uuid)                from public, anon;
+revoke all on function public.fin_ordem(text)                    from public, anon;
+revoke all on function public.fin_periodo_ok(date, date)         from public, anon;
+revoke all on function public.fin_texto(jsonb, text, int)        from public, anon;
+revoke all on function public.fin_plano(uuid)                    from public, anon;
+revoke all on function public.fin_conta_salvar(uuid, uuid, text, text, text, boolean, boolean, boolean) from public, anon;
+revoke all on function public.fin_pessoas(uuid)                  from public, anon;
+revoke all on function public.fin_titulos_listar(uuid, text, date, date, text, text) from public, anon;
+revoke all on function public.fin_titulo_salvar(uuid, uuid, jsonb) from public, anon;
+revoke all on function public.fin_titulo_baixar(uuid, date, uuid, text) from public, anon;
+revoke all on function public.fin_titulo_estornar(uuid)          from public, anon;
+revoke all on function public.fin_titulo_cancelar(uuid)          from public, anon;
+revoke all on function public.fin_fatura_emitir(uuid, jsonb)     from public, anon;
+revoke all on function public.fin_fatura_cancelar(uuid)          from public, anon;
+revoke all on function public.fin_fatura_ver(uuid)               from public, anon;
+revoke all on function public.fin_lancamento_salvar(uuid, date, text, uuid, uuid, numeric) from public, anon;
+revoke all on function public.fin_lancamento_excluir(uuid)       from public, anon;
+revoke all on function public.fin_balancete(uuid, date, date)    from public, anon;
+revoke all on function public.fin_fluxo(uuid, date, date)        from public, anon;
+revoke all on function public.fin_dashboard(uuid, date, date)    from public, anon;
+
+grant execute on function public.fin_escopo_ok(uuid)                to authenticated;
+grant execute on function public.fin_ordem(text)                    to authenticated;
+grant execute on function public.fin_periodo_ok(date, date)         to authenticated;
+grant execute on function public.fin_texto(jsonb, text, int)        to authenticated;
+grant execute on function public.fin_plano(uuid)                    to authenticated;
+grant execute on function public.fin_conta_salvar(uuid, uuid, text, text, text, boolean, boolean, boolean) to authenticated;
+grant execute on function public.fin_pessoas(uuid)                  to authenticated;
+grant execute on function public.fin_titulos_listar(uuid, text, date, date, text, text) to authenticated;
+grant execute on function public.fin_titulo_salvar(uuid, uuid, jsonb) to authenticated;
+grant execute on function public.fin_titulo_baixar(uuid, date, uuid, text) to authenticated;
+grant execute on function public.fin_titulo_estornar(uuid)          to authenticated;
+grant execute on function public.fin_titulo_cancelar(uuid)          to authenticated;
+grant execute on function public.fin_fatura_emitir(uuid, jsonb)     to authenticated;
+grant execute on function public.fin_fatura_cancelar(uuid)          to authenticated;
+grant execute on function public.fin_fatura_ver(uuid)               to authenticated;
+grant execute on function public.fin_lancamento_salvar(uuid, date, text, uuid, uuid, numeric) to authenticated;
+grant execute on function public.fin_lancamento_excluir(uuid)       to authenticated;
+grant execute on function public.fin_balancete(uuid, date, date)    to authenticated;
+grant execute on function public.fin_fluxo(uuid, date, date)        to authenticated;
+grant execute on function public.fin_dashboard(uuid, date, date)    to authenticated;
+
+-- =====================================================================
+-- 13) PRIMEIRO USUÁRIO MASTER
 --    Depois de criar o usuário em Authentication > Users, troque o e-mail e o nome,
 --    tire os dois traços do início das linhas e rode:
 -- =====================================================================

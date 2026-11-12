@@ -176,6 +176,24 @@ tr.grupo-l th{background:var(--nevoa);font-size:13px;font-weight:600;padding:8px
 .cabeca>.acoes{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px;max-width:none;flex:0 1 auto}
 .botao.sutil{background:none;color:var(--texto2);font-weight:500;text-decoration:underline;padding:0 10px}
 .botao.sutil:hover{background:none;color:var(--verde)}
+.dlg.largo{width:min(880px,calc(100vw - 24px))}
+td.num,th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.neg{color:var(--erro)}
+tr.grupo td,tr.grupo th{font-weight:600;background:var(--nevoa)}
+tr.total td{font-weight:700;border-top:2px solid var(--verde)}
+.pilha{display:flex;flex-direction:column;gap:20px}
+.fin-acoes{display:flex;flex-wrap:wrap;gap:6px}
+.fin-faixa{display:flex;flex-direction:column;gap:6px}
+.fin-faixa-topo{display:flex;justify-content:space-between;gap:12px;font-size:14px}
+.fin-faixa-barra{height:8px;border-radius:4px;background:var(--nevoa);overflow:hidden}
+.fin-faixa-barra i{display:block;height:100%;background:var(--verde);border-radius:4px}
+.fatura-doc{display:flex;flex-direction:column;gap:18px;border:1px solid var(--linha);border-radius:12px;padding:20px}
+.fatura-topo,.fatura-partes{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.fatura-topo>div,.fatura-partes>div{display:flex;flex-direction:column;gap:4px}
+.fatura-num{text-align:right;align-items:flex-end}
+.fatura-num strong{font-size:22px}
+.fatura-doc span,.fatura-obs{font-size:12px;color:var(--texto2);margin:0}
+#ff-itens input{width:100%;min-width:0}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:var(--nevoa);padding:1px 5px;border-radius:4px;word-break:break-all}
 .bloco{margin:0;padding:12px 14px;background:var(--nevoa);border:1px solid var(--linha);border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;overflow-x:auto;white-space:pre}
 #mcp-tk,#mcp-url{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
@@ -208,7 +226,7 @@ var app=document.getElementById('app');
 var elAviso=document.getElementById('aviso');
 
 var PERFIS={master:'Master',gerencial:'Gerencial',corp_master:'Corporativo master',corp_operador:'Corporativo operador'};
-var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true,mcp:true};
+var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true,mcp:true,financeiro:true};
 var INATIVIDADE_MS=15*60*1000;
 var MAX_TENTATIVAS=5;
 var E={acesso:null,modulos:[],recuperando:/type=recovery/.test(hashInicial),novoLogin:false,tentativas:0,relogio:null,avisoRelogio:null};
@@ -536,6 +554,7 @@ var ROTAS={
   workflow:{titulo:'Workflow',modulo:'Workflow',fn:telaWorkflow,pode:function(){return temModulo('workflow');},semGrupo:true},
   dashboard:{titulo:'Dashboard',modulo:'Dashboard',fn:telaDashboard,pode:function(){return temModulo('dashboard');},semGrupo:true},
   cadastro:{titulo:'Cadastro',modulo:'Cadastro',fn:telaCadPessoas,pode:function(){return temModulo('cadastro');},semGrupo:true},
+  financeiro:{titulo:'Financeiro',modulo:'Financeiro',fn:telaFinanceiro,pode:function(){return temModulo('financeiro');},semGrupo:true},
   mcp:{titulo:'Conexão MCP',modulo:'Conexão MCP',fn:telaMcp,pode:function(){return temModulo('mcp');},semGrupo:true},
   app:{titulo:'Aplicativo',modulo:'Aplicativo',fn:telaApp,pode:function(){return temModulo('app');},semGrupo:true}
 };
@@ -1377,6 +1396,520 @@ async function telaMcp(){
       };
     });
   }
+}
+
+/* ---------- Financeiro ---------- */
+var FIN={aba:'dashboard',org:'',ini:'',fim:'',plano:[],planoDe:null,orgs:null,pessoas:null,pessoasDe:null,campo:'vencimento',status:'todos'};
+var FIN_ABAS=[['dashboard','Dashboard'],['receber','Contas a receber'],['pagar','Contas a pagar'],['projetado','Fluxo projetado'],['realizado','Fluxo realizado'],['dre','DRE'],['balanco','Balanço'],['balancete','Balancete'],['plano','Plano de contas']];
+var FIN_TIPOS=[['ativo','Ativo'],['passivo','Passivo'],['patrimonio','Patrimônio líquido'],['receita','Receita'],['custo','Custo'],['despesa','Despesa']];
+var FIN_FORMAS=[['','Não informada'],['pix','Pix'],['boleto','Boleto'],['transferencia','Transferência'],['cartao','Cartão'],['dinheiro','Dinheiro'],['outro','Outro']];
+function moeda(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
+function valorDe(txt){
+  var s=String(txt==null?'':txt).replace(/[R$\s]/g,'');
+  if(s.indexOf(',')>=0){s=s.replace(/\./g,'').replace(',','.');}
+  return s===''||isNaN(Number(s))?NaN:Number(s);
+}
+function finOrg(){return ehEquipe()?(FIN.org||null):E.acesso.organizacao_id;}
+function finMes(d){return [isoLocal(new Date(d.getFullYear(),d.getMonth(),1)),isoLocal(new Date(d.getFullYear(),d.getMonth()+1,0))];}
+function finAtalho(k){
+  var h=new Date(),p;
+  if(k==='mes'){p=finMes(h);}
+  else if(k==='mes_passado'){p=finMes(new Date(h.getFullYear(),h.getMonth()-1,1));}
+  else if(k==='proximo_mes'){p=finMes(new Date(h.getFullYear(),h.getMonth()+1,1));}
+  else if(k==='30'){p=[somaDias(-29),hojeIso()];}
+  else if(k==='90'){p=[hojeIso(),somaDias(90)];}
+  else if(k==='ano'){p=[h.getFullYear()+'-01-01',h.getFullYear()+'-12-31'];}
+  else if(k==='ano_passado'){p=[(h.getFullYear()-1)+'-01-01',(h.getFullYear()-1)+'-12-31'];}
+  if(p){FIN.ini=p[0];FIN.fim=p[1];}
+}
+function finContas(f){return FIN.plano.filter(function(c){return !c.grupo&&c.ativo&&f(c);});}
+function finOpcoes(f,sel){
+  return '<option value="">Escolha</option>'+finContas(f).map(function(c){return '<option value="'+esc(c.id)+'"'+(c.id===sel?' selected':'')+'>'+esc(c.codigo+' '+c.nome)+'</option>';}).join('');
+}
+function finDlg(titulo,corpo,rodape,largo){
+  var v=$('#dlg-fin');if(v)v.remove();
+  var d=document.createElement('dialog');
+  d.id='dlg-fin';d.className='dlg'+(largo?' largo':'');d.setAttribute('aria-label',titulo);
+  d.innerHTML='<form novalidate><div class="dlg-topo"><h2>'+esc(titulo)+'</h2><button class="botao claro pequeno" type="button" data-fechar>Fechar</button></div><div class="dlg-corpo">'+corpo+'</div><div class="dlg-rodape">'+rodape+'</div></form>';
+  document.body.appendChild(d);
+  d.fechar=function(){if(d.open&&d.close)d.close();d.remove();};
+  $('[data-fechar]',d).onclick=d.fechar;
+  d.addEventListener('cancel',function(){setTimeout(function(){d.remove();},0);});
+  if(typeof d.showModal==='function'){d.showModal();}else{d.setAttribute('open','');}
+  return d;
+}
+function finCartao(rotulo,valor,apoio,classe){
+  return '<div class="cartao-d baixo"><div class="cartao-d-topo"><span>'+esc(rotulo)+'</span></div><div class="numero'+(classe?' '+classe:'')+'">'+esc(valor)+'</div>'+(apoio?'<p class="apoio">'+esc(apoio)+'</p>':'')+'</div>';
+}
+function finBarras(grupos,series){
+  var topo=1;grupos.forEach(function(g){g.v.forEach(function(x){if(x>topo)topo=x;});});
+  var L=64,T=12,W=640,H=230,AW=W-L-8,AH=H-T-30,passo=AW/grupos.length,bw=Math.min(34,(passo-14)/series.length),svg='';
+  for(var i=0;i<=4;i++){
+    var y=T+AH-AH*i/4;
+    svg+='<line x1="'+L+'" y1="'+y+'" x2="'+(W-8)+'" y2="'+y+'" stroke="#D5DED9" stroke-width="1"/><text x="'+(L-8)+'" y="'+(y+4)+'" text-anchor="end" font-size="11" fill="#44564E">'+esc(Math.round(topo*i/4).toLocaleString('pt-BR'))+'</text>';
+  }
+  grupos.forEach(function(g,k){
+    var x0=L+k*passo+(passo-bw*series.length-2*(series.length-1))/2;
+    g.v.forEach(function(x,j){
+      var h=Math.max(x>0?2:0,AH*x/topo);
+      svg+='<rect x="'+(x0+j*(bw+2))+'" y="'+(T+AH-h)+'" width="'+bw+'" height="'+h+'" rx="2" fill="'+series[j][1]+'"><title>'+esc(g.r+' · '+series[j][0]+': '+moeda(x))+'</title></rect>';
+    });
+    svg+='<text x="'+(L+k*passo+passo/2)+'" y="'+(H-10)+'" text-anchor="middle" font-size="11" fill="#44564E">'+esc(g.r)+'</text>';
+  });
+  return '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Gráfico de barras: '+esc(series.map(function(s){return s[0];}).join(' e '))+'" style="width:100%;height:auto">'+svg+'</svg>'+
+    '<p class="meta">'+series.map(function(s){return '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+s[1]+';margin-right:6px"></span>'+esc(s[0]);}).join(' &nbsp; ')+'</p>';
+}
+function finLinha(pontos,rotulo){
+  if(pontos.length<2)return '';
+  var min=0,max=1;pontos.forEach(function(p){if(p.v<min)min=p.v;if(p.v>max)max=p.v;});
+  var L=64,T=12,W=640,H=200,AW=W-L-8,AH=H-T-28,svg='',pts=[];
+  function Y(v){return T+AH-AH*(v-min)/(max-min);}
+  for(var i=0;i<=4;i++){
+    var v=min+(max-min)*i/4,y=Y(v);
+    svg+='<line x1="'+L+'" y1="'+y+'" x2="'+(W-8)+'" y2="'+y+'" stroke="#D5DED9" stroke-width="1"/><text x="'+(L-8)+'" y="'+(y+4)+'" text-anchor="end" font-size="11" fill="#44564E">'+esc(Math.round(v).toLocaleString('pt-BR'))+'</text>';
+  }
+  if(min<0)svg+='<line x1="'+L+'" y1="'+Y(0)+'" x2="'+(W-8)+'" y2="'+Y(0)+'" stroke="#B3261E" stroke-width="1" stroke-dasharray="4 3"/>';
+  pontos.forEach(function(p,k){pts.push((L+AW*k/(pontos.length-1))+','+Y(p.v));});
+  svg+='<polyline points="'+pts.join(' ')+'" fill="none" stroke="#0F3D2E" stroke-width="2.5" stroke-linejoin="round"/>';
+  [0,pontos.length-1].forEach(function(k){
+    svg+='<text x="'+(L+AW*k/(pontos.length-1))+'" y="'+(H-8)+'" text-anchor="'+(k?'end':'start')+'" font-size="11" fill="#44564E">'+esc(pontos[k].r)+'</text>';
+  });
+  return '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(rotulo)+'" style="width:100%;height:auto">'+svg+'</svg>';
+}
+
+async function telaFinanceiro(){
+  carregando('Financeiro');
+  if(!FIN.ini){finAtalho('mes');}
+  if(ehEquipe()&&!FIN.orgs){var o=await sb.from('organizacoes').select('id,nome,ativo').order('nome');FIN.orgs=o.error?[]:(o.data||[]);}
+  var org=finOrg(),p=await sb.rpc('fin_plano',{p_org:org});
+  if(p.error){falhaTela('Financeiro',p.error);return;}
+  FIN.plano=p.data||[];
+  tela('<div class="cabeca"><div><h1>Financeiro</h1><p class="apoio">Contas a pagar e a receber, faturas, fluxo de caixa e demonstrativos. Os relatórios são montados a partir dos lançamentos, por partidas dobradas.</p></div></div>'+
+    '<div class="segmento rolavel" role="group" aria-label="Menus do Financeiro">'+FIN_ABAS.map(function(a){return '<button type="button" class="aba" data-fin-aba="'+a[0]+'" aria-pressed="'+(FIN.aba===a[0])+'">'+a[1]+'</button>';}).join('')+'</div>'+
+    '<form class="painel" id="fin-filtro" novalidate><div class="grade">'+
+      (ehEquipe()?'<div class="campo" style="flex:1 1 220px"><label for="fin-org">Livros de</label><select id="fin-org"><option value="">Celeiro Administradora</option>'+
+        (FIN.orgs||[]).map(function(x){return '<option value="'+esc(x.id)+'"'+(x.id===FIN.org?' selected':'')+'>'+esc(x.nome)+(x.ativo?'':' (inativa)')+'</option>';}).join('')+'</select></div>':'')+
+      '<div class="campo" data-fin-periodo style="flex:0 1 170px"><label for="fin-ini">De</label><input id="fin-ini" type="date" value="'+esc(FIN.ini)+'" required></div>'+
+      '<div class="campo" style="flex:0 1 170px"><label for="fin-fim" id="fin-fim-r">Até</label><input id="fin-fim" type="date" value="'+esc(FIN.fim)+'" required></div>'+
+      '<div class="campo" data-fin-periodo style="flex:0 1 190px"><label for="fin-atalho">Período pronto</label><select id="fin-atalho"><option value="">Escolher</option><option value="mes">Este mês</option><option value="mes_passado">Mês passado</option><option value="proximo_mes">Próximo mês</option><option value="30">Últimos 30 dias</option><option value="90">Próximos 90 dias</option><option value="ano">Este ano</option><option value="ano_passado">Ano passado</option></select></div>'+
+      '<button class="botao" type="submit">Pesquisar</button></div></form>'+
+    '<div id="fin-corpo" class="pilha"></div>');
+  $$('[data-fin-aba]').forEach(function(b){b.onclick=function(){FIN.aba=b.getAttribute('data-fin-aba');$$('[data-fin-aba]').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');});finDesenha();};});
+  if($('#fin-org')){$('#fin-org').onchange=function(){FIN.org=this.value;FIN.pessoas=null;telaFinanceiro();};}
+  $('#fin-atalho').onchange=function(){if(!this.value)return;finAtalho(this.value);$('#fin-ini').value=FIN.ini;$('#fin-fim').value=FIN.fim;this.value='';finDesenha();};
+  $('#fin-filtro').onsubmit=function(ev){
+    ev.preventDefault();
+    var i=$('#fin-ini').value,f=$('#fin-fim').value;
+    if(FIN.aba==='balanco'){i=i||f;}
+    if(!i||!f){aviso('Informe as duas datas do período.',true);return;}
+    if(f<i){aviso('A data final não pode ser anterior à inicial.',true);return;}
+    FIN.ini=i;FIN.fim=f;finDesenha();
+  };
+  finDesenha();
+}
+async function finDesenha(){
+  var c=$('#fin-corpo');if(!c)return;
+  var soData=FIN.aba==='balanco',semPeriodo=FIN.aba==='plano';
+  $('#fin-filtro').classList.toggle('oculto',semPeriodo&&!ehEquipe());
+  $$('[data-fin-periodo]').forEach(function(x){x.classList.toggle('oculto',soData||semPeriodo);});
+  $('#fin-fim').closest('.campo').classList.toggle('oculto',semPeriodo);
+  $('#fin-filtro button[type=submit]').classList.toggle('oculto',semPeriodo);
+  $('#fin-fim-r').textContent=soData?'Posição em':'Até';
+  c.innerHTML='<p class="apoio">Carregando…</p>';
+  var fn={dashboard:finDashboard,receber:finTitulos,pagar:finTitulos,projetado:finProjetado,realizado:finRealizado,dre:finDre,balanco:finBalanco,balancete:finBalancete,plano:finPlano}[FIN.aba];
+  try{await fn(c,FIN.aba);}catch(e){c.innerHTML='<p class="erro" role="alert">'+esc(msgErro(e))+'</p>';}
+}
+async function finRpc(fn,args){var r=await sb.rpc(fn,args);if(r.error)throw r.error;return r.data;}
+function finPeriodo(){return {p_org:finOrg(),p_ini:FIN.ini,p_fim:FIN.fim};}
+function finPeriodoTexto(){return dataBr(FIN.ini)+' a '+dataBr(FIN.fim);}
+
+async function finDashboard(c){
+  var d=await finRpc('fin_dashboard',finPeriodo()),res=Number(d.receitas)-Number(d.despesas);
+  var meses=(d.meses||[]).map(function(m){return {r:m.mes.slice(5)+'/'+m.mes.slice(2,4),v:[Math.max(0,Number(m.receitas)),Math.max(0,Number(m.despesas))]};});
+  var cx=(d.meses||[]).map(function(m){return {r:m.mes.slice(5)+'/'+m.mes.slice(2,4),v:[Number(m.entradas),Number(m.saidas)]};});
+  var topo=Math.max.apply(null,[1].concat((d.despesas_por_conta||[]).map(function(x){return Number(x.valor);})));
+  c.innerHTML='<div class="grade-d">'+
+      finCartao('Saldo em caixa e bancos',moeda(d.saldo_caixa),'Posição de hoje',Number(d.saldo_caixa)<0?'neg':'')+
+      finCartao('A receber em aberto',moeda(d.receber_aberto),Number(d.receber_vencido)>0?moeda(d.receber_vencido)+' vencidos ('+d.receber_vencido_qtd+')':'Nada vencido')+
+      finCartao('A pagar em aberto',moeda(d.pagar_aberto),Number(d.pagar_vencido)>0?moeda(d.pagar_vencido)+' vencidos ('+d.pagar_vencido_qtd+')':'Nada vencido')+
+      finCartao('Recebido no período',moeda(d.recebido),finPeriodoTexto())+
+      finCartao('Pago no período',moeda(d.pago),finPeriodoTexto())+
+      finCartao('Resultado do período',moeda(res),'Receitas '+moeda(d.receitas)+' · custos e despesas '+moeda(d.despesas),res<0?'neg':'')+
+    '</div>'+
+    '<div class="grade3">'+
+      '<div class="painel"><h2>Receitas e despesas</h2><p class="apoio">Por competência, nos seis meses até '+esc(dataBr(FIN.fim).slice(3))+'.</p>'+finBarras(meses,[['Receitas','#0F3D2E'],['Custos e despesas','#E3A72F']])+'</div>'+
+      '<div class="painel"><h2>Entradas e saídas de caixa</h2><p class="apoio">O que entrou e saiu de caixa e bancos, nos mesmos meses.</p>'+finBarras(cx,[['Entradas','#0F3D2E'],['Saídas','#E3A72F']])+'</div>'+
+    '</div>'+
+    '<div class="grade3">'+
+      '<div class="painel"><h2>Despesas por categoria</h2><p class="apoio">'+esc(finPeriodoTexto())+'</p>'+
+        ((d.despesas_por_conta||[]).map(function(x){return '<div class="fin-faixa"><div class="fin-faixa-topo"><span>'+esc(x.conta)+'</span><strong>'+esc(moeda(x.valor))+'</strong></div><div class="fin-faixa-barra"><i style="width:'+Math.max(2,Math.round(100*Number(x.valor)/topo))+'%"></i></div></div>';}).join('')||'<p class="vazio">Sem custos ou despesas no período.</p>')+'</div>'+
+      '<div class="painel"><h2>Próximos vencimentos</h2><div class="rolagem"><table><thead><tr><th scope="col">Vencimento</th><th scope="col">Título</th><th scope="col" class="num">Valor</th></tr></thead><tbody>'+
+        ((d.proximos||[]).map(function(t){return '<tr><td>'+esc(dataBr(t.vencimento))+(t.vencimento<hojeIso()?' <span class="selo urgente">Vencido</span>':'')+'</td><td>'+esc(t.descricao)+'<span class="sub">'+esc(t.codigo+(t.pessoa_nome?' · '+t.pessoa_nome:''))+'</span></td><td class="num'+(t.tipo==='pagar'?' neg':'')+'">'+(t.tipo==='pagar'?'− ':'')+esc(moeda(t.valor))+'</td></tr>';}).join('')||'<tr><td colspan="3" class="vazio">Nenhum título em aberto.</td></tr>')+'</tbody></table></div></div>'+
+    '</div>';
+}
+
+function finSituacao(t){
+  if(t.status==='pago')return '<span class="situacao">'+(t.tipo==='receber'?'Recebido':'Pago')+' em '+esc(dataBr(t.pago_em))+'</span>';
+  if(t.status==='cancelado')return '<span class="situacao off">Cancelado</span>';
+  if(t.vencimento<hojeIso())return '<span class="selo urgente">Vencido</span>';
+  return '<span class="selo claro">Em aberto</span>';
+}
+async function finTitulos(c,tipo){
+  var rec=tipo==='receber',lista=await finRpc('fin_titulos_listar',{p_org:finOrg(),p_tipo:tipo,p_ini:FIN.ini,p_fim:FIN.fim,p_campo:FIN.campo,p_status:FIN.status});
+  var soma=function(f){return lista.filter(f).reduce(function(s,t){return s+Number(t.valor);},0);};
+  var validos=function(t){return t.status!=='cancelado';};
+  c.innerHTML='<div class="cabeca"><div><h2>'+(rec?'Contas a receber':'Contas a pagar')+'</h2><p class="apoio">'+(rec?'Ao emitir uma fatura, o título correspondente é lançado aqui automaticamente.':'Despesas e custos a pagar, com a baixa no dia do pagamento.')+'</p></div>'+
+      '<div class="acoes">'+(rec?'<button class="botao" type="button" id="fin-fatura">Emitir fatura</button>':'')+'<button class="botao'+(rec?' claro':'')+'" type="button" id="fin-novo">'+(rec?'Lançar sem fatura':'Nova conta a pagar')+'</button></div></div>'+
+    '<div class="painel"><div class="grade"><div class="campo" style="flex:0 1 240px"><label for="fin-campo">Pesquisar o período por</label><select id="fin-campo"><option value="vencimento">Vencimento</option><option value="emissao">Competência (emissão)</option><option value="pagamento">'+(rec?'Recebimento':'Pagamento')+'</option></select></div>'+
+      '<div class="campo" style="flex:0 1 220px"><label for="fin-status">Situação</label><select id="fin-status"><option value="todos">Todas</option><option value="aberto">Em aberto</option><option value="vencido">Vencidos</option><option value="pago">'+(rec?'Recebidos':'Pagos')+'</option><option value="cancelado">Cancelados</option></select></div></div></div>'+
+    '<div class="grade-d">'+finCartao('Total do período',moeda(soma(validos)),(function(n){return n+(n===1?' título':' títulos');})(lista.filter(validos).length)+' · '+finPeriodoTexto())+
+      finCartao('Em aberto',moeda(soma(function(t){return t.status==='aberto';})),moeda(soma(function(t){return t.status==='aberto'&&t.vencimento<hojeIso();}))+' vencidos')+
+      finCartao(rec?'Recebido':'Pago',moeda(soma(function(t){return t.status==='pago';})))+'</div>'+
+    '<div class="rolagem"><table id="fin-lista"><thead><tr><th scope="col">Título</th><th scope="col">Categoria</th><th scope="col">Vencimento</th><th scope="col" class="num">Valor</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead><tbody>'+
+      (lista.map(function(t){
+        var ac='';
+        if(t.fatura_id)ac+='<button class="botao claro pequeno" type="button" data-ver-fatura="'+esc(t.fatura_id)+'">Ver fatura</button>';
+        if(t.status==='aberto'){
+          ac='<button class="botao pequeno" type="button" data-baixar="'+esc(t.id)+'">'+(rec?'Receber':'Pagar')+'</button>'+ac;
+          if(!t.fatura_id)ac+='<button class="botao claro pequeno" type="button" data-editar-titulo="'+esc(t.id)+'">Editar</button><button class="botao sutil pequeno" type="button" data-cancelar-titulo="'+esc(t.id)+'">Cancelar</button>';
+        }else if(t.status==='pago'){ac+='<button class="botao sutil pequeno" type="button" data-estornar="'+esc(t.id)+'">Estornar</button>';}
+        return '<tr><td>'+esc(t.descricao)+'<span class="sub">'+esc(t.codigo+(t.pessoa_nome?' · '+t.pessoa_nome:'')+(t.fatura?' · '+t.fatura:''))+'</span></td><td>'+esc(t.conta||'')+'</td>'+
+          '<td>'+esc(dataBr(t.vencimento))+'<span class="sub">competência '+esc(dataBr(t.emissao))+'</span></td><td class="num">'+esc(moeda(t.valor))+'</td><td>'+finSituacao(t)+(t.status==='pago'&&t.conta_caixa?'<span class="sub">'+esc(t.conta_caixa)+'</span>':'')+'</td><td><div class="fin-acoes">'+ac+'</div></td></tr>';
+      }).join('')||'<tr><td colspan="6" class="vazio">Nenhum título neste período.</td></tr>')+'</tbody></table></div>';
+  $('#fin-campo').value=FIN.campo;$('#fin-status').value=FIN.status;
+  $('#fin-campo').onchange=function(){FIN.campo=this.value;finDesenha();};
+  $('#fin-status').onchange=function(){FIN.status=this.value;finDesenha();};
+  $('#fin-novo').onclick=function(){finDlgTitulo(tipo,null);};
+  if(rec){$('#fin-fatura').onclick=finDlgFatura;}
+  var achar=function(id){return lista.filter(function(t){return t.id===id;})[0];};
+  $$('[data-baixar]',c).forEach(function(b){b.onclick=function(){finDlgBaixa(achar(b.getAttribute('data-baixar')));};});
+  $$('[data-editar-titulo]',c).forEach(function(b){b.onclick=function(){finDlgTitulo(tipo,achar(b.getAttribute('data-editar-titulo')));};});
+  $$('[data-ver-fatura]',c).forEach(function(b){b.onclick=function(){finVerFatura(b.getAttribute('data-ver-fatura'));};});
+  function confirma(b,rotulo,fn,arg,ok){
+    b.onclick=async function(){
+      if(b.getAttribute('data-confirma')!=='1'){
+        var antes=b.textContent;b.setAttribute('data-confirma','1');b.textContent=rotulo;
+        setTimeout(function(){if(b.isConnected){b.removeAttribute('data-confirma');b.textContent=antes;}},5000);return;
+      }
+      ocupar(b,true);
+      var r=await sb.rpc(fn,{p_id:arg});
+      if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+      aviso(ok);finDesenha();
+    };
+  }
+  $$('[data-cancelar-titulo]',c).forEach(function(b){confirma(b,'Confirmar cancelamento','fin_titulo_cancelar',b.getAttribute('data-cancelar-titulo'),'Título cancelado.');});
+  $$('[data-estornar]',c).forEach(function(b){confirma(b,'Confirmar estorno','fin_titulo_estornar',b.getAttribute('data-estornar'),'Baixa estornada. O título voltou a ficar em aberto.');});
+}
+async function finPessoas(){
+  var org=finOrg();
+  if(!FIN.pessoas||FIN.pessoasDe!==org){
+    var r=await sb.rpc('fin_pessoas',{p_org:org});
+    FIN.pessoas=r.error?[]:(r.data||[]);FIN.pessoasDe=org;
+  }
+  return FIN.pessoas;
+}
+function finListaPessoas(ps){return '<datalist id="fin-pessoas">'+ps.map(function(p){return '<option value="'+esc(p.nome)+'">';}).join('')+'</datalist>';}
+function finPessoaDe(ps,nome){var n=String(nome||'').trim().toLowerCase();return ps.filter(function(p){return p.nome.toLowerCase()===n;})[0]||null;}
+async function finDlgTitulo(tipo,t){
+  var rec=tipo==='receber',novo=!t,ps=await finPessoas();
+  var d=finDlg(novo?(rec?'Lançar conta a receber':'Nova conta a pagar'):'Editar '+t.codigo,
+    '<div class="campo"><label for="ft-desc">Descrição</label><input id="ft-desc" type="text" maxlength="200" value="'+esc(novo?'':t.descricao)+'" required></div>'+
+    '<div class="campo"><label for="ft-pessoa">'+(rec?'Cliente':'Fornecedor')+' (opcional)</label><input id="ft-pessoa" type="text" maxlength="200" list="fin-pessoas" value="'+esc(novo?'':t.pessoa_nome)+'" autocomplete="off">'+finListaPessoas(ps)+'<p class="meta">Digite para buscar no Cadastro, ou escreva um nome avulso.</p></div>'+
+    '<div class="campo"><label for="ft-conta">Categoria</label><select id="ft-conta" required>'+finOpcoes(function(c){return rec?c.tipo==='receita':(c.tipo==='custo'||c.tipo==='despesa');},novo?'':t.conta_id)+'</select></div>'+
+    '<div class="grade"><div class="campo"><label for="ft-emis">Competência</label><input id="ft-emis" type="date" value="'+esc(novo?hojeIso():t.emissao)+'" required></div>'+
+      '<div class="campo"><label for="ft-venc">Vencimento</label><input id="ft-venc" type="date" value="'+esc(novo?hojeIso():t.vencimento)+'" required></div>'+
+      '<div class="campo"><label for="ft-valor">Valor (R$)</label><input id="ft-valor" type="text" inputmode="decimal" value="'+esc(novo?'':Number(t.valor).toLocaleString('pt-BR',{minimumFractionDigits:2}))+'" placeholder="0,00" required></div></div>'+
+    '<div class="campo"><label for="ft-obs">Observações</label><textarea id="ft-obs" rows="2" maxlength="1000">'+esc(novo?'':t.observacoes)+'</textarea></div>',
+    '<button class="botao" type="submit">Salvar</button>');
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var valor=valorDe($('#ft-valor',d).value),b=$('button[type=submit]',d),pes=finPessoaDe(ps,$('#ft-pessoa',d).value);
+    if(!$('#ft-desc',d).value.trim()){aviso('Informe a descrição.',true);return;}
+    if(!$('#ft-conta',d).value){aviso('Escolha a categoria.',true);return;}
+    if(!(valor>0)){aviso('Informe um valor maior que zero.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('fin_titulo_salvar',{p_id:novo?null:t.id,p_org:finOrg(),p_dados:{tipo:tipo,descricao:$('#ft-desc',d).value,pessoa_nome:$('#ft-pessoa',d).value.trim(),
+      pessoa_tipo:pes?pes.tipo:null,pessoa_id:pes?pes.id:null,conta_id:$('#ft-conta',d).value,emissao:$('#ft-emis',d).value,vencimento:$('#ft-venc',d).value,valor:valor,observacoes:$('#ft-obs',d).value}});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso(novo?'Título lançado.':'Título salvo.');finDesenha();
+  };
+  $('#ft-desc',d).focus();
+}
+function finDlgBaixa(t){
+  var rec=t.tipo==='receber';
+  var d=finDlg((rec?'Receber ':'Pagar ')+t.codigo,
+    '<p class="apoio">'+esc(t.descricao)+(t.pessoa_nome?' · '+esc(t.pessoa_nome):'')+'<br><strong>'+esc(moeda(t.valor))+'</strong> · vencimento '+esc(dataBr(t.vencimento))+'</p>'+
+    '<div class="grade"><div class="campo"><label for="fb-data">Data do '+(rec?'recebimento':'pagamento')+'</label><input id="fb-data" type="date" value="'+esc(hojeIso())+'" max="'+esc(hojeIso())+'" required></div>'+
+      '<div class="campo"><label for="fb-caixa">'+(rec?'Entrou em':'Saiu de')+'</label><select id="fb-caixa" required>'+finOpcoes(function(c){return c.caixa;},'')+'</select></div>'+
+      '<div class="campo"><label for="fb-forma">Forma</label><select id="fb-forma">'+FIN_FORMAS.map(function(f){return '<option value="'+f[0]+'">'+f[1]+'</option>';}).join('')+'</select></div></div>'+
+    '<p class="meta">A baixa é pelo valor integral do título. O lançamento no caixa é feito na hora.</p>',
+    '<button class="botao" type="submit">Confirmar '+(rec?'recebimento':'pagamento')+'</button>');
+  var cx=finContas(function(c){return c.caixa;});
+  if(cx.length){$('#fb-caixa',d).value=(cx.filter(function(c){return /banco/i.test(c.nome);})[0]||cx[0]).id;}
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d);
+    if(!$('#fb-data',d).value||!$('#fb-caixa',d).value){aviso('Informe a data e a conta.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('fin_titulo_baixar',{p_id:t.id,p_data:$('#fb-data',d).value,p_caixa:$('#fb-caixa',d).value,p_forma:$('#fb-forma',d).value});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso(rec?'Recebimento registrado.':'Pagamento registrado.');finDesenha();
+  };
+}
+function finItemLinha(){
+  return '<tr><td><input type="text" maxlength="200" aria-label="Descrição do item" data-fi="descricao"></td><td><input type="text" inputmode="decimal" aria-label="Quantidade" data-fi="quantidade" value="1" style="width:80px"></td>'+
+    '<td><input type="text" inputmode="decimal" aria-label="Valor unitário" data-fi="valor" placeholder="0,00" style="width:120px"></td><td class="num" data-fi-total>R$ 0,00</td>'+
+    '<td><button class="botao sutil pequeno" type="button" data-fi-tirar aria-label="Remover item">Remover</button></td></tr>';
+}
+async function finDlgFatura(){
+  var ps=await finPessoas();
+  var d=finDlg('Emitir fatura',
+    '<div class="grade"><div class="campo" style="flex:2 1 280px"><label for="ff-cliente">Cliente</label><input id="ff-cliente" type="text" maxlength="200" list="fin-pessoas" autocomplete="off" required>'+finListaPessoas(ps)+'</div>'+
+      '<div class="campo"><label for="ff-doc">CPF ou CNPJ</label><input id="ff-doc" type="text" maxlength="20"></div></div>'+
+    '<div class="grade"><div class="campo" style="flex:2 1 280px"><label for="ff-end">Endereço</label><input id="ff-end" type="text" maxlength="300"></div>'+
+      '<div class="campo"><label for="ff-email">E-mail</label><input id="ff-email" type="email" maxlength="200"></div></div>'+
+    '<div class="grade"><div class="campo"><label for="ff-emis">Emissão</label><input id="ff-emis" type="date" value="'+esc(hojeIso())+'" required></div>'+
+      '<div class="campo"><label for="ff-venc">Vencimento</label><input id="ff-venc" type="date" value="'+esc(somaDias(10))+'" required></div>'+
+      '<div class="campo"><label for="ff-forma">Forma de cobrança</label><select id="ff-forma">'+FIN_FORMAS.map(function(f){return '<option value="'+f[0]+'">'+f[1]+'</option>';}).join('')+'</select></div></div>'+
+    '<div class="campo"><label for="ff-conta">Categoria da receita</label><select id="ff-conta" required>'+finOpcoes(function(c){return c.tipo==='receita';},'')+'</select></div>'+
+    '<div class="campo"><span class="rotulo">Itens</span><div class="rolagem"><table id="ff-itens"><thead><tr><th scope="col">Descrição</th><th scope="col">Qtd.</th><th scope="col">Valor unitário</th><th scope="col" class="num">Total</th><th scope="col"></th></tr></thead><tbody>'+finItemLinha()+'</tbody>'+
+      '<tfoot><tr class="total"><td colspan="3">Total da fatura</td><td class="num" id="ff-total">R$ 0,00</td><td></td></tr></tfoot></table></div>'+
+      '<button class="botao claro pequeno" type="button" id="ff-mais" style="align-self:flex-start">Adicionar item</button></div>'+
+    '<div class="campo"><label for="ff-obs">Observações na fatura</label><textarea id="ff-obs" rows="2" maxlength="1000"></textarea></div>'+
+    '<p class="meta">Ao emitir, o título é lançado em contas a receber com o mesmo valor e vencimento.</p>',
+    '<button class="botao" type="submit">Emitir fatura</button>',true);
+  function itens(){
+    return $$('#ff-itens tbody tr',d).map(function(tr){
+      var q=valorDe($('[data-fi=quantidade]',tr).value),v=valorDe($('[data-fi=valor]',tr).value);
+      return {tr:tr,descricao:$('[data-fi=descricao]',tr).value.trim(),quantidade:q,valor_unitario:v,total:(q>0&&v>=0)?Math.round(q*v*100)/100:0};
+    });
+  }
+  function recalcula(){var s=0;itens().forEach(function(i){s+=i.total;$('[data-fi-total]',i.tr).textContent=moeda(i.total);});$('#ff-total',d).textContent=moeda(s);return s;}
+  $('#ff-itens',d).addEventListener('input',recalcula);
+  $('#ff-itens',d).addEventListener('click',function(ev){
+    var b=ev.target.closest('[data-fi-tirar]');if(!b)return;
+    if($$('#ff-itens tbody tr',d).length>1){b.closest('tr').remove();recalcula();}
+  });
+  $('#ff-mais',d).onclick=function(){$('#ff-itens tbody',d).insertAdjacentHTML('beforeend',finItemLinha());};
+  $('#ff-cliente',d).onchange=function(){
+    var p=finPessoaDe(ps,this.value);if(!p)return;
+    $('#ff-doc',d).value=p.tipo==='pj'?formataCnpj(p.documento):String(p.documento||'').replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/,'$1.$2.$3-$4');
+    $('#ff-end',d).value=p.endereco||'';$('#ff-email',d).value=p.email||'';
+  };
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),its=itens().filter(function(i){return i.descricao||i.valor_unitario>0;}),pes=finPessoaDe(ps,$('#ff-cliente',d).value);
+    if(!$('#ff-cliente',d).value.trim()){aviso('Informe o cliente.',true);return;}
+    if(!$('#ff-conta',d).value){aviso('Escolha a categoria da receita.',true);return;}
+    if(!its.length||its.some(function(i){return !i.descricao||!(i.quantidade>0)||!(i.valor_unitario>=0);})||!(recalcula()>0)){aviso('Preencha descrição, quantidade e valor de cada item.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('fin_fatura_emitir',{p_org:finOrg(),p_dados:{cliente_nome:$('#ff-cliente',d).value.trim(),cliente_tipo:pes?pes.tipo:null,cliente_id:pes?pes.id:null,
+      cliente_documento:$('#ff-doc',d).value.trim(),cliente_endereco:$('#ff-end',d).value.trim(),cliente_email:$('#ff-email',d).value.trim(),
+      emissao:$('#ff-emis',d).value,vencimento:$('#ff-venc',d).value,conta_id:$('#ff-conta',d).value,forma:$('#ff-forma',d).value,observacoes:$('#ff-obs',d).value,
+      itens:its.map(function(i){return {descricao:i.descricao,quantidade:i.quantidade,valor_unitario:i.valor_unitario};})}});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();
+    await finDesenha();
+    finMostraFatura(r.data);
+    aviso('Fatura '+r.data.codigo+' emitida e lançada em contas a receber.');
+  };
+  $('#ff-cliente',d).focus();
+}
+function finFaturaHtml(f){
+  var forma=rotuloDe(FIN_FORMAS,f.forma||'');
+  return '<div class="fatura-doc"><div class="fatura-topo"><div><strong>'+esc(f.emitente.nome)+'</strong>'+(f.emitente.cnpj?'<span>CNPJ '+esc(formataCnpj(f.emitente.cnpj))+'</span>':'')+'</div>'+
+      '<div class="fatura-num"><span>Fatura</span><strong>'+esc(f.codigo)+'</strong>'+(f.status==='cancelada'?'<span class="selo urgente">Cancelada</span>':'')+'</div></div>'+
+    '<div class="fatura-partes"><div><span>Cliente</span><strong>'+esc(f.cliente_nome)+'</strong>'+(f.cliente_documento?'<span>'+esc(f.cliente_documento)+'</span>':'')+(f.cliente_endereco?'<span>'+esc(f.cliente_endereco)+'</span>':'')+(f.cliente_email?'<span>'+esc(f.cliente_email)+'</span>':'')+'</div>'+
+      '<div><span>Emissão</span><strong>'+esc(dataBr(f.emissao))+'</strong><span>Vencimento</span><strong>'+esc(dataBr(f.vencimento))+'</strong>'+(f.forma?'<span>Forma de cobrança: '+esc(forma)+'</span>':'')+'</div></div>'+
+    '<table><thead><tr><th scope="col">Descrição</th><th scope="col" class="num">Qtd.</th><th scope="col" class="num">Valor unitário</th><th scope="col" class="num">Total</th></tr></thead><tbody>'+
+      (f.itens||[]).map(function(i){return '<tr><td>'+esc(i.descricao)+'</td><td class="num">'+esc(Number(i.quantidade).toLocaleString('pt-BR'))+'</td><td class="num">'+esc(moeda(i.valor_unitario))+'</td><td class="num">'+esc(moeda(i.total))+'</td></tr>';}).join('')+
+      '</tbody><tfoot><tr class="total"><td colspan="3">Total a pagar</td><td class="num">'+esc(moeda(f.total))+'</td></tr></tfoot></table>'+
+    (f.observacoes?'<p class="fatura-obs">'+esc(f.observacoes)+'</p>':'')+
+    '<p class="fatura-obs">Documento de cobrança emitido pelo Celeiro Office. Não substitui a nota fiscal.</p></div>';
+}
+var FIN_FATURA_CSS='body{font-family:Inter,Arial,sans-serif;color:#0F3D2E;margin:32px}.fatura-doc{display:flex;flex-direction:column;gap:20px}.fatura-topo,.fatura-partes{display:flex;justify-content:space-between;gap:24px}.fatura-topo div,.fatura-partes div{display:flex;flex-direction:column;gap:4px}.fatura-num{text-align:right}.fatura-num strong{font-size:22px}.fatura-doc span{font-size:12px;color:#44564E}table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #D5DED9}.num{text-align:right;white-space:nowrap}tr.total td{font-weight:700;border-top:2px solid #0F3D2E;border-bottom:0}.fatura-obs{font-size:12px;color:#44564E;margin:0}.selo{font-size:12px;font-weight:600;color:#B3261E}';
+function finMostraFatura(f){
+  var t=f.titulo||{},aberta=f.status==='emitida';
+  var d=finDlg('Fatura '+f.codigo,finFaturaHtml(f)+
+    '<p class="meta">Título em contas a receber: '+esc(t.codigo||'—')+' · '+(t.status==='pago'?'recebido em '+esc(dataBr(t.pago_em)):t.status==='cancelado'?'cancelado':'em aberto')+'</p>',
+    '<button class="botao" type="button" id="fv-imprimir">Imprimir ou salvar em PDF</button>'+(aberta?'<button class="botao sutil" type="button" id="fv-cancelar">Cancelar fatura</button>':''),true);
+  $('#fv-imprimir',d).onclick=function(){
+    var w=window.open('','_blank');
+    if(!w){aviso('O navegador bloqueou a janela de impressão. Permita pop-ups para este site.',true);return;}
+    w.document.write('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Fatura '+esc(f.codigo)+'</title><style>'+FIN_FATURA_CSS+'</style></head><body>'+finFaturaHtml(f)+'</body></html>');
+    w.document.close();w.focus();setTimeout(function(){w.print();},200);
+    evento('Imprimiu a fatura '+f.codigo,'Financeiro');
+  };
+  var bc=$('#fv-cancelar',d);
+  if(bc){bc.onclick=async function(){
+    if(bc.getAttribute('data-confirma')!=='1'){bc.setAttribute('data-confirma','1');bc.textContent='Confirmar cancelamento da fatura';return;}
+    ocupar(bc,true);
+    var r=await sb.rpc('fin_fatura_cancelar',{p_id:f.id});
+    if(r.error){ocupar(bc,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso('Fatura cancelada. O título em contas a receber também foi cancelado.');finDesenha();
+  };}
+}
+async function finVerFatura(id){
+  var r=await sb.rpc('fin_fatura_ver',{p_id:id});
+  if(r.error){aviso(msgErro(r.error),true);return;}
+  finMostraFatura(r.data);
+}
+
+async function finProjetado(c){
+  var d=await finRpc('fin_fluxo',finPeriodo()),hoje=d.hoje,saldo=Number(d.saldo_hoje),ent=0,sai=0,pontos=[{r:'Hoje',v:saldo}];
+  var linhas=(d.abertos||[]).map(function(t){
+    var e=t.tipo==='receber'?Number(t.valor):0,s=t.tipo==='pagar'?Number(t.valor):0,venc=t.vencimento<hoje;
+    saldo+=e-s;ent+=e;sai+=s;pontos.push({r:dataBr(venc?hoje:t.vencimento).slice(0,5),v:saldo});
+    return '<tr><td>'+esc(dataBr(t.vencimento))+(venc?' <span class="selo urgente">Vencido</span>':'')+'</td><td>'+esc(t.descricao)+'<span class="sub">'+esc(t.codigo+(t.pessoa_nome?' · '+t.pessoa_nome:''))+'</span></td>'+
+      '<td class="num">'+(e?esc(moeda(e)):'')+'</td><td class="num neg">'+(s?esc(moeda(s)):'')+'</td><td class="num'+(saldo<0?' neg':'')+'">'+esc(moeda(saldo))+'</td></tr>';
+  }).join('');
+  c.innerHTML='<div class="cabeca"><div><h2>Fluxo de caixa projetado</h2><p class="apoio">Parte do saldo de hoje e soma os títulos em aberto com vencimento até '+esc(dataBr(FIN.fim))+'. Títulos vencidos entram como se fossem liquidados hoje.</p></div></div>'+
+    '<div class="grade-d">'+finCartao('Saldo de hoje',moeda(d.saldo_hoje),'Caixa e bancos',Number(d.saldo_hoje)<0?'neg':'')+finCartao('A receber',moeda(ent))+finCartao('A pagar',moeda(sai))+finCartao('Saldo projetado',moeda(saldo),'Em '+dataBr(FIN.fim),saldo<0?'neg':'')+'</div>'+
+    (pontos.length>1?'<div class="painel"><h2>Saldo projetado</h2>'+finLinha(pontos,'Saldo projetado de caixa')+'</div>':'')+
+    '<div class="rolagem"><table><thead><tr><th scope="col">Vencimento</th><th scope="col">Título</th><th scope="col" class="num">Entrada</th><th scope="col" class="num">Saída</th><th scope="col" class="num">Saldo projetado</th></tr></thead><tbody>'+
+      '<tr class="grupo"><td colspan="4">Saldo de hoje</td><td class="num">'+esc(moeda(d.saldo_hoje))+'</td></tr>'+
+      (linhas||'<tr><td colspan="5" class="vazio">Nenhum título em aberto até esta data.</td></tr>')+'</tbody></table></div>';
+}
+async function finRealizado(c){
+  var d=await finRpc('fin_fluxo',finPeriodo()),saldo=Number(d.saldo_anterior),ent=0,sai=0,pontos=[{r:dataBr(FIN.ini).slice(0,5),v:saldo}];
+  var linhas=(d.movimentos||[]).map(function(m){
+    var e=Number(m.entrada),s=Number(m.saida);saldo+=e-s;ent+=e;sai+=s;pontos.push({r:dataBr(m.data).slice(0,5),v:saldo});
+    return '<tr><td>'+esc(dataBr(m.data))+'</td><td>'+esc(m.historico)+'<span class="sub">'+esc(m.conta+(m.origem==='lancamento'?' · lançamento manual':''))+'</span></td>'+
+      '<td class="num">'+(e?esc(moeda(e)):'')+'</td><td class="num neg">'+(s?esc(moeda(s)):'')+'</td><td class="num'+(saldo<0?' neg':'')+'">'+esc(moeda(saldo))+'</td></tr>';
+  }).join('');
+  c.innerHTML='<div class="cabeca"><div><h2>Fluxo de caixa realizado</h2><p class="apoio">O que de fato entrou e saiu de caixa e bancos de '+esc(finPeriodoTexto())+', pela data do pagamento.</p></div></div>'+
+    '<div class="grade-d">'+finCartao('Saldo inicial',moeda(d.saldo_anterior),'Antes de '+dataBr(FIN.ini))+finCartao('Entradas',moeda(ent))+finCartao('Saídas',moeda(sai))+finCartao('Saldo final',moeda(saldo),'Em '+dataBr(FIN.fim),saldo<0?'neg':'')+'</div>'+
+    (pontos.length>1?'<div class="painel"><h2>Saldo no período</h2>'+finLinha(pontos,'Saldo de caixa no período')+'</div>':'')+
+    '<div class="rolagem"><table><thead><tr><th scope="col">Data</th><th scope="col">Movimento</th><th scope="col" class="num">Entrada</th><th scope="col" class="num">Saída</th><th scope="col" class="num">Saldo</th></tr></thead><tbody>'+
+      '<tr class="grupo"><td colspan="4">Saldo inicial</td><td class="num">'+esc(moeda(d.saldo_anterior))+'</td></tr>'+
+      (linhas||'<tr><td colspan="5" class="vazio">Nenhum movimento de caixa no período.</td></tr>')+
+      '<tr class="total"><td colspan="2">Total do período</td><td class="num">'+esc(moeda(ent))+'</td><td class="num">'+esc(moeda(sai))+'</td><td class="num">'+esc(moeda(saldo))+'</td></tr></tbody></table></div>';
+}
+
+/* saldo de uma conta: devedora (ativo, custo, despesa) = débitos − créditos; credora = créditos − débitos */
+function finDev(c){return c.tipo==='ativo'||c.tipo==='custo'||c.tipo==='despesa';}
+function finSaldos(contas){
+  contas.forEach(function(c){
+    var filhos=c.grupo?contas.filter(function(x){return !x.grupo&&x.codigo.indexOf(c.codigo+'.')===0;}):[c];
+    c.s={ant_d:0,ant_c:0,per_d:0,per_c:0};
+    filhos.forEach(function(x){['ant_d','ant_c','per_d','per_c'].forEach(function(k){c.s[k]+=Number(x[k]);});});
+    var sinal=finDev(c)?1:-1;
+    c.anterior=sinal*(c.s.ant_d-c.s.ant_c);c.periodo=sinal*(c.s.per_d-c.s.per_c);c.final=c.anterior+c.periodo;
+  });
+  return contas;
+}
+function finNivel(c){return c.codigo.split('.').length-1;}
+async function finDre(c){
+  var b=await finRpc('fin_balancete',finPeriodo()),contas=finSaldos(b.contas||[]);
+  function bloco(tipo){return contas.filter(function(x){return x.tipo===tipo&&!x.grupo&&Math.abs(x.periodo)>0.004;});}
+  function soma(l){return l.reduce(function(s,x){return s+x.periodo;},0);}
+  var rec=bloco('receita'),cus=bloco('custo'),des=bloco('despesa'),tr=soma(rec),tc=soma(cus),td=soma(des),bruto=tr-tc,res=bruto-td;
+  function linhas(l,menos){return l.map(function(x){return '<tr><td style="padding-left:32px">'+esc(x.codigo+' '+x.nome)+'</td><td class="num">'+(menos?'− ':'')+esc(moeda(x.periodo))+'</td><td class="num">'+(tr?esc((100*x.periodo/tr).toFixed(1).replace('.',','))+'%':'')+'</td></tr>';}).join('');}
+  function tot(r,v,cl){return '<tr class="'+cl+'"><td>'+esc(r)+'</td><td class="num'+(v<0?' neg':'')+'">'+esc(moeda(v))+'</td><td class="num">'+(tr?esc((100*v/tr).toFixed(1).replace('.',','))+'%':'')+'</td></tr>';}
+  c.innerHTML='<div class="cabeca"><div><h2>DRE: demonstração do resultado</h2><p class="apoio">Por competência, de '+esc(finPeriodoTexto())+'. A coluna % compara cada linha com a receita.</p></div></div>'+
+    '<div class="grade-d">'+finCartao('Receita',moeda(tr))+finCartao('Custos',moeda(tc))+finCartao('Despesas',moeda(td))+finCartao('Resultado',moeda(res),tr?'Margem de '+(100*res/tr).toFixed(1).replace('.',',')+'%':'',res<0?'neg':'')+'</div>'+
+    '<div class="rolagem"><table id="fin-dre"><thead><tr><th scope="col">Conta</th><th scope="col" class="num">Valor</th><th scope="col" class="num">% da receita</th></tr></thead><tbody>'+
+      tot('Receita',tr,'grupo')+linhas(rec)+tot('(−) Custos',-tc,'grupo')+linhas(cus,true)+tot('(=) Lucro bruto',bruto,'total')+
+      tot('(−) Despesas',-td,'grupo')+linhas(des,true)+tot('(=) Resultado do período',res,'total')+'</tbody></table></div>';
+}
+async function finBalanco(c){
+  var b=await finRpc('fin_balancete',{p_org:finOrg(),p_ini:FIN.fim,p_fim:FIN.fim}),contas=finSaldos(b.contas||[]);
+  function tot(tipo){return contas.filter(function(x){return x.tipo===tipo&&!x.grupo;}).reduce(function(s,x){return s+x.final;},0);}
+  var ativo=tot('ativo'),passivo=tot('passivo'),pl=tot('patrimonio'),res=tot('receita')-tot('custo')-tot('despesa'),dif=ativo-(passivo+pl+res);
+  function lista(tipo){
+    return contas.filter(function(x){return x.tipo===tipo&&(x.grupo||Math.abs(x.final)>0.004);}).map(function(x){
+      return '<tr'+(x.grupo?' class="grupo"':'')+'><td style="padding-left:'+(14+18*finNivel(x))+'px">'+esc(x.codigo+' '+x.nome)+'</td><td class="num'+(x.final<0?' neg':'')+'">'+esc(moeda(x.final))+'</td></tr>';
+    }).join('');
+  }
+  c.innerHTML='<div class="cabeca"><div><h2>Balanço patrimonial</h2><p class="apoio">Posição em '+esc(dataBr(FIN.fim))+'. O resultado ainda não encerrado aparece no patrimônio líquido.</p></div></div>'+
+    '<div class="grade-d">'+finCartao('Ativo',moeda(ativo))+finCartao('Passivo',moeda(passivo))+finCartao('Patrimônio líquido',moeda(pl+res),'Inclui resultado acumulado de '+moeda(res))+
+      finCartao('Conferência',Math.abs(dif)<0.005?'Fechado':'Diferença de '+moeda(dif),'Ativo = Passivo + Patrimônio líquido',Math.abs(dif)<0.005?'':'neg')+'</div>'+
+    '<div class="grade3"><div class="rolagem"><table id="fin-ativo"><thead><tr><th scope="col">Ativo</th><th scope="col" class="num">Saldo</th></tr></thead><tbody>'+lista('ativo')+
+        '<tr class="total"><td>Total do ativo</td><td class="num">'+esc(moeda(ativo))+'</td></tr></tbody></table></div>'+
+      '<div class="rolagem"><table id="fin-passivo"><thead><tr><th scope="col">Passivo e patrimônio líquido</th><th scope="col" class="num">Saldo</th></tr></thead><tbody>'+lista('passivo')+lista('patrimonio')+
+        '<tr><td style="padding-left:32px">Resultado acumulado (não encerrado)</td><td class="num'+(res<0?' neg':'')+'">'+esc(moeda(res))+'</td></tr>'+
+        '<tr class="total"><td>Total do passivo e patrimônio líquido</td><td class="num">'+esc(moeda(passivo+pl+res))+'</td></tr></tbody></table></div></div>';
+}
+async function finBalancete(c){
+  var b=await finRpc('fin_balancete',finPeriodo()),contas=finSaldos(b.contas||[]),td=0,tc=0;
+  function dc(v,x){return Math.abs(v)<0.005?'—':esc(moeda(Math.abs(v)))+' '+((v>=0)===finDev(x)?'D':'C');}
+  var linhas=contas.filter(function(x){return x.grupo||Math.abs(x.anterior)>0.004||x.s.per_d>0||x.s.per_c>0;}).map(function(x){
+    if(!x.grupo){td+=x.s.per_d;tc+=x.s.per_c;}
+    return '<tr'+(x.grupo?' class="grupo"':'')+'><td style="padding-left:'+(14+18*finNivel(x))+'px">'+esc(x.codigo+' '+x.nome)+'</td><td class="num">'+dc(x.anterior,x)+'</td>'+
+      '<td class="num">'+(x.s.per_d?esc(moeda(x.s.per_d)):'—')+'</td><td class="num">'+(x.s.per_c?esc(moeda(x.s.per_c)):'—')+'</td><td class="num">'+dc(x.final,x)+'</td></tr>';
+  }).join('');
+  c.innerHTML='<div class="cabeca"><div><h2>Balancete de verificação</h2><p class="apoio">Movimento de cada conta de '+esc(finPeriodoTexto())+'. D = saldo devedor, C = saldo credor.</p></div>'+
+      '<div class="acoes"><button class="botao claro" type="button" id="fin-lanc">Novo lançamento manual</button></div></div>'+
+    '<div class="rolagem"><table id="fin-balancete"><thead><tr><th scope="col">Conta</th><th scope="col" class="num">Saldo anterior</th><th scope="col" class="num">Débitos</th><th scope="col" class="num">Créditos</th><th scope="col" class="num">Saldo final</th></tr></thead><tbody>'+linhas+
+      '<tr class="total"><td>Total do período</td><td></td><td class="num">'+esc(moeda(td))+'</td><td class="num">'+esc(moeda(tc))+'</td><td class="num">'+(Math.abs(td-tc)<0.005?'Fechado':'Diferença '+esc(moeda(td-tc)))+'</td></tr></tbody></table></div>'+
+    '<h2>Lançamentos manuais do período</h2><p class="apoio">Use para saldo inicial, capital, transferência entre contas e ajustes. Contas a pagar e a receber geram seus lançamentos sozinhas.</p>'+
+    '<div class="rolagem"><table><thead><tr><th scope="col">Data</th><th scope="col">Histórico</th><th scope="col">Débito</th><th scope="col">Crédito</th><th scope="col" class="num">Valor</th><th scope="col">Ação</th></tr></thead><tbody>'+
+      ((b.lancamentos||[]).map(function(l){return '<tr><td>'+esc(dataBr(l.data))+'</td><td>'+esc(l.historico)+'</td><td>'+esc(l.debito)+'</td><td>'+esc(l.credito)+'</td><td class="num">'+esc(moeda(l.valor))+'</td><td><button class="botao sutil pequeno" type="button" data-excluir-lanc="'+esc(l.id)+'">Excluir</button></td></tr>';}).join('')||'<tr><td colspan="6" class="vazio">Nenhum lançamento manual no período.</td></tr>')+'</tbody></table></div>';
+  $('#fin-lanc').onclick=finDlgLancamento;
+  $$('[data-excluir-lanc]',c).forEach(function(b){
+    b.onclick=async function(){
+      if(b.getAttribute('data-confirma')!=='1'){b.setAttribute('data-confirma','1');b.textContent='Confirmar exclusão';return;}
+      ocupar(b,true);
+      var r=await sb.rpc('fin_lancamento_excluir',{p_id:b.getAttribute('data-excluir-lanc')});
+      if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+      aviso('Lançamento excluído.');finDesenha();
+    };
+  });
+}
+function finDlgLancamento(){
+  var todas=function(){return true;};
+  var d=finDlg('Novo lançamento manual',
+    '<div class="grade"><div class="campo"><label for="fl-data">Data</label><input id="fl-data" type="date" value="'+esc(hojeIso())+'" required></div>'+
+      '<div class="campo"><label for="fl-valor">Valor (R$)</label><input id="fl-valor" type="text" inputmode="decimal" placeholder="0,00" required></div></div>'+
+    '<div class="campo"><label for="fl-hist">Histórico</label><input id="fl-hist" type="text" maxlength="200" placeholder="Ex.: Saldo inicial do banco" required></div>'+
+    '<div class="campo"><label for="fl-deb">Conta de débito (para onde vai)</label><select id="fl-deb" required>'+finOpcoes(todas,'')+'</select></div>'+
+    '<div class="campo"><label for="fl-cred">Conta de crédito (de onde vem)</label><select id="fl-cred" required>'+finOpcoes(todas,'')+'</select></div>'+
+    '<p class="meta">Exemplo de saldo inicial: débito em Banco conta movimento, crédito em Capital social.</p>',
+    '<button class="botao" type="submit">Lançar</button>');
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var v=valorDe($('#fl-valor',d).value),b=$('button[type=submit]',d);
+    if(!(v>0)){aviso('Informe um valor maior que zero.',true);return;}
+    if(!$('#fl-hist',d).value.trim()||!$('#fl-deb',d).value||!$('#fl-cred',d).value){aviso('Preencha histórico e as duas contas.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('fin_lancamento_salvar',{p_org:finOrg(),p_data:$('#fl-data',d).value,p_historico:$('#fl-hist',d).value,p_debito:$('#fl-deb',d).value,p_credito:$('#fl-cred',d).value,p_valor:v});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso('Lançamento feito.');finDesenha();
+  };
+}
+async function finPlano(c){
+  FIN.plano=await finRpc('fin_plano',{p_org:finOrg()});
+  c.innerHTML='<div class="cabeca"><div><h2>Plano de contas</h2><p class="apoio">As categorias usadas nos lançamentos e a estrutura dos demonstrativos. O plano padrão pode ser ajustado.</p></div>'+
+      '<div class="acoes"><button class="botao" type="button" id="fin-conta-nova">Nova conta</button></div></div>'+
+    '<div class="rolagem"><table id="fin-plano"><thead><tr><th scope="col">Conta</th><th scope="col">Tipo</th><th scope="col">Uso</th><th scope="col">Situação</th><th scope="col">Ação</th></tr></thead><tbody>'+
+      FIN.plano.map(function(x){
+        return '<tr'+(x.grupo?' class="grupo"':'')+'><td style="padding-left:'+(14+18*finNivel(x))+'px">'+esc(x.codigo+' '+x.nome)+'</td><td>'+esc(rotuloDe(FIN_TIPOS,x.tipo))+'</td>'+
+          '<td>'+(x.grupo?'Grupo (só soma)':x.caixa?'Caixa ou banco':x.papel?'Usada pelo sistema':'Recebe lançamentos')+'</td>'+
+          '<td><span class="situacao'+(x.ativo?'':' off')+'">'+(x.ativo?'Ativa':'Inativa')+'</span></td><td><button class="botao claro pequeno" type="button" data-conta="'+esc(x.id)+'">Editar</button></td></tr>';
+      }).join('')+'</tbody></table></div>';
+  $('#fin-conta-nova').onclick=function(){finDlgConta(null);};
+  $$('[data-conta]',c).forEach(function(b){b.onclick=function(){finDlgConta(FIN.plano.filter(function(x){return x.id===b.getAttribute('data-conta');})[0]);};});
+}
+function finDlgConta(x){
+  var novo=!x;
+  var d=finDlg(novo?'Nova conta':'Editar conta',
+    '<div class="grade"><div class="campo" style="flex:0 1 160px"><label for="fc-cod">Código</label><input id="fc-cod" type="text" maxlength="20" value="'+esc(novo?'':x.codigo)+'" placeholder="6.10" required></div>'+
+      '<div class="campo"><label for="fc-nome">Nome</label><input id="fc-nome" type="text" maxlength="120" value="'+esc(novo?'':x.nome)+'" required></div></div>'+
+    '<div class="campo"><label for="fc-tipo">Tipo</label><select id="fc-tipo">'+FIN_TIPOS.map(function(t){return '<option value="'+t[0]+'"'+(!novo&&x.tipo===t[0]?' selected':'')+'>'+t[1]+'</option>';}).join('')+'</select></div>'+
+    '<div class="grade"><div class="campo"><span class="rotulo">Grupo (só soma as contas abaixo)</span>'+chaveSw(!novo&&x.grupo,'Conta de grupo','id="fc-grupo"')+'</div>'+
+      '<div class="campo"><span class="rotulo">Caixa ou banco</span>'+chaveSw(!novo&&x.caixa,'Conta de caixa ou banco','id="fc-caixa"')+'</div>'+
+      '<div class="campo"><span class="rotulo">Ativa</span>'+chaveSw(novo||x.ativo,'Conta ativa','id="fc-ativo"')+'</div></div>'+
+    '<p class="meta">O código define a posição: 6.10 fica dentro do grupo 6. Contas com movimento não mudam de tipo.</p>',
+    '<button class="botao" type="submit">Salvar</button>');
+  $$('.chave-sw',d).forEach(function(s){s.onclick=function(){s.setAttribute('aria-checked',s.getAttribute('aria-checked')==='true'?'false':'true');};});
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),lig=function(id){return $(id,d).getAttribute('aria-checked')==='true';};
+    ocupar(b,true);
+    var r=await sb.rpc('fin_conta_salvar',{p_id:novo?null:x.id,p_org:finOrg(),p_codigo:$('#fc-cod',d).value.trim(),p_nome:$('#fc-nome',d).value,p_tipo:$('#fc-tipo',d).value,p_grupo:lig('#fc-grupo'),p_caixa:lig('#fc-caixa'),p_ativo:lig('#fc-ativo')});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso('Conta salva.');finDesenha();
+  };
 }
 
 /* ---------- Dashboard ---------- */

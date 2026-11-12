@@ -145,6 +145,36 @@ Cada consulta oficial fica registrada na Auditoria. O token é obtido por creden
 
 Validação de CPF na Receita ainda não tem função: depende da mesma contratação.
 
+## Financeiro
+
+Menus internos: Dashboard, Contas a receber, Contas a pagar, Fluxo projetado, Fluxo realizado, DRE, Balanço,
+Balancete e Plano de contas. Todos (menos o plano) têm pesquisa por período, com datas livres e períodos prontos.
+
+- **Livros separados**: cada organização tem os próprios livros. A equipe Celeiro escolhe em "Livros de" entre
+  a própria Celeiro e cada cliente; o cliente só vê os dele.
+- **Plano de contas**: criado sozinho na primeira abertura (33 contas: ativo, passivo, patrimônio, receitas,
+  custos e despesas) e pode ser ajustado. Contas com movimento não mudam de tipo.
+- **Contas a pagar e a receber**: título com descrição, cliente ou fornecedor (do Cadastro ou avulso), categoria,
+  competência, vencimento e valor. Baixa pelo valor integral, com data, conta de caixa ou banco e forma.
+  Estorno devolve o título para "em aberto". Nada é apagado: título é cancelado.
+- **Fatura**: em Contas a receber → "Emitir fatura". Cliente, itens (quantidade × valor), vencimento, categoria e
+  forma de cobrança. Ao emitir, o título é lançado automaticamente em contas a receber, com o mesmo valor e
+  vencimento. A fatura pode ser impressa ou salva em PDF. Cancelar a fatura cancela o título (se já foi
+  recebido, é preciso estornar antes). Título de fatura não é alterado à mão.
+- **Contabilidade**: por partidas dobradas, geradas dos títulos (na competência e no pagamento) e dos lançamentos
+  manuais (saldo inicial, capital, transferências, ajustes; ficam no Balancete). DRE por competência; fluxo
+  realizado pela data do pagamento; fluxo projetado parte do saldo de hoje e soma os títulos em aberto;
+  balanço mostra o resultado ainda não encerrado dentro do patrimônio líquido.
+- **Segurança**: as tabelas do Financeiro não são lidas direto pelo navegador; tudo passa por operações que
+  conferem o módulo, o segundo fator e a organização. Tudo vai para a Auditoria.
+
+Limites desta versão: sem boleto nem Pix (a fatura é o documento de cobrança; a instituição financeira ainda
+não foi escolhida); sem nota fiscal; sem baixa parcial, juros, multa ou desconto; sem parcelamento nem títulos
+recorrentes; sem conciliação bancária; sem encerramento de exercício; pagar aceita só categorias de custo e
+despesa (compra de imobilizado e empréstimos entram por lançamento manual). O Dashboard geral do sistema ainda
+não lê os números do Financeiro, e o MCP ainda não tem ferramentas do Financeiro. Os demonstrativos são
+gerenciais: não substituem a escrituração feita pela contabilidade.
+
 ## Conexão MCP
 
 O backoffice tem um servidor MCP próprio: a função `mcp` (`supabase/functions/mcp/index.ts`), no endereço
