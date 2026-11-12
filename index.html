@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Celeiro Administradora</title>
+<meta name="description" content="Celeiro Administradora: gestão de grandes estruturas empresariais em energia, imóveis e finanças, operada em uma plataforma própria.">
+<link rel="icon" href="assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: menu em cápsula flutuante, hero escuro com malha fina e o painel da plataforma à direita,
+   grade "bento" para a atuação, abas de produto, níveis de acesso, integrações e simulador. */
+:root{
+  color-scheme: light;
+  --verde:#0F3D2E;
+  --fundo:#061C15;        /* verde quase preto para as áreas de produto */
+  --fundo-2:#0B2A20;      /* superfícies sobre o fundo escuro */
+  --verde-medio:#3F5F53;
+  --ambar:#E3A72F;
+  --nevoa:#F4F6F3;
+  --branco:#FFFFFF;
+  --tinta:#10241C;
+  --linha:#DDE4DF;
+  --linha-escura:rgba(255,255,255,.1);
+  --texto-escuro:#B9CAC2; /* texto secundário sobre fundo escuro */
+  --fonte:"Sora","Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+  --raio:14px;
+  --raio-p:8px;
+  --largura:1180px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--branco);color:var(--tinta);font-family:var(--fonte);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:inherit}
+h1,h2,h3{margin:0;font-weight:600;line-height:1.14;letter-spacing:-.025em;text-wrap:balance}
+p{margin:0}
+section[id]{scroll-margin-top:96px}
+:focus-visible{outline:3px solid var(--ambar);outline-offset:3px;border-radius:6px}
+.wrap{width:100%;max-width:var(--largura);margin:0 auto;padding:0 24px}
+.skip{position:absolute;left:-999px;top:0;background:var(--ambar);color:var(--fundo);padding:10px 16px;font-weight:600;z-index:100}
+.skip:focus{left:12px;top:12px}
+.num{font-variant-numeric:tabular-nums}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:46px;padding:0 20px;border-radius:999px;font:600 14px/1 var(--fonte);text-decoration:none;border:1.5px solid transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.btn svg{width:16px;height:16px;flex:none}
+.btn-ambar{background:var(--ambar);color:var(--fundo)}
+.btn-ambar:hover{background:#EFBB4C}
+.btn-fantasma{border-color:rgba(255,255,255,.3);color:var(--branco)}
+.btn-fantasma:hover{border-color:var(--branco);background:rgba(255,255,255,.06)}
+.btn-verde{background:var(--verde);color:var(--branco)}
+.btn-verde:hover{background:#15503D}
+.btn-p{min-height:40px;padding:0 16px;font-size:13px}
+
+.etiqueta{display:inline-flex;align-items:center;gap:8px;font-weight:500;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--verde-medio)}
+.etiqueta::before{content:"";width:18px;height:8px;background:var(--ambar);transform:skewX(-38deg)}
+.escura .etiqueta{color:var(--texto-escuro)}
+.titulo{font-size:clamp(27px,3.2vw,40px);color:var(--verde)}
+.escura .titulo{color:var(--branco)}
+.apoio{color:var(--verde-medio);max-width:60ch;font-size:15.5px}
+.escura .apoio{color:var(--texto-escuro)}
+.cabeca{display:grid;gap:16px;margin-bottom:44px;justify-items:start}
+.secao{padding:96px 0}
+.nevoa{background:var(--nevoa)}
+.escura{background:var(--fundo);color:var(--branco)}
+.malha{background-image:linear-gradient(var(--linha-escura) 1px,transparent 1px),linear-gradient(90deg,var(--linha-escura) 1px,transparent 1px);background-size:56px 56px}
+
+/* Menu em cápsula */
+.topo{position:sticky;top:0;z-index:50;padding:14px 0;background:linear-gradient(var(--fundo) 55%,rgba(6,28,21,0))}
+.capsula{display:flex;align-items:center;justify-content:space-between;gap:20px;background:rgba(11,42,32,.92);border:1px solid var(--linha-escura);border-radius:999px;padding:8px 10px 8px 22px;color:var(--branco);backdrop-filter:blur(10px);position:relative}
+.capsula .logo img{height:30px;width:auto}
+.nav{display:flex;align-items:center;gap:4px}
+.nav a.item{font-weight:500;font-size:13.5px;text-decoration:none;color:#DCE6E1;padding:9px 14px;border-radius:999px}
+.nav a.item:hover{background:rgba(255,255,255,.08);color:var(--branco)}
+.nav .btn{margin-left:10px}
+.menu-btn{display:none;background:none;border:1px solid rgba(255,255,255,.3);border-radius:50%;color:var(--branco);width:42px;height:42px;cursor:pointer;align-items:center;justify-content:center}
+.menu-btn svg{width:20px;height:20px}
+
+/* Hero */
+.hero{background-color:var(--fundo);color:var(--branco);position:relative;overflow:hidden;margin-top:-78px;padding-top:78px}
+.hero::before{content:"";position:absolute;inset:0;background-image:linear-gradient(var(--linha-escura) 1px,transparent 1px),linear-gradient(90deg,var(--linha-escura) 1px,transparent 1px);background-size:56px 56px;-webkit-mask-image:radial-gradient(ellipse 80% 90% at 70% 30%,#000 20%,transparent 75%);mask-image:radial-gradient(ellipse 80% 90% at 70% 30%,#000 20%,transparent 75%)}
+.hero::after{content:"";position:absolute;right:-12%;top:-30%;width:60%;aspect-ratio:1;background:radial-gradient(circle,rgba(227,167,47,.2),rgba(227,167,47,0) 62%)}
+.hero .wrap{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,10fr) minmax(0,11fr);gap:56px;align-items:center;padding-top:72px;padding-bottom:96px}
+.hero-texto{display:grid;gap:22px;justify-items:start}
+.selo{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--linha-escura);background:rgba(255,255,255,.04);border-radius:999px;padding:7px 14px 7px 8px;font-size:12.5px;color:#DCE6E1}
+.selo b{background:var(--ambar);color:var(--fundo);font-weight:600;border-radius:999px;padding:2px 9px;font-size:11px;letter-spacing:.04em}
+.hero h1{font-size:clamp(34px,4.5vw,56px);font-weight:600;letter-spacing:-.035em;line-height:1.06}
+.hero h1 em{font-style:normal;color:var(--ambar)}
+.hero .lead{font-size:16.5px;color:var(--texto-escuro);max-width:48ch}
+.hero .acoes{display:flex;flex-wrap:wrap;gap:12px}
+.hero-pontos{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:13px;color:var(--texto-escuro);margin-top:6px}
+.hero-pontos span{display:inline-flex;align-items:center;gap:8px}
+.hero-pontos span::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ambar)}
+
+/* Painel ilustrativo */
+.tela{background:var(--fundo-2);border:1px solid rgba(255,255,255,.14);border-radius:var(--raio);box-shadow:0 30px 80px rgba(0,0,0,.45);overflow:hidden;font-size:12px}
+.tela-barra{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--linha-escura);color:var(--texto-escuro)}
+.tela-barra i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.2)}
+.tela-barra span{margin-left:8px;font-size:11.5px}
+.tela-barra .ex{margin-left:auto;border:1px solid rgba(227,167,47,.5);color:var(--ambar);border-radius:999px;padding:2px 10px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
+.tela-corpo{display:grid;grid-template-columns:128px 1fr}
+.tela-lado{border-right:1px solid var(--linha-escura);padding:14px 10px;display:grid;gap:4px;align-content:start}
+.tela-lado span{padding:7px 10px;border-radius:6px;color:var(--texto-escuro)}
+.tela-lado span.at{background:rgba(227,167,47,.14);color:var(--ambar);font-weight:500}
+.tela-main{padding:16px;display:grid;gap:14px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.kpi{background:rgba(255,255,255,.04);border:1px solid var(--linha-escura);border-radius:var(--raio-p);padding:10px 12px;display:grid;gap:2px}
+.kpi small{font-size:10px;color:var(--texto-escuro)}
+.kpi b{white-space:nowrap;font-size:14.5px;font-weight:600;color:var(--branco)}
+.kpi u{text-decoration:none;font-size:10px;color:var(--ambar)}
+.graf{background:rgba(255,255,255,.04);border:1px solid var(--linha-escura);border-radius:var(--raio-p);padding:12px}
+.graf-t{display:flex;justify-content:space-between;color:var(--texto-escuro);font-size:10.5px;margin-bottom:10px}
+.barras{display:grid;grid-template-columns:repeat(12,1fr);gap:6px;align-items:end;height:92px;border-bottom:1px solid var(--linha-escura)}
+.barras i{display:block;background:#2B7450;border-radius:3px 3px 0 0}
+.barras i.d{background:var(--ambar)}
+.quadro{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.col{background:rgba(255,255,255,.04);border:1px solid var(--linha-escura);border-radius:var(--raio-p);padding:10px;display:grid;gap:6px;align-content:start}
+.col small{color:var(--texto-escuro);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.col div{background:var(--fundo);border:1px solid var(--linha-escura);border-radius:6px;padding:7px 8px;color:#DCE6E1;font-size:10.5px;line-height:1.35}
+.col div em{display:block;font-style:normal;color:var(--texto-escuro);font-size:9.5px;margin-top:2px}
+
+/* Faixa de áreas */
+.faixa-areas{background:var(--fundo);border-top:1px solid var(--linha-escura);color:var(--texto-escuro)}
+.faixa-areas .wrap{display:flex;flex-wrap:wrap;gap:10px 28px;justify-content:space-between;padding-top:22px;padding-bottom:22px;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase}
+.faixa-areas span{display:inline-flex;align-items:center;gap:10px}
+.faixa-areas span::before{content:"";width:12px;height:5px;background:var(--ambar);transform:skewX(-38deg)}
+
+/* Bento */
+.bento{display:grid;grid-template-columns:repeat(6,1fr);gap:16px}
+.caixa{border:1px solid var(--linha);border-radius:var(--raio);padding:28px;background:var(--branco);display:grid;gap:12px;align-content:start;position:relative;overflow:hidden}
+.caixa .n{font-size:12px;font-weight:500;letter-spacing:.14em;color:var(--verde-medio)}
+.caixa svg.ic{width:40px;height:40px;color:var(--verde)}
+.caixa h3{font-size:19px;color:var(--verde)}
+.caixa p{font-size:14px;color:var(--verde-medio);max-width:44ch}
+.caixa.g{grid-column:span 3}
+.caixa.m{grid-column:span 2}
+.caixa.forte{background:var(--verde);border-color:var(--verde)}
+.caixa.forte h3{color:var(--branco);font-size:24px}
+.caixa.forte p,.caixa.forte .n{color:#C5D3CC}
+.caixa.forte svg.ic{color:var(--ambar)}
+.caixa.forte::after{content:"";position:absolute;right:-40px;bottom:26px;width:220px;height:40px;background:var(--ambar);transform:skewX(-38deg);opacity:.95}
+.caixa.forte::before{content:"";position:absolute;right:60px;bottom:78px;width:160px;height:18px;background:rgba(255,255,255,.12);transform:skewX(-38deg)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.tags span{font-size:11.5px;border:1px solid var(--linha);border-radius:999px;padding:3px 10px;color:var(--verde-medio)}
+.forte .tags span{border-color:rgba(255,255,255,.22);color:#DCE6E1}
+
+/* Quem somos */
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:start}
+.manifesto{font-size:clamp(20px,2.2vw,27px);line-height:1.4;letter-spacing:-.015em;color:var(--verde);font-weight:500}
+.manifesto + p{margin-top:20px;color:var(--verde-medio);font-size:15.5px}
+.fatos{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--linha);border:1px solid var(--linha);border-radius:var(--raio);overflow:hidden}
+.fato{background:var(--branco);padding:24px;display:grid;gap:4px}
+.fato b{font-size:34px;font-weight:600;color:var(--verde);letter-spacing:-.03em;line-height:1.1}
+.fato span{font-size:13px;color:var(--verde-medio)}
+
+/* Abas da plataforma */
+.abas{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px}
+.aba{font:500 13.5px var(--fonte);padding:10px 18px;border-radius:999px;border:1px solid var(--linha-escura);background:transparent;color:var(--texto-escuro);cursor:pointer}
+.aba:hover{color:var(--branco);border-color:rgba(255,255,255,.3)}
+.aba[aria-selected=true]{background:var(--ambar);border-color:var(--ambar);color:var(--fundo);font-weight:600}
+.painel-aba{background:var(--fundo-2);border:1px solid var(--linha-escura);border-radius:var(--raio);padding:36px;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:48px;align-items:start}
+.painel-aba[hidden]{display:none}
+.painel-aba h3{font-size:26px;margin-bottom:12px}
+.painel-aba p{color:var(--texto-escuro)}
+.lista{list-style:none;margin:0;padding:0;display:grid;gap:0}
+.lista li{display:grid;grid-template-columns:22px 1fr;gap:12px;padding:14px 0;border-bottom:1px solid var(--linha-escura);color:#DCE6E1;font-size:14.5px}
+.lista li:first-child{padding-top:0}
+.lista li::before{content:"";width:14px;height:7px;background:var(--ambar);transform:skewX(-38deg);margin-top:8px}
+.lista small{display:block;color:var(--texto-escuro);font-size:12.5px}
+
+/* Níveis de acesso */
+.niveis{display:grid;gap:10px}
+.nivel{display:grid;grid-template-columns:150px 1fr;gap:20px;align-items:center;border:1px solid var(--linha);border-radius:var(--raio-p);padding:16px 20px;background:var(--branco)}
+.nivel b{font-weight:600;color:var(--verde);font-size:14.5px}
+.nivel span{font-size:13.5px;color:var(--verde-medio)}
+.nivel:nth-child(1){margin-right:18%}
+.nivel:nth-child(2){margin-right:12%;margin-left:3%}
+.nivel:nth-child(3){margin-right:6%;margin-left:6%}
+.nivel:nth-child(4){margin-left:9%}
+.nivel:nth-child(1){border-left:4px solid var(--ambar)}
+.nivel:nth-child(2){border-left:4px solid var(--verde)}
+.nivel:nth-child(3){border-left:4px solid var(--verde-medio)}
+.nivel:nth-child(4){border-left:4px solid #9DB3A9}
+
+/* Integrações */
+.integ{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--linha);border:1px solid var(--linha);border-radius:var(--raio);overflow:hidden}
+.integ div{background:var(--branco);padding:22px 24px;display:grid;gap:4px}
+.integ b{font-weight:600;color:var(--verde);font-size:15px}
+.integ span{font-size:13.5px;color:var(--verde-medio)}
+.obs{font-size:12.5px;color:var(--verde-medio);margin-top:16px}
+
+/* Soluções em linhas */
+.linhas{border-top:1px solid var(--linha)}
+.linha-s{display:grid;grid-template-columns:70px minmax(0,4fr) minmax(0,6fr) auto;gap:28px;align-items:center;padding:26px 8px;border-bottom:1px solid var(--linha);text-decoration:none;transition:background .15s}
+.linha-s:hover{background:var(--nevoa)}
+.linha-s .i{font-size:13px;color:var(--verde-medio);letter-spacing:.1em}
+.linha-s h3{font-size:22px;color:var(--verde)}
+.linha-s p{font-size:14.5px;color:var(--verde-medio)}
+.linha-s .seta{width:44px;height:44px;border-radius:50%;border:1px solid var(--linha);display:grid;place-items:center;color:var(--verde);transition:background .15s,color .15s,border-color .15s}
+.linha-s:hover .seta{background:var(--ambar);border-color:var(--ambar);color:var(--fundo)}
+.linha-s .seta svg{width:18px;height:18px}
+
+/* Simulador */
+.sim{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:56px;align-items:start}
+.sim .nota{font-size:12.5px;color:#93A89E;max-width:46ch}
+.calc{background:var(--fundo-2);border:1px solid var(--linha-escura);border-radius:var(--raio);padding:28px;display:grid;gap:24px}
+.campo{display:grid;gap:10px}
+.campo .l{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.campo label{font-weight:500;font-size:13px;color:var(--texto-escuro)}
+.campo output{font-weight:600;font-size:20px;color:var(--branco)}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;background:rgba(255,255,255,.2);outline-offset:8px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--ambar);border:3px solid var(--fundo-2);box-shadow:0 0 0 1.5px var(--ambar);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--ambar);border:3px solid var(--fundo-2);box-shadow:0 0 0 1.5px var(--ambar);cursor:pointer}
+.prazos{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.prazo{background:rgba(255,255,255,.04);border:1px solid var(--linha-escura);border-radius:var(--raio-p);padding:16px;display:grid;gap:4px}
+.prazo .t{font-weight:600;font-size:13.5px}
+.prazo .r{font-size:11.5px;color:#93A89E}
+.prazo .v{font-weight:600;font-size:clamp(15px,1.6vw,19px);color:var(--ambar)}
+.prazo .b{height:5px;border-radius:3px;background:rgba(255,255,255,.12);margin-top:8px;overflow:hidden}
+.prazo .b i{display:block;height:100%;background:var(--ambar)}
+.calc .fim{font-size:12px;color:#93A89E}
+
+/* App */
+.app{display:grid;grid-template-columns:minmax(0,6fr) minmax(0,5fr);gap:64px;align-items:center}
+.app ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:14px}
+.app li{display:grid;grid-template-columns:22px 1fr;gap:12px;font-size:14.5px;color:var(--verde-medio)}
+.app li::before{content:"";width:14px;height:7px;background:var(--ambar);transform:skewX(-38deg);margin-top:8px}
+.app li b{color:var(--verde);font-weight:600}
+.fone{justify-self:center;width:270px;background:var(--fundo);border-radius:38px;padding:12px;box-shadow:0 30px 70px rgba(15,61,46,.28)}
+.fone-tela{background:var(--verde);border-radius:28px;padding:22px 16px 18px;display:grid;gap:12px;color:var(--branco)}
+.fone-tela img{height:26px;width:auto;margin-bottom:6px}
+.fone-tela .oi{font-size:12px;color:#C5D3CC}
+.fone-tela .tt{font-size:17px;font-weight:600;line-height:1.25;margin-bottom:6px}
+.item-app{background:var(--nevoa);color:var(--verde);border-radius:14px;padding:13px 14px;display:grid;grid-template-columns:34px 1fr 14px;gap:10px;align-items:center;font-weight:600;font-size:13px}
+.item-app svg{width:26px;height:26px}
+.item-app svg:last-child{width:14px;height:14px;color:var(--verde-medio)}
+.fone-nav{display:flex;justify-content:space-around;padding-top:10px;margin-top:4px;border-top:1px solid rgba(255,255,255,.14);font-size:10px;color:#C5D3CC}
+.fone-nav b{color:var(--ambar);font-weight:600}
+
+/* FAQ e contato */
+.faq{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,7fr);gap:56px;align-items:start}
+.busca{position:relative;margin-top:8px}
+.busca svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--verde-medio)}
+.busca input{width:100%;height:46px;padding:0 16px 0 42px;border:1px solid var(--linha);border-radius:999px;font:400 14px var(--fonte);color:var(--tinta);background:var(--branco)}
+.faq-lista{border-top:1px solid var(--linha)}
+.faq-lista details{border-bottom:1px solid var(--linha)}
+.faq-lista summary{list-style:none;cursor:pointer;padding:20px 4px;display:flex;justify-content:space-between;gap:20px;align-items:center;font-weight:600;font-size:15.5px;color:var(--verde)}
+.faq-lista summary::-webkit-details-marker{display:none}
+.faq-lista summary::after{content:"+";flex:none;font-weight:400;font-size:22px;line-height:1;color:var(--verde-medio)}
+.faq-lista details[open] summary::after{content:"–"}
+.faq-lista details p{padding:0 4px 22px;color:var(--verde-medio);max-width:66ch}
+.vazio{color:var(--verde-medio);padding:24px 4px}
+.contato{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:56px;align-items:start}
+.dados{display:grid;gap:10px;margin-top:8px;font-size:14.5px;color:#DCE6E1}
+form.fale{background:var(--fundo-2);border:1px solid var(--linha-escura);border-radius:var(--raio);padding:28px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+form.fale .c{display:grid;gap:6px}
+form.fale .c.larga{grid-column:1/-1}
+form.fale label{font-weight:500;font-size:12.5px;color:var(--texto-escuro)}
+form.fale input,form.fale textarea{font:400 14.5px var(--fonte);color:var(--branco);border:1px solid rgba(255,255,255,.18);border-radius:var(--raio-p);padding:12px 14px;background:rgba(255,255,255,.04);width:100%}
+form.fale textarea{min-height:120px;resize:vertical}
+form.fale input:focus,form.fale textarea:focus{outline:none;border-color:var(--ambar)}
+.busca input:focus{outline:none;border-color:var(--verde);box-shadow:0 0 0 3px rgba(15,61,46,.14)}
+.status{grid-column:1/-1;font-size:13.5px;color:var(--branco);background:rgba(227,167,47,.12);border-left:3px solid var(--ambar);padding:12px 14px;border-radius:0 var(--raio-p) var(--raio-p) 0}
+.status[hidden]{display:none}
+
+.rodape{background:var(--fundo);color:var(--texto-escuro);border-top:1px solid var(--linha-escura);padding:44px 0 28px;font-size:13.5px}
+.rodape .cima{display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap;padding-bottom:28px;border-bottom:1px solid var(--linha-escura)}
+.rodape img{height:34px;width:auto}
+.rodape nav{display:flex;flex-wrap:wrap;gap:8px 24px}
+.rodape a{text-decoration:none;color:#DCE6E1}
+.rodape a:hover{color:var(--ambar)}
+.rodape .baixo{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-top:22px;font-size:12.5px;color:#7F968B}
+
+@media (max-width:1000px){
+  .nav{display:none;position:absolute;left:0;right:0;top:calc(100% + 8px);background:var(--fundo-2);border:1px solid var(--linha-escura);border-radius:20px;flex-direction:column;align-items:stretch;padding:12px}
+  .nav.aberto{display:flex}
+  .nav .btn{margin:8px 0 0}
+  .menu-btn{display:inline-flex}
+  .hero .wrap,.duas,.sim,.app,.faq,.contato,.painel-aba{grid-template-columns:1fr;gap:40px}
+  .caixa.g,.caixa.m{grid-column:span 3}
+  .integ{grid-template-columns:1fr 1fr}
+  .linha-s{grid-template-columns:44px 1fr auto;gap:16px}
+  .linha-s p{grid-column:2/3;grid-row:2}
+  .linha-s .seta{grid-row:1/3;grid-column:3}
+  .nivel{margin-left:0!important;margin-right:0!important}
+}
+@media (max-width:640px){
+  .secao{padding:68px 0}
+  .wrap{padding:0 18px}
+  .caixa.g,.caixa.m{grid-column:span 6}
+  .kpis{grid-template-columns:1fr 1fr}
+  .tela-corpo{grid-template-columns:1fr}
+  .tela-lado{display:none}
+  .integ,.fatos,.prazos,form.fale{grid-template-columns:1fr}
+  .nivel{grid-template-columns:1fr;gap:4px}
+  .painel-aba{padding:24px}
+  .hero .wrap{padding-top:48px;padding-bottom:72px}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+
+/* Área administrativa */
+#painel-admin{display:none;background:var(--nevoa);min-height:100vh;padding-bottom:120px}
+.modo-admin #painel-admin{display:block}
+.modo-admin .topo,.modo-admin main,.modo-admin .rodape{display:none}
+.adm-topo{background:var(--fundo);color:var(--branco);padding:16px 0;margin-bottom:36px}
+.adm-topo .wrap{display:flex;align-items:center;gap:18px}
+.adm-topo img{height:30px;width:auto}
+.adm-topo span{font-weight:500;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--texto-escuro);padding-left:18px;border-left:1px solid var(--linha-escura)}
+.adm-topo a{margin-left:auto}
+.adm-aviso{background:var(--branco);border:1px solid var(--linha);border-left:4px solid var(--ambar);border-radius:var(--raio-p);padding:18px 20px;color:var(--verde);max-width:70ch}
+.adm-abas{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
+.adm-aba{font:500 14px var(--fonte);padding:10px 18px;border-radius:999px;border:1px solid var(--linha);background:var(--branco);color:var(--verde);cursor:pointer}
+.adm-aba[aria-selected=true]{background:var(--verde);border-color:var(--verde);color:var(--branco)}
+.adm-grupo{background:var(--branco);border:1px solid var(--linha);border-radius:var(--raio);padding:24px;margin:0 0 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;min-width:0}
+.adm-grupo legend{font-weight:600;font-size:16px;color:var(--verde);padding:0 8px;margin-left:-8px}
+.adm-c{display:grid;gap:6px;align-content:start}
+.adm-c.larga{grid-column:1/-1}
+.adm-c label,.adm-rot{font-weight:500;font-size:12.5px;color:var(--verde-medio)}
+.adm-c input[type=text],.adm-c input[type=url],.adm-c textarea,.adm-c select{font:400 14.5px var(--fonte);color:var(--tinta);border:1px solid var(--linha);border-radius:var(--raio-p);padding:11px 13px;background:var(--branco);width:100%}
+.adm-c textarea{min-height:84px;resize:vertical}
+.adm-c input:focus,.adm-c textarea:focus,.adm-c select:focus{outline:none;border-color:var(--verde);box-shadow:0 0 0 3px rgba(15,61,46,.14)}
+.adm-barra{position:fixed;left:0;right:0;bottom:0;background:var(--branco);border-top:1px solid var(--linha);padding:14px 0;z-index:40}
+.adm-barra .wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.adm-barra #adm-status{margin-right:auto;font-size:13.5px;color:var(--verde-medio)}
+.btn-linha{border-color:var(--linha);color:var(--verde);background:var(--branco)}
+.btn-linha:hover{border-color:var(--verde)}
+.btn-perigo{border-color:#C9D3CD;color:#8A3A2A;background:var(--branco)}
+.adm-faq-item{background:var(--branco);border:1px solid var(--linha);border-radius:var(--raio);padding:20px;margin-bottom:12px;display:grid;gap:12px}
+.adm-faq-item .l{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.adm-nota{font-size:13px;color:var(--verde-medio);max-width:76ch;margin-bottom:18px}
+.adm-duas{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:20px;align-items:start}
+.adm-cartao{background:var(--branco);border:1px solid var(--linha);border-radius:var(--raio);padding:24px;display:grid;gap:16px}
+.adm-cartao h3{font-size:17px;color:var(--verde)}
+.adm-marcas{display:flex;flex-wrap:wrap;gap:8px 16px}
+.adm-marcas label{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;color:var(--tinta);font-weight:400}
+.adm-marcas input{accent-color:var(--verde);width:16px;height:16px}
+.mcp-item{border:1px solid var(--linha);border-radius:var(--raio-p);padding:16px;display:grid;gap:8px}
+.mcp-item .l{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.mcp-item b{color:var(--verde);font-size:15px}
+.mcp-item code{font-size:12.5px;color:var(--verde-medio);word-break:break-all;font-family:ui-monospace,Menlo,Consolas,monospace}
+.mcp-item p{font-size:13px;color:var(--verde-medio)}
+.pilula{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:3px 10px;background:#E4EEE8;color:var(--verde);white-space:nowrap}
+.pilula.off{background:#EEE9E2;color:#7A6A4F}
+.mcp-acoes{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.btn-mini{min-height:34px;padding:0 14px;font-size:12.5px}
+.adm-vazio{font-size:14px;color:var(--verde-medio);padding:8px 0}
+.adm-erro{font-size:13px;color:#8A3A2A}
+@media (max-width:820px){.adm-grupo,.adm-duas{grid-template-columns:1fr}}
+
+/* Tela de acesso */
+#tela-login{display:none;min-height:100vh;background:var(--fundo);color:var(--branco)}
+.modo-login #tela-login{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr)}
+.modo-login .topo,.modo-login main,.modo-login .rodape{display:none}
+.lg-lado{padding:48px;display:grid;align-content:space-between;gap:40px;position:relative;overflow:hidden;background-image:linear-gradient(var(--linha-escura) 1px,transparent 1px),linear-gradient(90deg,var(--linha-escura) 1px,transparent 1px);background-size:56px 56px}
+.lg-lado::after{content:"";position:absolute;left:-60px;bottom:90px;width:360px;height:54px;background:var(--ambar);transform:skewX(-38deg);opacity:.9}
+.lg-lado img{height:36px;width:auto}
+.lg-lado h1{font-size:clamp(28px,3.2vw,42px);font-weight:600;letter-spacing:-.03em;margin-bottom:18px}
+.lg-lado ul{list-style:none;margin:0;padding:0;display:grid;gap:12px;color:var(--texto-escuro);font-size:14.5px;max-width:40ch}
+.lg-lado li{display:grid;grid-template-columns:22px 1fr;gap:10px}
+.lg-lado li::before{content:"";width:14px;height:7px;background:var(--ambar);transform:skewX(-38deg);margin-top:8px}
+.lg-lado>*{position:relative;z-index:1}
+.lg-lado a{color:#DCE6E1;font-size:13.5px}
+.lg-form{background:var(--nevoa);color:var(--tinta);display:grid;place-items:center;padding:48px 24px}
+.lg-caixa{width:100%;max-width:420px;display:grid;gap:22px}
+.lg-demo{background:#FBF3DF;border:1px solid #E9D49B;border-left:4px solid var(--ambar);border-radius:var(--raio-p);padding:12px 14px;font-size:13px;color:#5B4513}
+.lg-passos{display:flex;gap:8px;list-style:none;margin:0;padding:0;font-size:12.5px;font-weight:500;color:var(--verde-medio)}
+.lg-passos li{flex:1;border-top:3px solid var(--linha);padding-top:8px}
+.lg-passos li.at{border-color:var(--verde);color:var(--verde)}
+.lg-caixa h2{font-size:26px;color:var(--verde)}
+.lg-caixa .sub{color:var(--verde-medio);font-size:14.5px;margin-top:-12px}
+.lg-etapa{display:grid;gap:16px}
+.lg-etapa[hidden]{display:none}
+.lg-c{display:grid;gap:6px}
+.lg-c label{font-weight:500;font-size:12.5px;color:var(--verde)}
+.lg-c input{font:400 15px var(--fonte);color:var(--tinta);border:1px solid var(--linha);border-radius:var(--raio-p);padding:13px 14px;background:var(--branco);width:100%}
+.lg-c input:focus{outline:none;border-color:var(--verde);box-shadow:0 0 0 3px rgba(15,61,46,.14)}
+.lg-senha{position:relative}
+.lg-senha input{padding-right:84px}
+.lg-senha button{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;font:500 12.5px var(--fonte);color:var(--verde);padding:8px 10px;cursor:pointer;border-radius:6px}
+#lg-codigo{font-size:26px;letter-spacing:.5em;text-align:center;font-variant-numeric:tabular-nums;font-weight:600}
+.lg-erro{font-size:13px;color:#8A3A2A}
+.lg-erro[hidden]{display:none}
+.lg-etapa .btn{width:100%}
+.lg-voltar{background:none;border:0;font:500 13.5px var(--fonte);color:var(--verde);cursor:pointer;padding:6px;justify-self:center;text-decoration:underline}
+.lg-ajuda{font-size:13px;color:var(--verde-medio)}
+.lg-cad{background:var(--branco);border:1px solid var(--linha);border-radius:var(--raio);padding:20px;display:grid;gap:14px;justify-items:center}
+.lg-cad[hidden]{display:none}
+.lg-cad ol{margin:0;padding-left:20px;font-size:13.5px;color:var(--verde-medio);justify-self:stretch;display:grid;gap:6px}
+.lg-cad img{width:200px;height:200px;background:#fff;border:1px solid var(--linha);border-radius:8px}
+.lg-cad code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;letter-spacing:.08em;word-break:break-all;color:var(--verde);background:var(--nevoa);padding:8px 10px;border-radius:6px;text-align:center}
+.lg-fim{background:var(--branco);border:1px solid var(--linha);border-radius:var(--raio);padding:22px;display:grid;gap:12px}
+.lg-fim p{font-size:14px;color:var(--verde-medio)}
+@media (max-width:900px){.modo-login #tela-login{grid-template-columns:1fr}.lg-lado{padding:32px 24px}.lg-lado::after{display:none}.lg-lado ul{display:none}}
+
+</style>
+</head>
+<body>
+<a class="skip" href="#conteudo">Pular para o conteúdo</a>
+
+<header class="topo">
+  <div class="wrap">
+    <div class="capsula">
+      <a class="logo" href="#inicio" aria-label="Celeiro Administradora, início"><img src="assets/logo-negativa.png" alt="Celeiro Administradora"></a>
+      <button class="menu-btn" id="menu-btn" aria-expanded="false" aria-controls="nav" aria-label="Abrir menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <nav class="nav" id="nav" aria-label="Principal">
+        <a class="item" href="#atuacao">Atuação</a>
+        <a class="item" href="#plataforma">Plataforma</a>
+        <a class="item" href="#solucoes">Soluções</a>
+        <a class="item" href="#aplicativo">Aplicativo</a>
+        <a class="item" href="#faq">Dúvidas</a>
+        <a class="item" href="#entrar">Entrar</a>
+        <a class="btn btn-ambar btn-p" href="#contato">Fale conosco</a>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<main id="conteudo">
+
+<section class="hero" id="inicio">
+  <div class="wrap">
+    <div class="hero-texto">
+      <p class="selo"><b>Plataforma</b> <span data-c="hero_selo">Gestão, energia, imóveis e finanças</span></p>
+      <h1><span data-c="hero_titulo">Grandes estruturas empresariais,</span> <em data-c="hero_destaque">administradas em um só sistema.</em></h1>
+      <p class="lead" data-c="hero_lead">A Celeiro Administradora reúne energia, geração, incorporação, gestão imobiliária e estruturação financeira, com tudo acompanhado em plataforma própria.</p>
+      <div class="acoes">
+        <a class="btn btn-ambar" href="#contato">Fale com a Celeiro
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="btn btn-fantasma" href="#plataforma">Ver a plataforma</a>
+      </div>
+      <div class="hero-pontos"><span>Módulos por perfil de acesso</span><span>Painel de indicadores</span><span>Aplicativo para clientes</span></div>
+    </div>
+
+    <div class="tela" role="img" aria-label="Exemplo ilustrativo do painel da Plataforma Celeiro, com indicadores, gráfico de arrecadação e quadro de tarefas">
+      <div class="tela-barra"><i></i><i></i><i></i><span>Plataforma Celeiro · Painel</span><span class="ex">Exemplo ilustrativo</span></div>
+      <div class="tela-corpo">
+        <div class="tela-lado"><span class="at">Painel</span><span>Tarefas</span><span>Cadastros</span><span>Financeiro</span><span>Investimentos</span></div>
+        <div class="tela-main">
+          <div class="kpis">
+            <div class="kpi"><small>Arrecadação</small><b class="num">R$ 1,28 mi</b><u>no mês</u></div>
+            <div class="kpi"><small>Economia de energia</small><b class="num">14,6%</b><u>média</u></div>
+            <div class="kpi"><small>Inadimplência</small><b class="num">3,2%</b><u>da carteira</u></div>
+            <div class="kpi"><small>Pendências</small><b class="num">7</b><u>com prazo</u></div>
+          </div>
+          <div class="graf">
+            <div class="graf-t"><span>Arrecadação mensal</span><span>12 meses</span></div>
+            <div class="barras"><i style="height:38%"></i><i style="height:46%"></i><i style="height:42%"></i><i style="height:55%"></i><i style="height:51%"></i><i style="height:63%"></i><i style="height:60%"></i><i style="height:72%"></i><i style="height:68%"></i><i style="height:81%"></i><i style="height:86%"></i><i class="d" style="height:96%"></i></div>
+          </div>
+          <div class="quadro">
+            <div class="col"><small>A fazer</small><div>Validar cadastro CNPJ<em>Prazo em 2 dias</em></div></div>
+            <div class="col"><small>Em andamento</small><div>Conciliar recebimentos<em>Financeiro</em></div><div>Emitir faturas<em>Energia</em></div></div>
+            <div class="col"><small>Concluído</small><div>Nota fiscal emitida<em>Hoje</em></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="faixa-areas">
+  <div class="wrap"><span>Energia</span><span>Geração</span><span>Incorporação</span><span>Gestão imobiliária</span><span>Estruturação financeira</span><span>Cobranças</span></div>
+</div>
+
+<section class="secao nevoa" id="atuacao">
+  <div class="wrap">
+    <div class="cabeca">
+      <p class="etiqueta">Áreas de atuação</p>
+      <h2 class="titulo">Seis frentes sob a mesma gestão.</h2>
+      <p class="apoio">Operações de energia, imóveis e finanças administradas em conjunto, com os mesmos cadastros, cobranças e indicadores.</p>
+    </div>
+    <div class="bento">
+      <article class="caixa g forte">
+        <p class="n">01 · ENERGIA</p>
+        <svg class="ic" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M27 4 10 27h12l-3 17 19-25H25z"/></svg>
+        <h3 data-c="atu1_t">Comercialização de energia</h3>
+        <p data-c="atu1_d">Compra e venda de energia elétrica para empresas e grandes consumidores.</p>
+        <div class="tags"><span>Empresas</span><span>Grandes consumidores</span></div>
+      </article>
+      <article class="caixa g">
+        <p class="n">02 · GERAÇÃO</p>
+        <svg class="ic" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M10 18h28l5 20H5zM24 18v20M8 28h32M17 18l-3 20M31 18l3 20"/><circle cx="24" cy="8" r="3"/></svg>
+        <h3 data-c="atu2_t">Unidades geradoras</h3>
+        <p data-c="atu2_d">Construção de unidades de geração de energia.</p>
+      </article>
+      <article class="caixa m">
+        <p class="n">03 · CONSTRUÇÃO</p>
+        <svg class="ic" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M8 42V14l14-8v36M22 20l18 6v16M4 42h40M13 20v2M13 28v2M13 36v2M29 30v2M35 32v2"/></svg>
+        <h3 data-c="atu3_t">Incorporação e construção</h3>
+        <p data-c="atu3_d">Desenvolvimento e execução de empreendimentos imobiliários.</p>
+      </article>
+      <article class="caixa m">
+        <p class="n">04 · PATRIMÔNIO</p>
+        <svg class="ic" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M6 22 24 8l18 14M10 20v20h28V20M19 40V28h10v12"/></svg>
+        <h3 data-c="atu4_t">Gestão de ativos imobiliários</h3>
+        <p data-c="atu4_d">Administração e acompanhamento de patrimônio imobiliário.</p>
+      </article>
+      <article class="caixa m">
+        <p class="n">05 · FINANÇAS</p>
+        <svg class="ic" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M6 40h36M10 34V24M19 34V16M28 34V20M37 34V8"/></svg>
+        <h3 data-c="atu5_t">Estruturação financeira</h3>
+        <p data-c="atu5_d">Operações financeiras, financiamentos e captação de recursos.</p>
+      </article>
+      <article class="caixa" style="grid-column:1/-1;grid-template-columns:auto 1fr;column-gap:24px;align-items:center">
+        <svg class="ic" style="grid-row:1/4" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M8 20v8h6l14 9V11l-14 9zM34 18a8 8 0 0 1 0 12M39 13a15 15 0 0 1 0 22"/></svg>
+        <p class="n">06 · RELACIONAMENTO</p>
+        <h3 data-c="atu6_t">Cobranças e divulgação</h3>
+        <p data-c="atu6_d">Gestão de cobranças e divulgação de produtos e serviços.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="secao" id="quem-somos">
+  <div class="wrap duas">
+    <div>
+      <p class="etiqueta" style="margin-bottom:20px">Quem somos</p>
+      <p class="manifesto" data-c="quem_manifesto">A Celeiro Administradora tem como missão promover a gestão e a administração de grandes estruturas empresariais.</p>
+      <p data-c="quem_texto">Atuamos na comercialização de energia, na construção de unidades geradoras, na incorporação, construção e gestão imobiliária, na estruturação financeira, em cobranças e na divulgação de produtos e serviços.</p>
+    </div>
+    <div class="fatos">
+      <div class="fato"><b class="num">6</b><span>áreas de atuação</span></div>
+      <div class="fato"><b class="num">5</b><span>módulos na plataforma</span></div>
+      <div class="fato"><b class="num">4</b><span>níveis de acesso</span></div>
+      <div class="fato"><b class="num">3</b><span>soluções no aplicativo</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="secao escura malha" id="plataforma">
+  <div class="wrap">
+    <div class="cabeca">
+      <p class="etiqueta">Plataforma Celeiro</p>
+      <h2 class="titulo">Um software de gestão montado em módulos.</h2>
+      <p class="apoio">Cada módulo é habilitado conforme a operação do cliente. Escolha um para ver o que ele faz.</p>
+    </div>
+    <div class="abas" role="tablist" aria-label="Módulos da plataforma">
+      <button class="aba" role="tab" id="aba-painel" aria-controls="p-painel" aria-selected="true">Painel</button>
+      <button class="aba" role="tab" id="aba-tarefas" aria-controls="p-tarefas" aria-selected="false" tabindex="-1">Tarefas</button>
+      <button class="aba" role="tab" id="aba-cadastros" aria-controls="p-cadastros" aria-selected="false" tabindex="-1">Cadastros</button>
+      <button class="aba" role="tab" id="aba-financeiro" aria-controls="p-financeiro" aria-selected="false" tabindex="-1">Financeiro</button>
+      <button class="aba" role="tab" id="aba-investimentos" aria-controls="p-investimentos" aria-selected="false" tabindex="-1">Investimentos</button>
+    </div>
+    <div class="painel-aba" role="tabpanel" id="p-painel" aria-labelledby="aba-painel">
+      <div><h3>Painel de indicadores</h3><p>Visão do desempenho da operação em uma tela, atualizada com os dados dos outros módulos.</p></div>
+      <ul class="lista"><li><div>Arrecadação</div></li><li><div>Economia de energia</div></li><li><div>Usuários inadimplentes</div></li><li><div>Pendências do fluxo de tarefas<small>Com nome do responsável e prazo</small></div></li></ul>
+    </div>
+    <div class="painel-aba" role="tabpanel" id="p-tarefas" aria-labelledby="aba-tarefas" hidden>
+      <div><h3>Fluxo de tarefas</h3><p>Quadro no formato kanban para acompanhar o que está a fazer, em andamento e concluído.</p></div>
+      <ul class="lista"><li><div>Criação de tarefa a partir de qualquer tela do sistema</div></li><li><div>Marcação dos usuários envolvidos ou responsáveis</div></li><li><div>Prazos visíveis no painel</div></li></ul>
+    </div>
+    <div class="painel-aba" role="tabpanel" id="p-cadastros" aria-labelledby="aba-cadastros" hidden>
+      <div><h3>Cadastros</h3><p>Empresas, pessoas e produtos em uma base única, com os documentos anexados a cada registro.</p></div>
+      <ul class="lista"><li><div>Cadastro de empresas (CNPJ)<small>Responsável legal, responsável financeiro e contatos</small></div></li><li><div>Cadastro de pessoas (CPF)</div></li><li><div>Produtos<small>Energia, financiamento e captação de recursos</small></div></li><li><div>Envio de arquivos vinculado ao cadastro</div></li></ul>
+    </div>
+    <div class="painel-aba" role="tabpanel" id="p-financeiro" aria-labelledby="aba-financeiro" hidden>
+      <div><h3>Financeiro</h3><p>Da emissão da cobrança ao fluxo de caixa, no mesmo lugar.</p></div>
+      <ul class="lista"><li><div>Emissão de faturas</div></li><li><div>Boletos e Pix cobrança</div></li><li><div>Conciliação financeira</div></li><li><div>Fluxo de caixa realizado e projetado<small>Contas a pagar e contas a receber</small></div></li><li><div>Emissão de nota fiscal</div></li></ul>
+    </div>
+    <div class="painel-aba" role="tabpanel" id="p-investimentos" aria-labelledby="aba-investimentos" hidden>
+      <div><h3>Investimentos</h3><p>Acompanhamento da evolução patrimonial de cada cliente.</p></div>
+      <ul class="lista"><li><div>Vínculo a um CNPJ ou CPF</div></li><li><div>Tipo de investimento</div></li><li><div>Taxa de correção</div></li><li><div>Evolução patrimonial</div></li></ul>
+    </div>
+  </div>
+</section>
+
+<section class="secao" id="acessos">
+  <div class="wrap duas" style="align-items:center">
+    <div class="cabeca" style="margin:0">
+      <p class="etiqueta">Perfis e permissões</p>
+      <h2 class="titulo">Cada pessoa vê só o que precisa ver.</h2>
+      <p class="apoio">A plataforma separa a gestão da Celeiro e a operação de cada cliente. A empresa cliente administra os próprios usuários.</p>
+    </div>
+    <div class="niveis">
+      <div class="nivel"><b>Master</b><span>Alta gestão. Habilita os módulos de cada conta.</span></div>
+      <div class="nivel"><b>Gerencial</b><span>Equipe Celeiro, com acesso aos módulos liberados.</span></div>
+      <div class="nivel"><b>Cliente master</b><span>Vê todos os dados da sua organização e cadastra operadores.</span></div>
+      <div class="nivel"><b>Cliente operador</b><span>Acessa o que o cliente master permitir.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="secao nevoa" id="integracoes">
+  <div class="wrap">
+    <div class="cabeca">
+      <p class="etiqueta">Integrações</p>
+      <h2 class="titulo">Conectada aos sistemas que a operação usa.</h2>
+    </div>
+    <div class="integ">
+      <div><b>Receita Federal</b><span>Validação dos dados cadastrais de CNPJ e CPF.</span></div>
+      <div><b>SEFAZ</b><span>Emissão de nota fiscal.</span></div>
+      <div><b>Instituição financeira</b><span>Boletos, Pix cobrança e conta digital.</span></div>
+      <div><b>gov.br</b><span>Cadastro e reconhecimento de assinatura.</span></div>
+      <div><b>Google e Apple</b><span>Entrada com a conta que a pessoa já usa.</span></div>
+      <div><b>Assistentes de IA</b><span>Conexão MCP com permissão por usuário e módulo.</span></div>
+    </div>
+    <p class="obs">Integrações previstas no projeto da plataforma. A disponibilidade de cada uma é confirmada pela equipe Celeiro.</p>
+  </div>
+</section>
+
+<section class="secao" id="solucoes">
+  <div class="wrap">
+    <div class="cabeca">
+      <p class="etiqueta">Soluções Celeiro</p>
+      <h2 class="titulo">Três soluções na tela de início do aplicativo.</h2>
+    </div>
+    <div class="linhas">
+      <a class="linha-s" href="#contato"><span class="i">01</span><h3 data-c="sol1_t">Aquisição Veicular</h3><p data-c="sol1_d">Soluções para a aquisição de veículos, com acompanhamento da Celeiro em cada etapa.</p><span class="seta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg></span></a>
+      <a class="linha-s" href="#simulador"><span class="i">02</span><h3 data-c="sol2_t">Energia com Desconto</h3><p data-c="sol2_d">Desconto na conta de energia a partir das operações de comercialização e geração da Celeiro.</p><span class="seta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg></span></a>
+      <a class="linha-s" href="#contato"><span class="i">03</span><h3 data-c="sol3_t">Conta digital</h3><p data-c="sol3_d">Abra sua conta digital pelo aplicativo e concentre pagamentos e recebimentos em um só lugar.</p><span class="seta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg></span></a>
+    </div>
+    <p class="obs">Disponibilidade e condições de cada solução são informadas pela equipe Celeiro no atendimento.</p>
+  </div>
+</section>
+
+<section class="secao escura" id="simulador">
+  <div class="wrap sim">
+    <div style="display:grid;gap:16px;align-content:start;justify-items:start">
+      <p class="etiqueta">Simulador</p>
+      <h2 class="titulo">Quanto a conta de energia pode reduzir?</h2>
+      <p class="apoio">Ajuste o valor da conta e o percentual de desconto para comparar a economia em três prazos.</p>
+      <p class="nota">Simulação ilustrativa. O percentual é hipotético e não representa oferta nem desconto garantido pela Celeiro. Valores sem impostos, bandeiras tarifárias ou reajustes.</p>
+    </div>
+    <div class="calc">
+      <div class="campo"><div class="l"><label for="sim-conta">Conta mensal de energia</label><output class="num" id="sim-conta-v" for="sim-conta">R$ 5.000,00</output></div><input type="range" id="sim-conta" min="500" max="50000" step="500" value="5000"></div>
+      <div class="campo"><div class="l"><label for="sim-desc">Desconto hipotético</label><output class="num" id="sim-desc-v" for="sim-desc">15%</output></div><input type="range" id="sim-desc" min="5" max="30" step="1" value="15"></div>
+      <div class="prazos" aria-live="polite">
+        <div class="prazo"><p class="t">12 meses</p><p class="r">Economia acumulada</p><p class="v num" id="sim-12">R$ 9.000,00</p><div class="b"><i style="width:33.3%"></i></div></div>
+        <div class="prazo"><p class="t">24 meses</p><p class="r">Economia acumulada</p><p class="v num" id="sim-24">R$ 18.000,00</p><div class="b"><i style="width:66.6%"></i></div></div>
+        <div class="prazo"><p class="t">36 meses</p><p class="r">Economia acumulada</p><p class="v num" id="sim-36">R$ 27.000,00</p><div class="b"><i style="width:100%"></i></div></div>
+      </div>
+      <p class="fim">Economia = conta mensal × desconto × número de meses. A conta com desconto ficaria em <strong class="num" id="sim-nova" style="color:#fff">R$ 4.250,00</strong> por mês.</p>
+    </div>
+  </div>
+</section>
+
+<section class="secao nevoa" id="aplicativo">
+  <div class="wrap app">
+    <div style="display:grid;gap:16px;justify-items:start">
+      <p class="etiqueta">Aplicativo Celeiro</p>
+      <h2 class="titulo">A Celeiro no celular do cliente.</h2>
+      <p class="apoio">O aplicativo leva as soluções e os conteúdos da Celeiro para quem está cadastrado.</p>
+      <ul>
+        <li><span><b>Soluções na tela de início.</b> Aquisição Veicular, Energia com Desconto e conta digital.</span></li>
+        <li><span><b>Área de vídeos.</b> Conteúdos publicados pela Celeiro, com descrição de cada vídeo.</span></li>
+        <li><span><b>Coleta de assinaturas.</b> Abaixo-assinado com reconhecimento de assinatura pelo gov.br.</span></li>
+        <li><span><b>Cadastro simples.</b> E-mail e senha, conta Google ou gov.br.</span></li>
+      </ul>
+      <a class="btn btn-verde" href="#contato" style="margin-top:10px">Avise-me do lançamento</a>
+    </div>
+    <div class="fone" role="img" aria-label="Ilustração da tela de início do aplicativo Celeiro com as três soluções">
+      <div class="fone-tela">
+        <img src="assets/logo-negativa.png" alt="">
+        <p class="oi">Bem-vindo</p>
+        <p class="tt">O que você procura hoje?</p>
+        <div class="item-app"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><path d="M6 30v-7l5-11h22l7 11h2v7zM6 23h36"/><circle cx="14" cy="32" r="4"/><circle cx="34" cy="32" r="4"/></svg>Aquisição Veicular<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
+        <div class="item-app"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"><path d="M27 4 10 27h12l-3 17 19-25H25z"/></svg>Energia com Desconto<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
+        <div class="item-app"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><rect x="5" y="11" width="38" height="26" rx="3"/><path d="M5 19h38M11 30h9"/></svg>Abra sua conta digital<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
+        <div class="fone-nav"><b>Início</b><span>Vídeos</span><span>Assinaturas</span><span>Perfil</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="secao" id="faq">
+  <div class="wrap faq">
+    <div style="display:grid;gap:16px;justify-items:start;align-content:start">
+      <p class="etiqueta">Perguntas frequentes</p>
+      <h2 class="titulo">Dúvidas comuns.</h2>
+      <div class="busca" style="width:100%">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <input type="search" id="faq-busca" placeholder="Buscar perguntas" aria-label="Buscar perguntas">
+      </div>
+    </div>
+    <div>
+      <div class="faq-lista" id="faq-lista">
+        <details open><summary>O que é a Celeiro Administradora?</summary><p>É uma administradora voltada à gestão e administração de grandes estruturas empresariais, com atuação em energia, imóveis e finanças.</p></details>
+        <details><summary>Em quais áreas a Celeiro atua?</summary><p>Comercialização de energia, construção de unidades geradoras, incorporação, construção e gestão imobiliária, estruturação financeira, cobranças e divulgação de produtos e serviços.</p></details>
+        <details><summary>O que é a Plataforma Celeiro?</summary><p>É o software de gestão da Celeiro, organizado em módulos: painel de indicadores, fluxo de tarefas, cadastros, financeiro e investimentos.</p></details>
+        <details><summary>Minha empresa pode ter vários usuários?</summary><p>Sim. O usuário principal da empresa acessa todos os dados da organização e cadastra operadores com níveis de permissão diferentes.</p></details>
+        <details><summary>Quais soluções estão no aplicativo?</summary><p>A tela de início reúne Aquisição Veicular, Energia com Desconto e a abertura da conta digital.</p></details>
+        <details><summary>O desconto mostrado no simulador é garantido?</summary><p>Não. O simulador é ilustrativo e usa um percentual hipotético escolhido por você. As condições reais são informadas pela equipe Celeiro no atendimento.</p></details>
+        <details><summary>Como é feito o cadastro no aplicativo?</summary><p>Com e-mail e senha, com uma conta Google ou pelo gov.br.</p></details>
+      </div>
+      <p class="vazio" id="faq-vazio" hidden>Nenhuma pergunta encontrada. Tente outra palavra ou escreva para a equipe pelo formulário abaixo.</p>
+    </div>
+  </div>
+</section>
+
+<section class="secao escura malha" id="contato">
+  <div class="wrap contato">
+    <div style="display:grid;gap:16px;justify-items:start;align-content:start">
+      <p class="etiqueta">Fale conosco</p>
+      <h2 class="titulo">Conte o que a sua empresa precisa.</h2>
+      <p class="apoio">Nossa equipe retorna o contato.</p>
+      <div class="dados"><span data-c="tel">[TELEFONE]</span><span data-c="email">[E-MAIL]</span><span data-c="end">[ENDEREÇO]</span></div>
+    </div>
+    <form class="fale" id="form-contato" novalidate>
+      <div class="c"><label for="f-nome">Nome</label><input id="f-nome" name="nome" autocomplete="name" required></div>
+      <div class="c"><label for="f-empresa">Empresa</label><input id="f-empresa" name="empresa" autocomplete="organization"></div>
+      <div class="c"><label for="f-email">E-mail</label><input id="f-email" name="email" type="email" autocomplete="email" required></div>
+      <div class="c"><label for="f-tel">Telefone</label><input id="f-tel" name="telefone" type="tel" autocomplete="tel"></div>
+      <div class="c larga"><label for="f-msg">Mensagem</label><textarea id="f-msg" name="mensagem" required></textarea></div>
+      <div class="c larga" style="justify-items:start"><button class="btn btn-ambar" type="submit">Enviar mensagem</button></div>
+      <p class="status" id="form-status" role="status" hidden></p>
+    </form>
+  </div>
+</section>
+
+</main>
+
+<footer class="rodape">
+  <div class="wrap">
+    <div class="cima">
+      <img src="assets/logo-negativa.png" alt="Celeiro Administradora">
+      <nav aria-label="Rodapé"><a href="#atuacao">Atuação</a><a href="#quem-somos">Quem somos</a><a href="#plataforma">Plataforma</a><a href="#solucoes">Soluções</a><a href="#aplicativo">Aplicativo</a><a href="#faq">Dúvidas</a><a href="#contato">Contato</a></nav>
+    </div>
+    <div class="baixo"><span><span data-c="cnpj">[CNPJ]</span> · Celeiro Administradora</span><span>© 2026 Celeiro Administradora. Todos os direitos reservados. <a href="#admin" id="link-admin" style="margin-left:14px;color:#E3A72F">Área administrativa</a></span></div>
+  </div>
+</footer>
+
+
+<section id="tela-login" aria-label="Acesso à Plataforma Celeiro">
+  <div class="lg-lado">
+    <img src="assets/logo-negativa.png" alt="Celeiro Administradora">
+    <div>
+      <h1>Acesso à Plataforma Celeiro</h1>
+      <ul>
+        <li>Entrada em duas etapas: senha e código do aplicativo Google Authenticator.</li>
+        <li>O código muda a cada 30 segundos e só existe no seu celular.</li>
+        <li>Cada pessoa acessa apenas os módulos liberados para o seu perfil.</li>
+      </ul>
+    </div>
+    <a href="#inicio">Voltar ao site</a>
+  </div>
+  <div class="lg-form">
+    <div class="lg-caixa">
+      <ol class="lg-passos" aria-label="Etapas do acesso">
+        <li id="lg-p1" class="at">1. E-mail e senha</li>
+        <li id="lg-p2">2. Código de verificação</li>
+      </ol>
+
+      <form class="lg-etapa" id="lg-etapa1" novalidate>
+        <h2>Entrar</h2>
+        <p class="sub">Use o e-mail cadastrado na plataforma.</p>
+        <div class="lg-c"><label for="lg-email">E-mail</label><input type="email" id="lg-email" autocomplete="username" inputmode="email"></div>
+        <div class="lg-c"><label for="lg-senha">Senha</label>
+          <div class="lg-senha"><input type="password" id="lg-senha" autocomplete="current-password"><button type="button" id="lg-ver" aria-pressed="false">Mostrar</button></div></div>
+        <p class="lg-erro" id="lg-erro1" role="alert" hidden></p>
+        <button class="btn btn-verde" type="submit">Continuar</button>
+        <p class="lg-ajuda">Esqueceu a senha? Peça a redefinição ao administrador da sua conta.</p>
+      </form>
+
+      <form class="lg-etapa" id="lg-etapa2" novalidate hidden>
+        <h2 id="lg-t2">Código de verificação</h2>
+        <p class="sub" id="lg-s2">Abra o Google Authenticator no celular e digite o código de 6 dígitos da conta Celeiro.</p>
+        <div class="lg-cad" id="lg-cad" hidden>
+          <ol>
+            <li>Abra o Google Authenticator e toque em <strong>+</strong>, depois em <strong>Ler código QR</strong>.</li>
+            <li>Aponte a câmera para o código abaixo.</li>
+            <li>Digite o código de 6 dígitos que o aplicativo mostrar.</li>
+          </ol>
+          <img id="lg-qr" alt="Código QR para cadastrar no Google Authenticator" width="200" height="200">
+          <p class="lg-ajuda">Não consegue ler o código? Escolha "Inserir chave de configuração" no aplicativo e digite:</p>
+          <code id="lg-segredo"></code>
+        </div>
+        <div class="lg-c"><label for="lg-codigo">Código de 6 dígitos</label><input type="text" id="lg-codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"></div>
+        <p class="lg-erro" id="lg-erro2" role="alert" hidden></p>
+        <button class="btn btn-verde" type="submit">Verificar e entrar</button>
+        <p class="lg-ajuda">Sem acesso ao celular? Fale com o administrador da sua conta para redefinir a verificação.</p>
+        <button class="lg-voltar" type="button" id="lg-volta">Sair e voltar ao início</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section id="painel-admin" aria-label="Área administrativa">
+  <div class="adm-topo"><div class="wrap">
+    <img src="assets/logo-negativa.png" alt="Celeiro Administradora">
+    <span>Área administrativa</span>
+    <a class="btn btn-fantasma btn-p" href="#inicio">Ver o site</a>
+    <button class="btn btn-fantasma btn-p" type="button" id="adm-sair">Sair</button>
+  </div></div>
+  <div class="wrap">
+    <p class="adm-aviso" id="adm-aviso" role="status">Carregando a área administrativa…</p>
+    <div id="adm-corpo" hidden>
+      <div class="adm-abas" role="tablist" aria-label="Seções da área administrativa">
+        <button class="adm-aba" type="button" role="tab" data-aba="conteudo" aria-selected="true">Conteúdo do site</button>
+        <button class="adm-aba" type="button" role="tab" data-aba="duvidas" aria-selected="false">Dúvidas frequentes</button>
+        <button class="adm-aba" type="button" role="tab" data-aba="mcp" aria-selected="false">Conexões MCP</button>
+      </div>
+
+      <div id="adm-conteudo">
+        <p class="adm-nota">Edite os textos e clique em Salvar alterações. O site é atualizado para todos os visitantes logo em seguida. Campo vazio volta ao texto original.</p>
+        <form id="adm-form" novalidate></form>
+      </div>
+
+      <div id="adm-duvidas" hidden>
+        <p class="adm-nota">Perguntas e respostas da seção Dúvidas. A ordem aqui é a ordem no site.</p>
+        <div id="adm-faq"></div>
+        <button class="btn btn-linha btn-p" type="button" id="adm-faq-add">Adicionar pergunta</button>
+      </div>
+
+      <div id="adm-mcp" hidden>
+        <p class="adm-nota">Cadastro das conexões MCP da Celeiro: qual servidor, quais módulos ele alcança e quais perfis podem usá-lo. Este cadastro guarda a configuração. Não registre senhas, tokens ou chaves aqui.</p>
+        <div class="adm-duas">
+          <form class="adm-cartao" id="mcp-form" novalidate>
+            <h3>Nova conexão</h3>
+            <div class="adm-c"><label for="mcp-nome">Nome</label><input type="text" id="mcp-nome" maxlength="80" placeholder="Ex.: Assistente financeiro"></div>
+            <div class="adm-c"><label for="mcp-url">Endereço do servidor MCP</label><input type="url" id="mcp-url" maxlength="300" placeholder="https://"></div>
+            <div class="adm-c"><label for="mcp-desc">Para que serve</label><textarea id="mcp-desc" maxlength="400"></textarea></div>
+            <div class="adm-c"><span class="adm-rot">Módulos liberados</span>
+              <div class="adm-marcas" id="mcp-modulos">
+                <label><input type="checkbox" id="mcp-m-site" value="Site"> Site</label>
+                <label><input type="checkbox" id="mcp-m-painel" value="Painel"> Painel</label>
+                <label><input type="checkbox" id="mcp-m-tarefas" value="Tarefas"> Tarefas</label>
+                <label><input type="checkbox" id="mcp-m-cadastros" value="Cadastros"> Cadastros</label>
+                <label><input type="checkbox" id="mcp-m-financeiro" value="Financeiro"> Financeiro</label>
+                <label><input type="checkbox" id="mcp-m-investimentos" value="Investimentos"> Investimentos</label>
+              </div></div>
+            <div class="adm-c"><span class="adm-rot">Perfis que podem usar</span>
+              <div class="adm-marcas" id="mcp-perfis">
+                <label><input type="checkbox" id="mcp-p-master" value="Master"> Master</label>
+                <label><input type="checkbox" id="mcp-p-gerencial" value="Gerencial"> Gerencial</label>
+                <label><input type="checkbox" id="mcp-p-cmaster" value="Cliente master"> Cliente master</label>
+                <label><input type="checkbox" id="mcp-p-coperador" value="Cliente operador"> Cliente operador</label>
+              </div></div>
+            <div class="adm-c"><label for="mcp-acesso">Tipo de acesso</label>
+              <select id="mcp-acesso"><option value="Somente leitura">Somente leitura</option><option value="Leitura e escrita">Leitura e escrita</option></select></div>
+            <p class="adm-erro" id="mcp-erro" role="alert" hidden></p>
+            <button class="btn btn-verde" type="submit">Cadastrar conexão</button>
+          </form>
+          <div style="display:grid;gap:20px">
+            <div class="adm-cartao">
+              <h3>Conexões cadastradas</h3>
+              <div id="mcp-lista" style="display:grid;gap:12px"><p class="adm-vazio">Carregando…</p></div>
+            </div>
+            <div class="adm-cartao" style="display:none">
+              <h3>Conexão desta página</h3>
+              <p class="adm-nota" style="margin:0">O conteúdo do site fica em um repositório de dados ligado a esta página. O Claude alcança esse repositório por MCP, então os textos também podem ser atualizados por conversa.</p>
+              <div id="mcp-teste" style="display:grid;gap:8px"></div>
+              <button class="btn btn-linha btn-p" type="button" id="mcp-verificar" style="justify-self:start">Verificar conexão</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="adm-barra" id="adm-barra" hidden><div class="wrap">
+    <span id="adm-status" role="status"></span>
+    <button class="btn btn-perigo btn-p" type="button" id="adm-restaurar">Restaurar textos originais</button>
+    <button class="btn btn-verde btn-p" type="button" id="adm-salvar">Salvar alterações</button>
+  </div></div>
+</section>
+
+
+<script>
+(function(){
+  var btn=document.getElementById('menu-btn'),nav=document.getElementById('nav');
+  btn.addEventListener('click',function(){var a=nav.classList.toggle('aberto');btn.setAttribute('aria-expanded',a);});
+  nav.addEventListener('click',function(e){if(e.target.closest('a')){nav.classList.remove('aberto');btn.setAttribute('aria-expanded','false');}});
+
+  /* Abas da plataforma */
+  var abas=[].slice.call(document.querySelectorAll('.aba'));
+  function abrir(a){
+    abas.forEach(function(x){var s=x===a;x.setAttribute('aria-selected',s);x.tabIndex=s?0:-1;document.getElementById(x.getAttribute('aria-controls')).hidden=!s;});
+  }
+  abas.forEach(function(a,i){
+    a.addEventListener('click',function(){abrir(a);});
+    a.addEventListener('keydown',function(e){
+      if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft')return;
+      var n=abas[(i+(e.key==='ArrowRight'?1:abas.length-1))%abas.length];abrir(n);n.focus();
+    });
+  });
+
+  /* Simulador */
+  var brl=new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'});
+  var conta=document.getElementById('sim-conta'),desc=document.getElementById('sim-desc');
+  function sim(){
+    var v=+conta.value,d=+desc.value;
+    document.getElementById('sim-conta-v').textContent=brl.format(v);
+    document.getElementById('sim-desc-v').textContent=d+'%';
+    [12,24,36].forEach(function(m){document.getElementById('sim-'+m).textContent=brl.format(v*(d/100)*m);});
+    document.getElementById('sim-nova').textContent=brl.format(v*(1-d/100));
+  }
+  conta.addEventListener('input',sim);desc.addEventListener('input',sim);sim();
+
+  /* Busca nas perguntas */
+  var busca=document.getElementById('faq-busca');
+  function norm(s){return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');}
+  busca.addEventListener('input',function(){
+    var q=norm(busca.value.trim()),n=0,itens=[].slice.call(document.querySelectorAll('#faq-lista details'));
+    itens.forEach(function(d){var ok=!q||norm(d.textContent).indexOf(q)>-1;d.hidden=!ok;if(ok)n++;});
+    document.getElementById('faq-vazio').hidden=n>0;
+  });
+
+  /* Formulário: ainda sem canal de envio */
+  var form=document.getElementById('form-contato'),st=document.getElementById('form-status');
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var falta=['f-nome','f-email','f-msg'].filter(function(id){return !document.getElementById(id).value.trim();});
+    st.hidden=false;
+    if(falta.length){st.textContent='Preencha nome, e-mail e mensagem para continuar.';document.getElementById(falta[0]).focus();return;}
+    st.textContent='Mensagem não enviada: este formulário ainda não está ligado a um canal de atendimento. A ligação será feita na publicação do site.';
+  });
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.104.1"></script>
+<script src="config.js"></script>
+<script>
+/* Ligação com o Supabase: sessão, login em duas etapas e dados do site.
+   Este bloco precisa rodar antes do bloco da área administrativa. */
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  var cfg=window.CELEIRO_CONFIG||{};
+  var configurado=!!(cfg.url&&cfg.anonKey&&!/COLE_AQUI/.test(String(cfg.url)+String(cfg.anonKey))&&window.supabase&&window.supabase.createClient);
+  var sb=configurado?window.supabase.createClient(cfg.url,cfg.anonKey):null;
+
+  function nivel(){
+    if(!sb)return Promise.resolve(null);
+    return sb.auth.mfa.getAuthenticatorAssuranceLevel().then(function(r){return r&&r.data?r.data.currentLevel:null;}).catch(function(){return null;});
+  }
+
+  /* ---------- dados do site: mesma interface usada pela área administrativa ---------- */
+  function erroDb(e){
+    var negado=e&&(e.code==='42501'||e.code==='PGRST301'||e.status===401||e.status===403);
+    return {code:negado?'invalid_argument':'unavailable',message:(e&&e.message)||''};
+  }
+  var ouvC=[],ouvM=[];
+  function lerConteudo(){
+    return sb.from('site_conteudo').select('dados').eq('id','principal').maybeSingle().then(function(r){
+      if(r.error)throw erroDb(r.error);
+      var d=r.data&&r.data.dados;
+      return {id:'conteudo',exists:!!d,data:function(){return d||undefined;},metadata:{fromCache:false,hasPendingWrites:false}};
+    });
+  }
+  function avisarConteudo(){lerConteudo().then(function(s){ouvC.forEach(function(o){o.n(s);});}).catch(function(e){ouvC.forEach(function(o){if(o.e)o.e(e);});});}
+  var docConteudo={
+    onSnapshot:function(n,e){ouvC.push({n:n,e:e});avisarConteudo();return function(){};},
+    set:function(d){return sb.from('site_conteudo').upsert({id:'principal',dados:d,atualizado_em:new Date().toISOString()}).then(function(r){if(r.error)throw erroDb(r.error);avisarConteudo();});},
+    delete:function(){return sb.from('site_conteudo').delete().eq('id','principal').then(function(r){if(r.error)throw erroDb(r.error);avisarConteudo();});}
+  };
+  function avisarMcp(){
+    sb.from('mcp_conexoes').select('*').order('nome').then(function(r){
+      if(r.error)throw erroDb(r.error);
+      var docs=(r.data||[]).map(function(l){return {id:l.id,exists:true,data:function(){return l;}};});
+      ouvM.forEach(function(o){o.n({docs:docs,size:docs.length,empty:!docs.length});});
+    }).catch(function(e){ouvM.forEach(function(o){if(o.e)o.e(e.code?e:erroDb(e));});});
+  }
+  function umaLinha(r){if(r.error)throw erroDb(r.error);if(!r.data||!r.data.length)throw {code:'invalid_argument',message:'sem permissão'};avisarMcp();}
+  var colMcp={
+    orderBy:function(){return colMcp;},
+    onSnapshot:function(n,e){ouvM.push({n:n,e:e});avisarMcp();return function(){};},
+    doc:function(){return {set:function(d){
+      return sb.from('mcp_conexoes').insert({nome:d.nome,url:d.url,descricao:d.descricao||'',modulos:d.modulos||[],perfis:d.perfis||[],acesso:d.acesso,ativo:d.ativo!==false}).select('id').then(umaLinha);}};}
+  };
+  var db={
+    doc:function(p){
+      if(p==='site/conteudo')return docConteudo;
+      var id=p.split('/')[1];
+      return {
+        update:function(d){return sb.from('mcp_conexoes').update({ativo:!!d.ativo}).eq('id',id).select('id').then(umaLinha);},
+        delete:function(){return sb.from('mcp_conexoes').delete().eq('id',id).select('id').then(umaLinha);}
+      };
+    },
+    collection:function(){return colMcp;}
+  };
+  var usuario={
+    canEdit:function(){
+      return nivel().then(function(n){
+        if(n!=='aal2')return false;
+        return sb.from('administradores').select('user_id').maybeSingle().then(function(r){return !!(r&&r.data);});
+      }).catch(function(){return false;});
+    }
+  };
+  usuario.isOwner=usuario.canEdit;
+  window.claude={use:function(nome){return Promise.resolve(nome==='db'?(sb?db:null):nome==='user'?(sb?usuario:null):null);}};
+
+  /* ---------- tela de acesso ---------- */
+  var fator=null,ocupado=false;
+  function etapa(n){
+    $('lg-etapa1').hidden=n!==1;$('lg-etapa2').hidden=n===1;
+    $('lg-cad').hidden=n!=='cad';
+    $('lg-p1').className=n===1?'at':'';$('lg-p2').className=n===1?'':'at';
+    $('lg-t2').textContent=n==='cad'?'Cadastre o autenticador':'Código de verificação';
+    $('lg-s2').textContent=n==='cad'?'Primeiro acesso: ligue o Google Authenticator à sua conta Celeiro.':'Abra o Google Authenticator no celular e digite o código de 6 dígitos da conta Celeiro.';
+    if(n!==1)$('lg-codigo').focus();
+  }
+  function erro(id,t){var e=$(id);e.textContent=t||'';e.hidden=!t;}
+  function travar(sim){ocupado=sim;[].slice.call(document.querySelectorAll('#tela-login button[type=submit]')).forEach(function(b){b.disabled=sim;});}
+  function falha(e){
+    var c=e&&(e.code||''),m=String((e&&e.message)||'');
+    if(c==='invalid_credentials'||/invalid login credentials/i.test(m))return 'E-mail ou senha incorretos.';
+    if(c==='email_not_confirmed')return 'Este e-mail ainda não foi confirmado. Confirme pelo link enviado ou peça ao administrador.';
+    if(c==='over_request_rate_limit'||(e&&e.status===429))return 'Muitas tentativas. Aguarde alguns minutos e tente de novo.';
+    return 'Não foi possível concluir agora. Confira a conexão e tente de novo.';
+  }
+  function depoisDaSenha(){
+    return sb.auth.mfa.listFactors().then(function(f){
+      if(f.error)throw f.error;
+      var prontos=(f.data&&f.data.totp)||[];
+      if(prontos.length){fator=prontos[0].id;etapa(2);return;}
+      var sobras=((f.data&&f.data.all)||[]).filter(function(x){return x.status==='unverified';});
+      return sobras.reduce(function(p,x){return p.then(function(){return sb.auth.mfa.unenroll({factorId:x.id});});},Promise.resolve()).then(function(){
+        return sb.auth.mfa.enroll({factorType:'totp',friendlyName:'Google Authenticator '+Date.now()});
+      }).then(function(en){
+        if(en.error)throw en.error;
+        fator=en.data.id;
+        var qr=en.data.totp.qr_code||'';
+        $('lg-qr').src=qr.indexOf('data:')===0?qr:'data:image/svg+xml;utf-8,'+encodeURIComponent(qr);
+        $('lg-segredo').textContent=en.data.totp.secret||'';
+        etapa('cad');
+      });
+    });
+  }
+  $('lg-ver').addEventListener('click',function(){
+    var s=$('lg-senha'),v=s.type==='password';s.type=v?'text':'password';this.textContent=v?'Ocultar':'Mostrar';this.setAttribute('aria-pressed',v);
+  });
+  $('lg-etapa1').addEventListener('submit',function(e){
+    e.preventDefault();if(ocupado)return;
+    if(!sb){erro('lg-erro1','O site ainda não está ligado ao Supabase. Preencha o arquivo config.js.');return;}
+    var em=$('lg-email').value.trim(),se=$('lg-senha').value;
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){erro('lg-erro1','Informe um e-mail válido, como nome@empresa.com.br.');$('lg-email').focus();return;}
+    if(!se){erro('lg-erro1','Informe a senha.');$('lg-senha').focus();return;}
+    erro('lg-erro1','');travar(true);
+    sb.auth.signInWithPassword({email:em,password:se}).then(function(r){
+      if(r.error)throw r.error;
+      $('lg-senha').value='';
+      return depoisDaSenha();
+    }).catch(function(er){erro('lg-erro1',falha(er));}).then(function(){travar(false);});
+  });
+  $('lg-codigo').addEventListener('input',function(){this.value=this.value.replace(/\D/g,'').slice(0,6);});
+  $('lg-etapa2').addEventListener('submit',function(e){
+    e.preventDefault();if(ocupado||!sb||!fator)return;
+    var cod=$('lg-codigo').value;
+    if(!/^\d{6}$/.test(cod)){erro('lg-erro2','O código tem 6 dígitos. Confira no Google Authenticator.');$('lg-codigo').focus();return;}
+    erro('lg-erro2','');travar(true);
+    sb.auth.mfa.challengeAndVerify({factorId:fator,code:cod}).then(function(r){
+      if(r.error)throw r.error;
+      location.hash='#admin';location.reload();
+    }).catch(function(er){
+      $('lg-codigo').value='';travar(false);
+      erro('lg-erro2',(er&&er.status===429)?'Muitas tentativas. Aguarde alguns minutos e tente de novo.':'Código incorreto ou vencido. Espere o próximo código aparecer no aplicativo e digite de novo.');
+    });
+  });
+  function sair(){
+    var fim=function(){location.hash='#inicio';location.reload();};
+    if(!sb){fim();return;}
+    sb.auth.signOut().then(fim,fim);
+  }
+  $('lg-volta').addEventListener('click',sair);
+  $('adm-sair').addEventListener('click',sair);
+
+  function rota(){
+    var h=location.hash,on=h==='#entrar';
+    document.body.classList.toggle('modo-login',on);
+    if(on){
+      window.scrollTo(0,0);erro('lg-erro1','');erro('lg-erro2','');etapa(1);
+      if(!sb){erro('lg-erro1','O site ainda não está ligado ao Supabase. Preencha o arquivo config.js.');return;}
+      sb.auth.getSession().then(function(r){
+        if(!r||!r.data||!r.data.session)return;
+        return nivel().then(function(n){
+          if(location.hash!=='#entrar')return;
+          if(n==='aal2'){location.hash='#admin';return;}
+          return depoisDaSenha();
+        });
+      }).catch(function(){});
+    }else if(h==='#admin'&&sb){
+      nivel().then(function(n){if(n!=='aal2'&&location.hash==='#admin')location.replace('#entrar');});
+    }else if(h==='#admin'&&!sb){
+      location.replace('#entrar');
+    }
+  }
+  window.addEventListener('hashchange',rota);rota();
+})();
+
+</script>
+<script>
+/* Conteúdo editável e área administrativa.
+   O site sempre abre com os textos escritos na página; o que estiver salvo no repositório de dados substitui esses textos. */
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  var CAMPOS=[
+    ['Início','hero_selo','Frase do selo','t'],
+    ['Início','hero_titulo','Título, primeira parte','t'],
+    ['Início','hero_destaque','Título, parte em destaque','t'],
+    ['Início','hero_lead','Texto de apoio','a'],
+    ['Quem somos','quem_manifesto','Frase principal','a'],
+    ['Quem somos','quem_texto','Texto complementar','a']
+  ];
+  var i;
+  for(i=1;i<=6;i++){CAMPOS.push(['Áreas de atuação','atu'+i+'_t','Área '+i+', título','t']);CAMPOS.push(['Áreas de atuação','atu'+i+'_d','Área '+i+', descrição','t']);}
+  for(i=1;i<=3;i++){CAMPOS.push(['Soluções','sol'+i+'_t','Solução '+i+', nome','t']);CAMPOS.push(['Soluções','sol'+i+'_d','Solução '+i+', descrição','a']);}
+  CAMPOS.push(['Contato e rodapé','tel','Telefone','t'],['Contato e rodapé','email','E-mail','t'],['Contato e rodapé','end','Endereço','t'],['Contato e rodapé','cnpj','CNPJ','t']);
+
+  function alvos(k){return [].slice.call(document.querySelectorAll('[data-c="'+k+'"]'));}
+  var PADRAO={};
+  CAMPOS.forEach(function(c){var e=alvos(c[1])[0];PADRAO[c[1]]=e?e.textContent.trim():'';});
+  var FAQ_PADRAO=[].slice.call(document.querySelectorAll('#faq-lista details')).map(function(d){
+    return {p:d.querySelector('summary').textContent.trim(),r:d.querySelector('p').textContent.trim()};});
+
+  var salvo=null;          /* documento salvo, ou null */
+  function texto(k){var c=salvo&&salvo.campos;var v=c&&typeof c[k]==='string'?c[k].trim():'';return v||PADRAO[k];}
+  function faqAtual(){var f=salvo&&salvo.faq;
+    if(Array.isArray(f)){f=f.filter(function(x){return x&&typeof x.p==='string'&&typeof x.r==='string'&&x.p.trim();});if(f.length)return f;}
+    return FAQ_PADRAO;}
+  function aplicar(){
+    CAMPOS.forEach(function(c){var v=texto(c[1]);alvos(c[1]).forEach(function(e){if(e.textContent!==v)e.textContent=v;});});
+    var lista=$('faq-lista');lista.textContent='';
+    faqAtual().forEach(function(x,n){
+      var d=document.createElement('details'),s=document.createElement('summary'),p=document.createElement('p');
+      if(n===0)d.open=true;s.textContent=x.p;p.textContent=x.r;d.appendChild(s);d.appendChild(p);lista.appendChild(d);});
+  }
+
+  /* ---------- formulário de conteúdo ---------- */
+  var sujo=false,form=$('adm-form');
+  function montar(){
+    var grupos={};
+    CAMPOS.forEach(function(c){
+      var g=grupos[c[0]];
+      if(!g){g=document.createElement('fieldset');g.className='adm-grupo';var l=document.createElement('legend');l.textContent=c[0];g.appendChild(l);form.appendChild(g);grupos[c[0]]=g;}
+      var w=document.createElement('div');w.className='adm-c'+(c[3]==='a'?' larga':'');
+      var lb=document.createElement('label');lb.htmlFor='c-'+c[1];lb.textContent=c[2];
+      var el=document.createElement(c[3]==='a'?'textarea':'input');if(c[3]!=='a')el.type='text';el.id='c-'+c[1];el.maxLength=c[3]==='a'?600:160;
+      w.appendChild(lb);w.appendChild(el);g.appendChild(w);
+    });
+    form.addEventListener('input',function(){sujo=true;status('Alterações não salvas.');});
+    form.addEventListener('submit',function(e){e.preventDefault();});
+  }
+  function linhaFaq(x){
+    var b=document.createElement('div');b.className='adm-faq-item';
+    var l=document.createElement('div');l.className='l';
+    var t=document.createElement('span');t.className='adm-rot';t.textContent='Pergunta';
+    var rm=document.createElement('button');rm.type='button';rm.className='btn btn-perigo btn-mini';rm.textContent='Remover';
+    rm.addEventListener('click',function(){b.remove();sujo=true;status('Alterações não salvas.');});
+    l.appendChild(t);l.appendChild(rm);
+    var c1=document.createElement('div');c1.className='adm-c';var p=document.createElement('input');p.type='text';p.maxLength=200;p.value=x.p;p.setAttribute('aria-label','Pergunta');c1.appendChild(p);
+    var c2=document.createElement('div');c2.className='adm-c';var r=document.createElement('textarea');r.maxLength=900;r.value=x.r;r.setAttribute('aria-label','Resposta');c2.appendChild(r);
+    b.appendChild(l);b.appendChild(c1);b.appendChild(c2);
+    b.addEventListener('input',function(){sujo=true;status('Alterações não salvas.');});
+    return b;
+  }
+  function preencher(){
+    CAMPOS.forEach(function(c){var e=$('c-'+c[1]);if(e)e.value=texto(c[1]);});
+    var box=$('adm-faq');box.textContent='';faqAtual().forEach(function(x){box.appendChild(linhaFaq(x));});
+    sujo=false;
+  }
+  function status(t){$('adm-status').textContent=t||'';}
+  function erroDb(e){
+    var c=e&&e.code;
+    if(c==='invalid_argument')return 'Não foi possível salvar: sua conta não tem permissão de administrador ou a sessão venceu. Saia e entre de novo.';
+    if(c==='quota_exceeded')return 'Não foi possível salvar: o espaço de dados desta página está cheio.';
+    if(c==='resource_exhausted')return 'Muitas operações em sequência. Aguarde alguns segundos e tente de novo.';
+    if(c==='revoked'||c==='not_granted'||c==='capability_disabled'||c==='capability_removed')return 'O acesso aos dados foi encerrado nesta visualização. Recarregue a página.';
+    return 'Não foi possível concluir agora. Tente de novo em instantes.';
+  }
+
+  var db=null,usr=null,podeEditar=false,pronto=false,ref=null,ocupado=false;
+
+  $('adm-faq-add').addEventListener('click',function(){$('adm-faq').appendChild(linhaFaq({p:'',r:''}));sujo=true;status('Alterações não salvas.');});
+  $('adm-salvar').addEventListener('click',function(){
+    if(!ref||ocupado)return;
+    var campos={};
+    CAMPOS.forEach(function(c){var v=$('c-'+c[1]).value.trim();if(v&&v!==PADRAO[c[1]])campos[c[1]]=v;});
+    var faq=[].slice.call(document.querySelectorAll('#adm-faq .adm-faq-item')).map(function(b){
+      return {p:b.querySelector('input').value.trim(),r:b.querySelector('textarea').value.trim()};}).filter(function(x){return x.p&&x.r;});
+    var doc={campos:campos,atualizadoEm:new Date().toISOString()};
+    if(JSON.stringify(faq)!==JSON.stringify(FAQ_PADRAO))doc.faq=faq;
+    ocupado=true;status('Salvando…');
+    ref.set(doc).then(function(){sujo=false;status('Alterações salvas. O site já mostra os novos textos.');})
+      .catch(function(e){status(erroDb(e));}).then(function(){ocupado=false;});
+  });
+  var armado=null;
+  $('adm-restaurar').addEventListener('click',function(){
+    var b=this;if(!ref||ocupado)return;
+    if(!armado){b.textContent='Confirmar: apagar o que foi editado';armado=setTimeout(function(){armado=null;b.textContent='Restaurar textos originais';},6000);return;}
+    clearTimeout(armado);armado=null;b.textContent='Restaurar textos originais';
+    ocupado=true;status('Restaurando…');
+    ref.delete().then(function(){sujo=false;status('Textos originais restaurados.');})
+      .catch(function(e){status(erroDb(e));}).then(function(){ocupado=false;});
+  });
+
+  /* ---------- abas ---------- */
+  var abas=[].slice.call(document.querySelectorAll('.adm-aba'));
+  function aba(nome){
+    abas.forEach(function(a){a.setAttribute('aria-selected',a.dataset.aba===nome);});
+    $('adm-conteudo').hidden=nome!=='conteudo';$('adm-duvidas').hidden=nome!=='duvidas';$('adm-mcp').hidden=nome!=='mcp';
+    $('adm-barra').hidden=nome==='mcp';
+    if(nome==='mcp')ouvirMcp();
+  }
+  abas.forEach(function(a){a.addEventListener('click',function(){aba(a.dataset.aba);});});
+
+  /* ---------- conexões MCP ---------- */
+  var ouvindo=false;
+  function marcados(id){return [].slice.call(document.querySelectorAll('#'+id+' input:checked')).map(function(x){return x.value;});}
+  function lista(v){return Array.isArray(v)?v.filter(function(x){return typeof x==='string';}).join(', '):'';}
+  function desenharMcp(docs){
+    var box=$('mcp-lista');box.textContent='';
+    if(!docs.length){var v=document.createElement('p');v.className='adm-vazio';v.textContent='Nenhuma conexão cadastrada ainda.';box.appendChild(v);return;}
+    docs.forEach(function(s){
+      var d=s.data()||{},it=document.createElement('div');it.className='mcp-item';
+      var l=document.createElement('div');l.className='l';
+      var n=document.createElement('b');n.textContent=typeof d.nome==='string'?d.nome:'Sem nome';
+      var pl=document.createElement('span');pl.className='pilula'+(d.ativo?'':' off');pl.textContent=d.ativo?'Ativa':'Inativa';
+      l.appendChild(n);l.appendChild(pl);it.appendChild(l);
+      var u=document.createElement('code');u.textContent=typeof d.url==='string'?d.url:'';it.appendChild(u);
+      if(typeof d.descricao==='string'&&d.descricao){var ds=document.createElement('p');ds.textContent=d.descricao;it.appendChild(ds);}
+      var m=document.createElement('p');m.textContent='Módulos: '+(lista(d.modulos)||'nenhum')+' · Perfis: '+(lista(d.perfis)||'nenhum')+' · '+(typeof d.acesso==='string'?d.acesso:'Somente leitura');it.appendChild(m);
+      var ac=document.createElement('div');ac.className='mcp-acoes';
+      var t=document.createElement('button');t.type='button';t.className='btn btn-linha btn-mini';t.textContent=d.ativo?'Desativar':'Ativar';
+      t.addEventListener('click',function(){t.disabled=true;db.doc('mcp/'+s.id).update({ativo:!d.ativo}).catch(function(e){erroMcp(erroDb(e));t.disabled=false;});});
+      var x=document.createElement('button');x.type='button';x.className='btn btn-perigo btn-mini';x.textContent='Excluir';var conf=false;
+      x.addEventListener('click',function(){
+        if(!conf){conf=true;x.textContent='Confirmar exclusão';setTimeout(function(){conf=false;x.textContent='Excluir';},6000);return;}
+        x.disabled=true;db.doc('mcp/'+s.id).delete().catch(function(e){erroMcp(erroDb(e));x.disabled=false;});});
+      ac.appendChild(t);ac.appendChild(x);it.appendChild(ac);box.appendChild(it);
+    });
+  }
+  function erroMcp(t){var e=$('mcp-erro');e.textContent=t||'';e.hidden=!t;}
+  function ouvirMcp(){
+    if(ouvindo||!db)return;ouvindo=true;
+    var limite=setTimeout(function(){var b=$('mcp-lista');b.textContent='';var v=document.createElement('p');v.className='adm-vazio';v.textContent='Os dados ainda não responderam. A lista aparece assim que a conexão voltar.';b.appendChild(v);},10000);
+    db.collection('mcp').orderBy('nome').onSnapshot(function(q){clearTimeout(limite);desenharMcp(q.docs);},
+      function(e){clearTimeout(limite);var b=$('mcp-lista');b.textContent='';var v=document.createElement('p');v.className='adm-erro';v.textContent=erroDb(e);b.appendChild(v);});
+  }
+  $('mcp-form').addEventListener('submit',function(e){
+    e.preventDefault();if(!db)return;
+    var nome=$('mcp-nome').value.trim(),url=$('mcp-url').value.trim(),mods=marcados('mcp-modulos'),perf=marcados('mcp-perfis');
+    if(!nome){erroMcp('Informe um nome para a conexão.');$('mcp-nome').focus();return;}
+    if(!/^https:\/\/[^\s]+\.[^\s]+/.test(url)){erroMcp('Informe o endereço completo do servidor, começando com https://');$('mcp-url').focus();return;}
+    if(!mods.length){erroMcp('Marque ao menos um módulo.');return;}
+    if(!perf.length){erroMcp('Marque ao menos um perfil.');return;}
+    erroMcp('');var bt=this.querySelector('button[type=submit]');bt.disabled=true;
+    db.collection('mcp').doc().set({nome:nome,url:url,descricao:$('mcp-desc').value.trim(),modulos:mods,perfis:perf,acesso:$('mcp-acesso').value,ativo:true,criadoEm:new Date().toISOString()})
+      .then(function(){$('mcp-form').reset();})
+      .catch(function(er){erroMcp(erroDb(er));}).then(function(){bt.disabled=false;});
+  });
+  $('mcp-verificar').addEventListener('click',function(){
+    var box=$('mcp-teste'),bt=this;box.textContent='';bt.disabled=true;
+    function linha(t,ok){var p=document.createElement('p');p.style.fontSize='13.5px';var s=document.createElement('span');s.className='pilula'+(ok?'':' off');s.textContent=ok?'Conectado':'Indisponível';p.appendChild(s);p.appendChild(document.createTextNode(' '+t));box.appendChild(p);}
+    var c=window.claude&&window.claude.use?window.claude.use('mcp'):Promise.resolve(null);
+    c.then(function(mcp){
+      if(!mcp){linha('Esta visualização não expõe conexões MCP. Abra a página no claude.ai.',false);return;}
+      return mcp.listTools().then(function(r){
+        var sv=(r&&r.servers)||[];
+        if(!sv.length){linha('Nenhum servidor respondeu nesta visualização.',false);return;}
+        sv.forEach(function(s){linha((s.kind==='artifact'?'Repositório de dados do site':String(s.server))+' · '+((s.tools||[]).length)+' ferramentas',true);});
+      });
+    }).catch(function(e){
+      var c2=e&&e.code;
+      linha(c2==='not_granted'||c2==='capability_disabled'||c2==='capability_removed'?'Conexões MCP não estão liberadas nesta visualização.':'A verificação não respondeu. Tente de novo em instantes.',false);
+    }).then(function(){bt.disabled=false;});
+  });
+
+  /* ---------- rota e inicialização ---------- */
+  function rota(){
+    var adm=location.hash==='#admin';
+    document.body.classList.toggle('modo-admin',adm);
+    if(!adm)return;
+    window.scrollTo(0,0);
+    var av=$('adm-aviso'),corpo=$('adm-corpo');
+    if(!pronto){av.hidden=false;av.textContent='Carregando a área administrativa…';corpo.hidden=true;$('adm-barra').hidden=true;return;}
+    if(!db){av.hidden=false;av.textContent='O site ainda não está ligado ao Supabase. Confira o arquivo config.js.';corpo.hidden=true;$('adm-barra').hidden=true;return;}
+    if(!podeEditar){av.hidden=false;av.textContent='Área restrita. Sua conta entrou, mas não está na lista de administradores do site.';corpo.hidden=true;$('adm-barra').hidden=true;return;}
+    av.hidden=true;corpo.hidden=false;
+    var sel=abas.filter(function(a){return a.getAttribute('aria-selected')==='true';})[0];
+    aba(sel?sel.dataset.aba:'conteudo');
+  }
+  window.addEventListener('hashchange',rota);
+  montar();preencher();rota();
+
+  var uso=window.claude&&window.claude.use;
+  if(!uso){pronto=true;rota();return;}
+  Promise.all([window.claude.use('db'),window.claude.use('user')]).then(function(r){
+    db=r[0];usr=r[1];
+    return usr?usr.canEdit():false;
+  }).then(function(pode){podeEditar=!!pode;}).catch(function(){}).then(function(){
+    pronto=true;
+    if(db){
+      ref=db.doc('site/conteudo');
+      ref.onSnapshot(function(s){
+        salvo=s.exists?s.data():null;aplicar();
+        if(!sujo)preencher();
+      },function(){});
+    }
+    if(podeEditar&&db)$('link-admin').hidden=false;
+    rota();
+  });
+})();
+
+</script>
+</body>
+</html>
