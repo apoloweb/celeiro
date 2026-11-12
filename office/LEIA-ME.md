@@ -122,6 +122,28 @@ Para os clientes usarem, habilite o módulo Workflow para os perfis deles em **M
 - Cadastro não é apagado: é inativado e pode ser reativado.
 - Toda inclusão e alteração fica na Auditoria, com os valores de antes e depois.
 
+## Consulta oficial de CNPJ (Receita Federal)
+
+A função `consulta-cnpj` (em `supabase/functions/consulta-cnpj/index.ts`) consulta a empresa e o quadro de sócios na API Consulta CNPJ da Receita, operada pelo Serpro, seguindo a especificação "APIs CNPJ (Básica, QSA e Empresa)" versão 2 publicada no catálogo Conecta gov.br. O botão **Buscar dados pelo CNPJ** tenta primeiro essa consulta; se ela não estiver configurada, usa a base pública BrasilAPI e avisa na tela qual fonte foi usada.
+
+**Situação: código pronto, sem acesso contratado.**
+
+- O acesso descrito no catálogo Conecta gov.br é para órgãos públicos (federais e estaduais), com adesão formal e cadastro prévio dos endereços IP de origem no Serpro. Uma empresa privada, como a Celeiro, não se enquadra nessa adesão.
+- Para empresa privada, o caminho é contratar a Consulta CNPJ na loja do Serpro. O endereço e o formato da resposta precisam ser conferidos na documentação do produto contratado; a função aceita outro endereço pelos segredos abaixo.
+- As funções do Supabase não saem por um IP fixo. Se o fornecedor exigir IP cadastrado, será preciso um servidor intermediário com IP fixo.
+
+**Para ligar, quando houver credenciais** (painel do Supabase do backoffice > Edge Functions):
+
+1. Publique a função com o nome exato `consulta-cnpj`, colando o conteúdo do arquivo.
+2. Em Secrets, cadastre:
+   - `RECEITA_CNPJ_CLIENT_ID` e `RECEITA_CNPJ_CLIENT_SECRET` (obrigatórios)
+   - `RECEITA_CNPJ_TOKEN_URL` e `RECEITA_CNPJ_BASE_URL` (se o endereço for diferente do gateway do Conecta)
+   - `RECEITA_CPF_USUARIO` (CPF enviado no cabeçalho `x-cpf-usuario`, exigido pelo Conecta)
+
+Cada consulta oficial fica registrada na Auditoria. O token é obtido por credenciais de cliente (Basic + `grant_type=client_credentials`), que é o padrão do gateway do Serpro, mas esse detalhe não está escrito na especificação e precisa ser confirmado no primeiro uso real.
+
+Validação de CPF na Receita ainda não tem função: depende da mesma contratação.
+
 ## Dashboard
 
 - Primeira linha: tarefas vencidas, urgentes, sob sua responsabilidade e não lidas, cada uma com "Ver tudo" que abre a lista já filtrada.

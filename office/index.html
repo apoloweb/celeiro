@@ -1688,25 +1688,44 @@ function editarPj(j){
   var inC=$('#j-cnpj');inC.onblur=function(){inC.value=formataCnpj(inC.value);};
   ['j-telefone_fixo','j-telefone_celular','j-financeiro_telefone'].forEach(function(id){var t=$('#'+id);t.onblur=function(){t.value=fmtTel(t.value);};});
   $('#j-cancelar').onclick=function(){if(novo)telaCadPessoas();else verPj(j.id);};
+  function preenchePj(d,fonte){
+    function poe(id,v){var el=$('#'+id);if(el&&v!==undefined&&v!==null&&String(v).trim()!=='')el.value=String(v).trim();}
+    poe('j-razao_social',d.razao_social);poe('j-nome_fantasia',d.nome_fantasia);poe('j-situacao_cadastral',d.situacao_cadastral);
+    poe('j-cep',fmtCep(d.cep));poe('j-logradouro',d.logradouro);poe('j-numero',d.numero);poe('j-complemento',d.complemento);
+    poe('j-bairro',d.bairro);poe('j-cidade',d.cidade);if(UFS.indexOf(d.uf)>=0)$('#j-uf').value=d.uf;
+    poe('j-email',d.email);poe('j-telefone_fixo',fmtTel(d.telefone));
+    qsaNovo=(Array.isArray(d.socios)?d.socios:[]).filter(function(x){return x&&x.nome;});
+    enriquecido=true;
+    var av=$('#j-qsa-aviso');av.classList.remove('oculto');
+    av.textContent='Dados preenchidos pela '+fonte+'. '+(qsaNovo.length?qsaNovo.length+(qsaNovo.length===1?' pessoa do quadro societário será gravada':' pessoas do quadro societário serão gravadas')+' ao salvar'+(novo?'.':', substituindo o quadro atual.'):'A consulta não trouxe quadro societário.');
+    aviso('Dados da empresa preenchidos. Confira antes de salvar.');
+  }
   $('#j-buscar').onclick=async function(){
     var n=soNum(inC.value),b=this;
     if(!cnpjValido(n)){aviso('CNPJ inválido. Confira os números.',true);return;}
     ocupar(b,true);
+    /* 1) consulta oficial da Receita, pela função do servidor */
+    var falhaOficial='';
+    try{
+      var o=await sb.functions.invoke('consulta-cnpj',{body:{cnpj:n}});
+      if(!o.error&&o.data&&o.data.razao_social){preenchePj(o.data,'base oficial da Receita Federal');ocupar(b,false);return;}
+      var corpo=null;
+      try{if(o.error&&o.error.context&&typeof o.error.context.json==='function'){corpo=await o.error.context.json();}}catch(err){}
+      var codigo=(corpo&&corpo.codigo)||'';
+      if(codigo==='nao_encontrado'||codigo==='invalido'){aviso(corpo.erro,true);ocupar(b,false);return;}
+      if(codigo&&codigo!=='nao_configurada'){falhaOficial=' A consulta oficial falhou: '+(corpo.erro||codigo);}
+    }catch(err){}
+    /* 2) sem consulta oficial disponível: base pública gratuita */
     try{
       var r=await fetch('https://brasilapi.com.br/api/cnpj/v1/'+n);
       if(!r.ok)throw new Error('sem resposta');
       var d=await r.json();
-      function poe(id,v){var el=$('#'+id);if(el&&v!==undefined&&v!==null&&String(v).trim()!=='')el.value=String(v).trim();}
-      poe('j-razao_social',d.razao_social);poe('j-nome_fantasia',d.nome_fantasia);poe('j-situacao_cadastral',d.descricao_situacao_cadastral);
-      poe('j-cep',fmtCep(d.cep));poe('j-logradouro',[d.descricao_tipo_de_logradouro,d.logradouro].filter(Boolean).join(' '));poe('j-numero',d.numero);poe('j-complemento',d.complemento);
-      poe('j-bairro',d.bairro);poe('j-cidade',d.municipio);if(UFS.indexOf(d.uf)>=0)$('#j-uf').value=d.uf;
-      poe('j-email',d.email);poe('j-telefone_fixo',fmtTel(d.ddd_telefone_1));
-      qsaNovo=(Array.isArray(d.qsa)?d.qsa:[]).map(function(s){return {nome:String(s.nome_socio||s.nome||'').trim(),documento:String(s.cnpj_cpf_do_socio||'').trim().slice(0,20),qualificacao:String(s.qualificacao_socio||'').trim(),selecionado:false};}).filter(function(s){return s.nome;});
-      enriquecido=true;
-      var av=$('#j-qsa-aviso');av.classList.remove('oculto');
-      av.textContent='Dados preenchidos pela base pública de CNPJ. '+(qsaNovo.length?qsaNovo.length+(qsaNovo.length===1?' pessoa do quadro societário será gravada':' pessoas do quadro societário serão gravadas')+' ao salvar'+(novo?'.':', substituindo o quadro atual.'):'A base não trouxe quadro societário.');
-      aviso('Dados da empresa preenchidos. Confira antes de salvar.');
-    }catch(err){aviso('Não foi possível consultar o CNPJ agora. Preencha os dados manualmente.',true);}
+      preenchePj({razao_social:d.razao_social,nome_fantasia:d.nome_fantasia,situacao_cadastral:d.descricao_situacao_cadastral,cep:d.cep,
+        logradouro:[d.descricao_tipo_de_logradouro,d.logradouro].filter(Boolean).join(' '),numero:d.numero,complemento:d.complemento,bairro:d.bairro,cidade:d.municipio,uf:d.uf,
+        email:d.email,telefone:d.ddd_telefone_1,
+        socios:(Array.isArray(d.qsa)?d.qsa:[]).map(function(x){return {nome:String(x.nome_socio||x.nome||'').trim(),documento:String(x.cnpj_cpf_do_socio||'').trim().slice(0,20),qualificacao:String(x.qualificacao_socio||'').trim(),selecionado:false};})
+      },'base pública de CNPJ (BrasilAPI), que não é a consulta oficial.'+falhaOficial);
+    }catch(err){aviso('Não foi possível consultar o CNPJ agora. Preencha os dados manualmente.'+falhaOficial,true);}
     ocupar(b,false);
   };
   $('#f-pj').onsubmit=async function(ev){
