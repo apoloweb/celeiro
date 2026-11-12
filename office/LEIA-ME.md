@@ -171,3 +171,41 @@ No projeto real, em 12/11/2026, também foram conferidos: a versão com níveis 
 11. Em **Usuários**, crie um nível com um ou dois módulos e depois um usuário novo com esse nível. Confira os módulos mostrados na lista.
 12. Entre com o usuário novo (senha inicial), cadastre o autenticador e confira que o menu mostra só os módulos esperados.
 13. Clique em **Nova tarefa** no topo, crie uma tarefa com prazo e confira que ela aparece em **Workflow** e nas pendências do **Dashboard**.
+
+## Integração com o aplicativo (módulo Aplicativo)
+
+O app Celeiro envia para o backoffice: instalações, leads (cadastros), solicitações de abertura de conta, cotações veiculares e pedidos de migração de energia. O backoffice também controla quais módulos do app estão ligados.
+
+**Para ativar:** rode `supabase-app.sql` no SQL Editor do projeto do backoffice, depois do `supabase.sql`. Sempre que o `supabase.sql` mudar no repositório, rode-o de novo: telas novas (Workflow, Dashboard, edição de usuários) dependem dele. Pode ser rodado mais de uma vez. Em seguida, em Módulos e permissões, habilite "Aplicativo" para o perfil Gerencial, se a equipe for usar (o Master já vê).
+
+**Como o app envia:** chama a função `app_registrar` com a chave pública do projeto, sem login.
+
+    POST https://<projeto>.supabase.co/rest/v1/rpc/app_registrar
+    cabeçalhos: apikey e Authorization: Bearer <chave pública>
+    corpo: {"p_tipo": "...", "p_dispositivo": "...", "p_dados": {...}}
+
+| `p_tipo` | Quando | Campos em `p_dados` |
+|---|---|---|
+| `instalacao` | Primeira abertura do app no aparelho | plataforma, versao |
+| `lead` | Cadastro de usuário no app | nome, email, telefone, metodo |
+| `conta_digital` | Pedido de abertura de conta | nome, telefone, email, documento, tipo_pessoa, nascimento, responsavel, protocolo |
+| `cotacao_veicular` | Formulário de Aquisição Veicular | nome, telefone, veiculo, condicao, valor, cidade |
+| `migracao_energia` | Formulário de Energia com Desconto | nome, telefone, unidade, distribuidora, valor_fatura, fatura_anexada |
+
+`"teste": true` em `p_dados` marca o registro como teste: ele fica fora dos totais e só aparece com o filtro "Mostrar registros de teste".
+
+O app lê os módulos ligados pela função `app_config` (mesmo endereço, `rpc/app_config`, corpo vazio).
+
+**Segurança:** o app só consegue gravar por `app_registrar`; não lê nada do backoffice. A leitura exige login com as duas etapas, perfil Master ou Gerencial e o módulo Aplicativo habilitado. Só o Master liga e desliga módulos do app. Mudanças de situação e de módulos entram na auditoria. Há um freio de 20 registros por aparelho por hora.
+
+**Limites:**
+- "Instalações" conta aparelhos que abriram o app pela primeira vez. O número de downloads das lojas vem dos painéis da App Store e do Google Play.
+- Como o endereço é público, alguém pode enviar registros falsos. O freio por aparelho reduz o volume, mas não impede; antes do lançamento vale acrescentar verificação do aparelho (App Attest / Play Integrity) ou captcha.
+- O arquivo da fatura de energia ainda não é enviado, só a indicação de que foi anexado.
+- CPF e CNPJ chegam em texto. Definir prazo de retenção e incluir no aviso de privacidade do app.
+
+**Testes:** `supabase-app.sql` rodou duas vezes em Postgres local sobre o `supabase.sql`; 38 verificações de acesso aprovadas (app sem login, Master com e sem segundo fator, Gerencial com e sem o módulo, módulo desligado, freio). A tela foi aberta em navegador com dados de exemplo. Não testado contra o projeto Supabase real.
+
+## Troca de e-mail de um usuário
+
+Em **Usuários > Editar**, o campo E-mail agora pode ser alterado. A troca muda o e-mail de login no Supabase e o cadastro do backoffice, e entra na auditoria. Quem pode: Master (qualquer usuário) e Corporativo master (operadores da própria organização). Regras conferidas em Postgres local (8 verificações); não testado contra o projeto Supabase real.

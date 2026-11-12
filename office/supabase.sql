@@ -562,6 +562,49 @@ begin
 end;
 $$;
 
+-- Troca o e-mail de acesso de um usuário (o login passa a ser o e-mail novo)
+create or replace function public.alterar_email_usuario(p_user uuid, p_email text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_meu   text := public.meu_perfil();
+  v_alvo  public.usuarios%rowtype;
+  v_email text := lower(trim(coalesce(p_email, '')));
+begin
+  if not public.aal2() or v_meu is null then
+    raise exception 'Acesso negado';
+  end if;
+  select * into v_alvo from public.usuarios where user_id = p_user;
+  if v_alvo.user_id is null then
+    raise exception 'Usuário não encontrado';
+  end if;
+  if not (v_meu = 'master'
+          or (v_meu = 'corp_master' and v_alvo.perfil = 'corp_operador'
+              and v_alvo.organizacao_id = public.minha_org())) then
+    raise exception 'Seu perfil não pode alterar este usuário';
+  end if;
+  if v_email !~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$' or char_length(v_email) > 254 then
+    raise exception 'E-mail inválido';
+  end if;
+  if v_email = lower(v_alvo.email) then
+    return;
+  end if;
+  if exists (select 1 from auth.users where lower(email) = v_email and id <> p_user) then
+    raise exception 'Já existe um acesso com este e-mail';
+  end if;
+
+  update auth.users set email = v_email, updated_at = now() where id = p_user;
+  update auth.identities
+     set identity_data = coalesce(identity_data, '{}'::jsonb) || jsonb_build_object('email', v_email),
+         updated_at = now()
+   where user_id = p_user and provider = 'email';
+  update public.usuarios set email = v_email where user_id = p_user;
+end;
+$$;
+
 -- Cria ou altera um nível de permissão (p_id nulo = novo)
 create or replace function public.salvar_nivel(
   p_id uuid, p_nome text, p_descricao text, p_org uuid, p_modulos text[]
@@ -747,6 +790,7 @@ revoke all on function public.meu_acesso()        from public, anon;
 revoke all on function public.registrar_evento(text, text, jsonb)             from public, anon;
 revoke all on function public.vincular_usuario(text, text, text, uuid, uuid)   from public, anon;
 revoke all on function public.atualizar_usuario(uuid, text, text, uuid, boolean, uuid) from public, anon;
+revoke all on function public.alterar_email_usuario(uuid, text) from public, anon;
 revoke all on function public.pode_criar_usuario(text, uuid)                   from public, anon;
 revoke all on function public.nivel_valido(uuid, text, uuid)                   from public, anon;
 revoke all on function public.salvar_nivel(uuid, text, text, uuid, text[])     from public, anon;
@@ -765,6 +809,7 @@ grant execute on function public.meu_acesso()      to authenticated;
 grant execute on function public.registrar_evento(text, text, jsonb)             to authenticated;
 grant execute on function public.vincular_usuario(text, text, text, uuid, uuid)   to authenticated;
 grant execute on function public.atualizar_usuario(uuid, text, text, uuid, boolean, uuid) to authenticated;
+grant execute on function public.alterar_email_usuario(uuid, text) to authenticated;
 grant execute on function public.pode_criar_usuario(text, uuid)                   to authenticated;
 grant execute on function public.nivel_valido(uuid, text, uuid)                   to authenticated;
 grant execute on function public.salvar_nivel(uuid, text, text, uuid, text[])     to authenticated;

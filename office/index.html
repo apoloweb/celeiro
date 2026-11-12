@@ -190,7 +190,7 @@ var app=document.getElementById('app');
 var elAviso=document.getElementById('aviso');
 
 var PERFIS={master:'Master',gerencial:'Gerencial',corp_master:'Corporativo master',corp_operador:'Corporativo operador'};
-var PRONTOS={auditoria:true,workflow:true,dashboard:true};
+var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true};
 var INATIVIDADE_MS=15*60*1000;
 var MAX_TENTATIVAS=5;
 var E={acesso:null,modulos:[],recuperando:/type=recovery/.test(hashInicial),novoLogin:false,tentativas:0,relogio:null,avisoRelogio:null};
@@ -516,7 +516,8 @@ var ROTAS={
   auditoria:{titulo:'Auditoria',modulo:'Auditoria',fn:telaAuditoria,pode:function(){return temModulo('auditoria');}},
   senha:{titulo:'Trocar senha',modulo:'Acesso',fn:telaSenha,pode:function(){return true;},semGrupo:true},
   workflow:{titulo:'Workflow',modulo:'Workflow',fn:telaWorkflow,pode:function(){return temModulo('workflow');},semGrupo:true},
-  dashboard:{titulo:'Dashboard',modulo:'Dashboard',fn:telaDashboard,pode:function(){return temModulo('dashboard');},semGrupo:true}
+  dashboard:{titulo:'Dashboard',modulo:'Dashboard',fn:telaDashboard,pode:function(){return temModulo('dashboard');},semGrupo:true},
+  app:{titulo:'Aplicativo',modulo:'Aplicativo',fn:telaApp,pode:function(){return temModulo('app');},semGrupo:true}
 };
 
 function rota(){
@@ -706,7 +707,7 @@ async function telaUsuarios(op){
       (vincular?'<p class="apoio">Use quando o acesso (e-mail e senha) já foi criado no painel do Supabase. Aqui você só liga esse e-mail a um perfil.</p>':'')+
       '<div class="grade">'+
       '<div class="campo"><label for="u-nome">Nome</label><input id="u-nome" type="text" maxlength="120" value="'+esc(ed?ed.nome:'')+'" required></div>'+
-      '<div class="campo"><label for="u-email">E-mail</label><input id="u-email" type="email" autocomplete="off" value="'+esc(ed?ed.email:'')+'"'+(ed?' disabled':'')+' required></div>'+
+      '<div class="campo"><label for="u-email">E-mail</label><input id="u-email" type="email" autocomplete="off" value="'+esc(ed?ed.email:'')+'" required></div>'+
       (ed||vincular?'':'<div class="campo"><label for="u-senha">Senha inicial (mínimo 10 caracteres)</label><div class="junto"><input id="u-senha" type="text" autocomplete="off" maxlength="72" required><button class="botao claro pequeno" type="button" id="b-gerar">Gerar</button></div></div>')+
       '</div><div class="grade">'+
       '<div class="campo"><label for="u-perfil">Perfil</label><select id="u-perfil"'+(ed&&ed.user_id===a.user_id?' disabled':'')+'>'+optPerfil+'</select></div>'+
@@ -779,6 +780,11 @@ async function telaUsuarios(op){
     ocupar(b,true);
     var r;
     if(ed){
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ocupar(b,false);aviso('Informe um e-mail válido.',true);return;}
+      if(email!==String(ed.email||'').toLowerCase()){
+        r=await sb.rpc('alterar_email_usuario',{p_user:ed.user_id,p_email:email});
+        if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+      }
       r=await sb.rpc('atualizar_usuario',{p_user:ed.user_id,p_nome:nome,p_perfil:perfil,p_org:org,p_ativo:ed.ativo,p_nivel:nivel});
       if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
       aviso('Usuário alterado.');telaUsuarios();return;
@@ -1264,6 +1270,87 @@ async function telaDashboard(){
     '</div>');
   $$('[data-ir-aba]').forEach(function(l){l.onclick=function(){WF.aba=l.getAttribute('data-ir-aba');WF.busca='';};});
   $$('[data-abrir-d]').forEach(function(b){b.onclick=function(){var t=ts.filter(function(x){return x.id===b.getAttribute('data-abrir-d');})[0];if(t)abrirTarefa(t);};});
+}
+
+/* ---------- Aplicativo: instalações, leads e solicitações vindas do app ---------- */
+var APP={filtros:{tipo:'',status:'',teste:false}};
+var APP_TIPOS={lead:'Lead',conta_digital:'Abertura de conta',cotacao_veicular:'Cotação veicular',migracao_energia:'Migração de energia'};
+var APP_STATUS={novo:'Novo',em_atendimento:'Em atendimento',concluido:'Concluído',descartado:'Descartado'};
+var APP_CAMPOS={metodo:'Acesso',tipo_pessoa:'Pessoa',nascimento:'Nascimento',responsavel:'Responsável',protocolo:'Protocolo',veiculo:'Veículo',condicao:'Condição',valor:'Valor (R$)',cidade:'Cidade',unidade:'Unidade',distribuidora:'Distribuidora',valor_fatura:'Fatura média (R$)',fatura_anexada:'Fatura anexada'};
+function appDetalhes(d){
+  return Object.keys(d||{}).filter(function(k){return d[k]!==''&&d[k]!==null;}).map(function(k){
+    var v=d[k];if(v===true)v='sim';if(v===false)v='não';
+    return esc(APP_CAMPOS[k]||k)+': '+esc(v);
+  }).join(' · ');
+}
+async function telaApp(){
+  carregando('Aplicativo');
+  var f=APP.filtros;
+  var q=sb.from('app_solicitacoes').select('*').order('criado_em',{ascending:false}).limit(200);
+  if(f.tipo)q=q.eq('tipo',f.tipo);
+  if(f.status)q=q.eq('status',f.status);
+  if(!f.teste)q=q.eq('teste',false);
+  var rs=await Promise.all([sb.rpc('app_resumo'),q,sb.from('app_modulos').select('*').order('ordem')]);
+  for(var i=0;i<rs.length;i++){if(rs[i].error){falhaTela('Aplicativo',rs[i].error);return;}}
+  var r=rs[0].data||{},tipos=r.tipos||{},linhas=rs[1].data||[],mods=rs[2].data||[],master=ehMaster();
+  function cartao(titulo,total,sub){return '<div class="cartao"><span>'+esc(titulo)+'</span><strong style="font-size:28px">'+esc(total)+'</strong><span>'+esc(sub)+'</span></div>';}
+  var cartoes=cartao('Instalações do app',r.instalacoes||0,(r.instalacoes_7d||0)+' nos últimos 7 dias');
+  Object.keys(APP_TIPOS).forEach(function(t){
+    var x=tipos[t]||{total:0,novos:0};
+    cartoes+=cartao(t==='lead'?'Leads':APP_TIPOS[t],x.total,x.novos+' aguardando atendimento');
+  });
+  var corpo=linhas.map(function(s){
+    var d=dataHora(s.criado_em);
+    return '<tr><td>'+esc(d.data)+'<span class="sub">'+esc(d.hora)+'</span></td>'+
+      '<td>'+esc(APP_TIPOS[s.tipo]||s.tipo)+(s.teste?'<span class="sub">registro de teste</span>':'')+'</td>'+
+      '<td>'+esc(s.nome||'Sem nome')+'<span class="sub">'+esc([s.telefone,s.email,s.documento].filter(Boolean).join(' · '))+'</span></td>'+
+      '<td>'+appDetalhes(s.dados)+'</td>'+
+      '<td><select class="app-status" style="min-width:170px" data-id="'+esc(s.id)+'" aria-label="Situação de '+esc(s.nome||'solicitação')+'">'+
+        Object.keys(APP_STATUS).map(function(k){return '<option value="'+k+'"'+(s.status===k?' selected':'')+'>'+APP_STATUS[k]+'</option>';}).join('')+'</select></td></tr>';
+  }).join('');
+  tela('<div class="cabeca"><div><h1>Aplicativo</h1><p class="apoio">Instalações, leads e solicitações enviadas pelo app Celeiro. Os totais não contam registros de teste.</p></div></div>'+
+    '<div class="cartoes">'+cartoes+'</div>'+
+    '<form class="painel" id="f-app" novalidate><div class="grade">'+
+      '<div class="campo"><label for="p-tipo">Tipo</label><select id="p-tipo"><option value="">Todos</option>'+
+        Object.keys(APP_TIPOS).map(function(k){return '<option value="'+k+'"'+(f.tipo===k?' selected':'')+'>'+APP_TIPOS[k]+'</option>';}).join('')+'</select></div>'+
+      '<div class="campo"><label for="p-status">Situação</label><select id="p-status"><option value="">Todas</option>'+
+        Object.keys(APP_STATUS).map(function(k){return '<option value="'+k+'"'+(f.status===k?' selected':'')+'>'+APP_STATUS[k]+'</option>';}).join('')+'</select></div>'+
+      '<label style="display:flex;gap:8px;align-items:center;height:48px"><input type="checkbox" id="p-teste"'+(f.teste?' checked':'')+'> Mostrar registros de teste</label>'+
+      '<button class="botao" type="submit">Filtrar</button></div></form>'+
+    '<div class="rolagem"><table><thead><tr><th scope="col">Recebido em</th><th scope="col">Tipo</th><th scope="col">Pessoa</th><th scope="col">Detalhes</th><th scope="col">Situação</th></tr></thead><tbody>'+
+      (corpo||'<tr><td colspan="5" class="vazio">Nenhum registro recebido do app com estes filtros.</td></tr>')+'</tbody></table></div>'+
+    '<div class="painel"><h2>Módulos do aplicativo</h2><p class="apoio">'+(master?'Ligue ou desligue o que aparece no app. Vale para todos os aparelhos na próxima abertura.':'Somente o perfil Master altera os módulos do aplicativo.')+'</p>'+
+      '<div class="rolagem"><table><tbody>'+mods.map(function(m){
+        return '<tr><th scope="row">'+esc(m.nome)+'</th><td style="width:80px">'+chaveSw(m.habilitado,m.nome+' no aplicativo','data-codigo="'+esc(m.codigo)+'"',!master)+'</td></tr>';
+      }).join('')+'</tbody></table></div></div>'+
+    '<p class="nota">Instalações contam os aparelhos que abriram o app pela primeira vez. O número de downloads de cada loja fica nos painéis da App Store e do Google Play. A lista mostra os 200 registros mais recentes.</p>');
+  $('#f-app').onsubmit=function(ev){
+    ev.preventDefault();
+    APP.filtros={tipo:$('#p-tipo').value,status:$('#p-status').value,teste:$('#p-teste').checked};
+    evento('Filtrou os registros do aplicativo','Aplicativo',APP.filtros);
+    telaApp();
+  };
+  $$('.app-status').forEach(function(sel){
+    var anterior=sel.value;
+    sel.onchange=async function(){
+      sel.disabled=true;
+      var x=await sb.rpc('app_definir_status',{p_id:sel.getAttribute('data-id'),p_status:sel.value});
+      sel.disabled=false;
+      if(x.error){sel.value=anterior;aviso(msgErro(x.error),true);return;}
+      anterior=sel.value;aviso('Situação atualizada.');
+    };
+  });
+  $$('.chave-sw[data-codigo]').forEach(function(b){
+    b.onclick=async function(){
+      var novo=b.getAttribute('aria-checked')!=='true';
+      ocupar(b,true);
+      var x=await sb.rpc('app_definir_modulo',{p_codigo:b.getAttribute('data-codigo'),p_habilitado:novo});
+      ocupar(b,false);
+      if(x.error){aviso(msgErro(x.error),true);return;}
+      b.setAttribute('aria-checked',novo?'true':'false');
+      aviso(novo?'Módulo do aplicativo ligado.':'Módulo do aplicativo desligado.');
+    };
+  });
 }
 
 /* ---------- Auditoria ---------- */
