@@ -1,4 +1,5 @@
--- Celeiro Office · backoffice · estrutura no Supabase (fase 1 + criação de usuários e níveis de permissão)
+-- Celeiro Office · backoffice · estrutura no Supabase
+-- (acesso, perfis, módulos, níveis de permissão, auditoria e Workflow)
 -- Projeto Supabase PRÓPRIO do backoffice (separado do projeto do site).
 -- Rode este arquivo inteiro em: painel do Supabase > SQL Editor > New query > Run.
 -- Pode ser rodado mais de uma vez sem duplicar nada.
@@ -830,7 +831,478 @@ create policy "auditoria leitura" on public.auditoria
   );
 
 -- =====================================================================
--- 7) PRIMEIRO USUÁRIO MASTER
+-- 8) WORKFLOW (tarefas em lista e em quadro)
+--    Tarefa da equipe Celeiro: organizacao_id nulo. Tarefa de um cliente: organizacao_id dele.
+--    Quem vê: quem tem o módulo Workflow; equipe Celeiro vê todas, cliente vê as da própria organização.
+--    Tarefa confidencial: só quem criou, os responsáveis e os envolvidos.
+--    Toda gravação passa pelas funções abaixo.
+-- =====================================================================
+
+create table if not exists public.workflow_tarefas (
+  id             uuid primary key default gen_random_uuid(),
+  numero         bigint generated always as identity,
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  titulo         text not null check (char_length(titulo) between 1 and 500),
+  descricao      text not null default '' check (char_length(descricao) <= 4000),
+  status         text not null default 'a_fazer'
+                 check (status in ('a_fazer','em_andamento','em_revisao','concluida')),
+  prioridade     text not null default 'media' check (prioridade in ('baixa','media','alta','urgente')),
+  prazo          date,
+  modulo         text not null default '' check (char_length(modulo) <= 60),
+  categoria      text not null default '' check (char_length(categoria) <= 80),
+  confidencial   boolean not null default false,
+  origem_rotulo  text not null default '' check (char_length(origem_rotulo) <= 160),
+  criado_por     uuid references public.usuarios(user_id) on delete set null,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now(),
+  atualizado_por uuid references public.usuarios(user_id) on delete set null,
+  concluida_em   timestamptz
+);
+
+create table if not exists public.workflow_participantes (
+  tarefa_id uuid not null references public.workflow_tarefas(id) on delete cascade,
+  user_id   uuid not null references public.usuarios(user_id) on delete cascade,
+  papel     text not null check (papel in ('responsavel','envolvido')),
+  primary key (tarefa_id, user_id)
+);
+
+create table if not exists public.workflow_comentarios (
+  id        uuid primary key default gen_random_uuid(),
+  tarefa_id uuid not null references public.workflow_tarefas(id) on delete cascade,
+  user_id   uuid references public.usuarios(user_id) on delete set null,
+  texto     text not null check (char_length(texto) between 1 and 2000),
+  criado_em timestamptz not null default now()
+);
+
+-- Quando cada pessoa abriu cada tarefa pela última vez (para marcar "não lidas")
+create table if not exists public.workflow_leituras (
+  tarefa_id uuid not null references public.workflow_tarefas(id) on delete cascade,
+  user_id   uuid not null references public.usuarios(user_id) on delete cascade,
+  lido_em   timestamptz not null default now(),
+  primary key (tarefa_id, user_id)
+);
+
+create unique index if not exists workflow_tarefas_numero on public.workflow_tarefas (numero);
+create index if not exists workflow_tarefas_org        on public.workflow_tarefas (organizacao_id);
+create index if not exists workflow_participantes_user on public.workflow_participantes (user_id);
+create index if not exists workflow_comentarios_tarefa on public.workflow_comentarios (tarefa_id);
+
+alter table public.workflow_tarefas       enable row level security;
+alter table public.workflow_participantes enable row level security;
+alter table public.workflow_comentarios   enable row level security;
+alter table public.workflow_leituras      enable row level security;
+
+-- O usuário atual pode ver e criar tarefas desta organização (nulo = equipe Celeiro)?
+create or replace function public.workflow_escopo_ok(p_org uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select public.pode_modulo('workflow')
+     and coalesce(public.eh_equipe() or p_org = public.minha_org(), false);
+$$;
+
+-- O usuário atual pode ver esta tarefa? (considera as confidenciais)
+create or replace function public.workflow_pode_ver(p_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.workflow_tarefas t
+    where t.id = p_id
+      and public.workflow_escopo_ok(t.organizacao_id)
+      and (
+        not t.confidencial
+        or t.criado_por = (select auth.uid())
+        or exists (
+          select 1 from public.workflow_participantes p
+          where p.tarefa_id = t.id and p.user_id = (select auth.uid())
+        )
+      )
+  );
+$$;
+
+-- Esta pessoa pode ser marcada em uma tarefa desta organização? (uso interno)
+create or replace function public.workflow_pessoa_ok(p_user uuid, p_org uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.usuarios u
+    where u.user_id = p_user
+      and u.ativo
+      and 'workflow' = any(public.modulos_efetivos(u.user_id))
+      and (
+        (p_org is not null and u.organizacao_id = p_org)
+        or (u.perfil in ('master','gerencial') and (p_org is null or public.eh_equipe()))
+      )
+  );
+$$;
+
+-- Pessoas que o usuário atual pode marcar em uma tarefa
+create or replace function public.workflow_pessoas(p_org uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.workflow_escopo_ok(p_org) then
+    raise exception 'Acesso negado';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'user_id', u.user_id, 'nome', u.nome, 'perfil', u.perfil) order by u.nome), '[]'::jsonb)
+    from public.usuarios u
+    where public.workflow_pessoa_ok(u.user_id, p_org)
+  );
+end;
+$$;
+
+-- Tarefas que o usuário atual enxerga, com participantes, comentários e "não lida"
+create or replace function public.workflow_listar()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(jsonb_agg(s.x order by s.numero desc), '[]'::jsonb)
+  from (
+    select t.numero, jsonb_build_object(
+      'id', t.id,
+      'numero', t.numero,
+      'codigo', 'WF-' || lpad(t.numero::text, 4, '0'),
+      'organizacao_id', t.organizacao_id,
+      'organizacao', o.nome,
+      'titulo', t.titulo,
+      'descricao', t.descricao,
+      'status', t.status,
+      'prioridade', t.prioridade,
+      'prazo', t.prazo,
+      'modulo', t.modulo,
+      'categoria', t.categoria,
+      'confidencial', t.confidencial,
+      'origem_rotulo', t.origem_rotulo,
+      'criado_por', t.criado_por,
+      'criado_por_nome', c.nome,
+      'criado_em', t.criado_em,
+      'atualizado_em', t.atualizado_em,
+      'concluida_em', t.concluida_em,
+      'participantes', coalesce((
+        select jsonb_agg(jsonb_build_object('user_id', p.user_id, 'nome', u.nome, 'papel', p.papel)
+                         order by p.papel desc, u.nome)
+        from public.workflow_participantes p
+        join public.usuarios u on u.user_id = p.user_id
+        where p.tarefa_id = t.id), '[]'::jsonb),
+      'comentarios', (select count(*) from public.workflow_comentarios k where k.tarefa_id = t.id),
+      'nao_lida', coalesce(t.atualizado_por <> (select auth.uid()), false)
+                  and coalesce(l.lido_em < t.atualizado_em, true),
+      'pode_excluir', coalesce(
+        t.criado_por = (select auth.uid())
+        or public.meu_perfil() = 'master'
+        or (public.meu_perfil() = 'corp_master' and t.organizacao_id = public.minha_org()), false)
+    ) as x
+    from public.workflow_tarefas t
+    left join public.organizacoes o on o.id = t.organizacao_id
+    left join public.usuarios c on c.user_id = t.criado_por
+    left join public.workflow_leituras l on l.tarefa_id = t.id and l.user_id = (select auth.uid())
+    where public.workflow_pode_ver(t.id)
+  ) s;
+$$;
+
+-- Comentários de uma tarefa
+create or replace function public.workflow_detalhe(p_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.workflow_pode_ver(p_id) then
+    raise exception 'Tarefa não encontrada';
+  end if;
+  return jsonb_build_object(
+    'id', p_id,
+    'comentarios', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', k.id, 'nome', coalesce(u.nome, 'Usuário removido'), 'texto', k.texto, 'criado_em', k.criado_em)
+        order by k.criado_em)
+      from public.workflow_comentarios k
+      left join public.usuarios u on u.user_id = k.user_id
+      where k.tarefa_id = p_id), '[]'::jsonb)
+  );
+end;
+$$;
+
+-- Marca a tarefa como lida pelo usuário atual
+create or replace function public.workflow_marcar_lida(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.workflow_pode_ver(p_id) then
+    raise exception 'Tarefa não encontrada';
+  end if;
+  insert into public.workflow_leituras (tarefa_id, user_id, lido_em)
+  values (p_id, (select auth.uid()), now())
+  on conflict (tarefa_id, user_id) do update set lido_em = excluded.lido_em;
+end;
+$$;
+
+-- Cria (p_id nulo) ou altera uma tarefa e seus participantes
+drop function if exists public.workflow_salvar(uuid, text, text, uuid, text, date, text, uuid[], uuid[], text, text);
+create or replace function public.workflow_salvar(
+  p_id uuid, p_titulo text, p_descricao text, p_org uuid, p_status text, p_prazo date,
+  p_prioridade text, p_modulo text, p_categoria text, p_confidencial boolean,
+  p_responsaveis uuid[], p_envolvidos uuid[], p_origem_rotulo text default ''
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid  uuid := (select auth.uid());
+  v_id   uuid;
+  v_org  uuid;
+  v_resp uuid[];
+  v_env  uuid[];
+  v_u    uuid;
+begin
+  if char_length(trim(coalesce(p_titulo, ''))) = 0 then
+    raise exception 'Informe o título da tarefa';
+  end if;
+  if coalesce(p_status, '') not in ('a_fazer','em_andamento','em_revisao','concluida') then
+    raise exception 'Situação inválida';
+  end if;
+  if coalesce(p_prioridade, '') not in ('baixa','media','alta','urgente') then
+    raise exception 'Prioridade inválida';
+  end if;
+
+  if p_id is null then
+    if not public.workflow_escopo_ok(p_org) then
+      raise exception 'Você não pode criar tarefas para esta organização';
+    end if;
+    if p_org is not null and not exists (select 1 from public.organizacoes where id = p_org and ativo) then
+      raise exception 'Organização não encontrada ou inativa';
+    end if;
+    v_org := p_org;
+    insert into public.workflow_tarefas (
+      organizacao_id, titulo, descricao, status, prioridade, prazo, modulo, categoria,
+      confidencial, origem_rotulo, criado_por, atualizado_por, concluida_em)
+    values (
+      v_org, left(trim(p_titulo), 500), coalesce(p_descricao, ''), p_status, p_prioridade, p_prazo,
+      left(coalesce(p_modulo, ''), 60), left(trim(coalesce(p_categoria, '')), 80),
+      coalesce(p_confidencial, false), left(coalesce(p_origem_rotulo, ''), 160), v_uid, v_uid,
+      case when p_status = 'concluida' then now() end)
+    returning id into v_id;
+  else
+    if not public.workflow_pode_ver(p_id) then
+      raise exception 'Tarefa não encontrada';
+    end if;
+    v_id := p_id;
+    select organizacao_id into v_org from public.workflow_tarefas where id = p_id;
+    update public.workflow_tarefas
+       set titulo = left(trim(p_titulo), 500),
+           descricao = coalesce(p_descricao, ''),
+           status = p_status,
+           prioridade = p_prioridade,
+           prazo = p_prazo,
+           modulo = left(coalesce(p_modulo, ''), 60),
+           categoria = left(trim(coalesce(p_categoria, '')), 80),
+           confidencial = coalesce(p_confidencial, false),
+           atualizado_em = now(),
+           atualizado_por = v_uid,
+           concluida_em = case when p_status = 'concluida' then coalesce(concluida_em, now()) end
+     where id = p_id;
+  end if;
+
+  select coalesce(array_agg(distinct x), '{}'::uuid[]) into v_resp
+    from unnest(coalesce(p_responsaveis, '{}'::uuid[])) x where x is not null;
+  if p_id is null and coalesce(array_length(v_resp, 1), 0) = 0 then
+    v_resp := array[v_uid];
+  end if;
+  select coalesce(array_agg(distinct x), '{}'::uuid[]) into v_env
+    from unnest(coalesce(p_envolvidos, '{}'::uuid[])) x where x is not null and x <> all(v_resp);
+
+  foreach v_u in array (v_resp || v_env) loop
+    if not exists (select 1 from public.workflow_participantes where tarefa_id = v_id and user_id = v_u)
+       and not public.workflow_pessoa_ok(v_u, v_org) then
+      raise exception 'Uma das pessoas marcadas não pode participar desta tarefa';
+    end if;
+  end loop;
+
+  delete from public.workflow_participantes
+   where tarefa_id = v_id and user_id <> all(v_resp || v_env);
+  insert into public.workflow_participantes (tarefa_id, user_id, papel)
+    select v_id, x, 'responsavel' from unnest(v_resp) x
+    union all
+    select v_id, x, 'envolvido' from unnest(v_env) x
+  on conflict (tarefa_id, user_id) do update set papel = excluded.papel
+    where public.workflow_participantes.papel <> excluded.papel;
+
+  insert into public.workflow_leituras (tarefa_id, user_id, lido_em)
+  values (v_id, v_uid, now())
+  on conflict (tarefa_id, user_id) do update set lido_em = excluded.lido_em;
+
+  return v_id;
+end;
+$$;
+
+-- Move a tarefa de situação
+create or replace function public.workflow_mover(p_id uuid, p_status text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(p_status, '') not in ('a_fazer','em_andamento','em_revisao','concluida') then
+    raise exception 'Situação inválida';
+  end if;
+  if not public.workflow_pode_ver(p_id) then
+    raise exception 'Tarefa não encontrada';
+  end if;
+  update public.workflow_tarefas
+     set status = p_status,
+         atualizado_em = now(),
+         atualizado_por = (select auth.uid()),
+         concluida_em = case when p_status = 'concluida' then now() end
+   where id = p_id and status <> p_status;
+end;
+$$;
+
+-- Acrescenta um comentário
+create or replace function public.workflow_comentar(p_id uuid, p_texto text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.workflow_pode_ver(p_id) then
+    raise exception 'Tarefa não encontrada';
+  end if;
+  if char_length(trim(coalesce(p_texto, ''))) = 0 then
+    raise exception 'Escreva o comentário';
+  end if;
+  insert into public.workflow_comentarios (tarefa_id, user_id, texto)
+  values (p_id, (select auth.uid()), left(trim(p_texto), 2000));
+  update public.workflow_tarefas
+     set atualizado_em = now(), atualizado_por = (select auth.uid())
+   where id = p_id;
+  insert into public.workflow_leituras (tarefa_id, user_id, lido_em)
+  values (p_id, (select auth.uid()), now())
+  on conflict (tarefa_id, user_id) do update set lido_em = excluded.lido_em;
+end;
+$$;
+
+-- Exclui uma tarefa: quem criou, o Master ou o Corporativo master da organização
+create or replace function public.workflow_excluir(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_t public.workflow_tarefas%rowtype;
+begin
+  if not public.workflow_pode_ver(p_id) then
+    raise exception 'Tarefa não encontrada';
+  end if;
+  select * into v_t from public.workflow_tarefas where id = p_id;
+  if not coalesce(
+       v_t.criado_por = (select auth.uid())
+       or public.meu_perfil() = 'master'
+       or (public.meu_perfil() = 'corp_master' and v_t.organizacao_id = public.minha_org()), false) then
+    raise exception 'Só quem criou a tarefa, o Master ou o responsável da organização pode excluir';
+  end if;
+  delete from public.workflow_tarefas where id = p_id;
+end;
+$$;
+
+drop trigger if exists auditar_workflow_tarefas on public.workflow_tarefas;
+create trigger auditar_workflow_tarefas
+  after insert or update or delete on public.workflow_tarefas
+  for each row execute function public.auditar('Workflow');
+
+drop trigger if exists auditar_workflow_participantes on public.workflow_participantes;
+create trigger auditar_workflow_participantes
+  after insert or update or delete on public.workflow_participantes
+  for each row execute function public.auditar('Workflow');
+
+drop trigger if exists auditar_workflow_comentarios on public.workflow_comentarios;
+create trigger auditar_workflow_comentarios
+  after insert or update or delete on public.workflow_comentarios
+  for each row execute function public.auditar('Workflow');
+
+revoke all on public.workflow_tarefas, public.workflow_participantes,
+              public.workflow_comentarios, public.workflow_leituras
+  from anon, authenticated;
+grant select on public.workflow_tarefas, public.workflow_participantes,
+                public.workflow_comentarios, public.workflow_leituras
+  to authenticated;
+
+revoke all on function public.workflow_pessoa_ok(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.workflow_escopo_ok(uuid)       from public, anon;
+revoke all on function public.workflow_pode_ver(uuid)        from public, anon;
+revoke all on function public.workflow_pessoas(uuid)         from public, anon;
+revoke all on function public.workflow_listar()              from public, anon;
+revoke all on function public.workflow_detalhe(uuid)         from public, anon;
+revoke all on function public.workflow_marcar_lida(uuid)     from public, anon;
+revoke all on function public.workflow_salvar(uuid, text, text, uuid, text, date, text, text, text, boolean, uuid[], uuid[], text) from public, anon;
+revoke all on function public.workflow_mover(uuid, text)     from public, anon;
+revoke all on function public.workflow_comentar(uuid, text)  from public, anon;
+revoke all on function public.workflow_excluir(uuid)         from public, anon;
+
+grant execute on function public.workflow_escopo_ok(uuid)      to authenticated;
+grant execute on function public.workflow_pode_ver(uuid)       to authenticated;
+grant execute on function public.workflow_pessoas(uuid)        to authenticated;
+grant execute on function public.workflow_listar()             to authenticated;
+grant execute on function public.workflow_detalhe(uuid)        to authenticated;
+grant execute on function public.workflow_marcar_lida(uuid)    to authenticated;
+grant execute on function public.workflow_salvar(uuid, text, text, uuid, text, date, text, text, text, boolean, uuid[], uuid[], text) to authenticated;
+grant execute on function public.workflow_mover(uuid, text)    to authenticated;
+grant execute on function public.workflow_comentar(uuid, text) to authenticated;
+grant execute on function public.workflow_excluir(uuid)        to authenticated;
+
+drop policy if exists "workflow_tarefas leitura" on public.workflow_tarefas;
+create policy "workflow_tarefas leitura" on public.workflow_tarefas
+  for select to authenticated
+  using (public.workflow_pode_ver(id));
+
+drop policy if exists "workflow_participantes leitura" on public.workflow_participantes;
+create policy "workflow_participantes leitura" on public.workflow_participantes
+  for select to authenticated
+  using (public.workflow_pode_ver(tarefa_id));
+
+drop policy if exists "workflow_comentarios leitura" on public.workflow_comentarios;
+create policy "workflow_comentarios leitura" on public.workflow_comentarios
+  for select to authenticated
+  using (public.workflow_pode_ver(tarefa_id));
+
+drop policy if exists "workflow_leituras leitura" on public.workflow_leituras;
+create policy "workflow_leituras leitura" on public.workflow_leituras
+  for select to authenticated
+  using (user_id = (select auth.uid()) and public.workflow_pode_ver(tarefa_id));
+
+-- =====================================================================
+-- 9) PRIMEIRO USUÁRIO MASTER
 --    Depois de criar o usuário em Authentication > Users, troque o e-mail e o nome,
 --    tire os dois traços do início das linhas e rode:
 -- =====================================================================

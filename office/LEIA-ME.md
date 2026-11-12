@@ -17,7 +17,10 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | Trocar a própria senha | Pronto |
 | Habilitação de módulos por perfil e por organização | Pronto |
 | Auditoria: registro de todas as ações, consulta com filtros, exportação | Pronto |
-| Dashboard, Workflow, Cadastro, Financeiro, Investimentos, Conexão MCP, Conteúdo | Aparecem no menu quando habilitados, com aviso da fase em que serão construídos |
+| Workflow: tarefas em lista e em quadro, responsável, envolvidos, prazo, comentários, confidenciais | Pronto |
+| Botão "Nova tarefa" em todas as telas, guardando a tela de origem | Pronto |
+| Dashboard: tarefas vencidas, urgentes, suas e não lidas, gráfico de 15 dias e pendências | Pronto (arrecadação, inadimplentes e energia sem dados até o Financeiro existir) |
+| Cadastro, Financeiro, Investimentos, Conexão MCP, Conteúdo | Aparecem no menu quando habilitados, com aviso da fase em que serão construídos |
 
 ## Arquivos
 
@@ -85,6 +88,26 @@ O Corporativo master cria apenas operadores da própria organização.
 - Master tem sempre todos os módulos e não recebe nível.
 - Um nível em uso não pode ser excluído; troque antes o nível dos usuários.
 
+## Workflow
+
+- **Lista e Quadro.** A mesma tarefa aparece nas duas formas. No quadro, arraste o cartão ou use os botões de mover.
+- **Filtros:** Todas, Pra mim (você é o responsável), Aguardando (você criou e está com outra pessoa), Não lidas (mudou desde a última vez que você abriu), Vencidas, Urgentes e Mencionado (você foi marcado como envolvido).
+- **Busca** por título ou pelo código (WF-0001). **Agrupar por** status ou por origem (módulo).
+- **Nova tarefa** em qualquer tela, pelo botão do topo: a tarefa guarda o módulo e a tela de onde foi criada.
+- **Quem vê:** quem tem o módulo Workflow. A equipe Celeiro vê as tarefas da Celeiro e de todos os clientes; cada cliente vê só as da própria organização.
+- **Confidencial:** só quem criou, o responsável e os envolvidos veem. Nem o Master vê uma tarefa confidencial de que não participa.
+- **Quem altera:** qualquer pessoa que vê a tarefa pode editar, mover e comentar. Excluir é só para quem criou, o Master e o Corporativo master da organização.
+- **Quem pode ser marcado:** pessoas com o módulo Workflow, da mesma organização da tarefa. Só a equipe Celeiro marca pessoas da Celeiro em tarefas de clientes.
+
+Para os clientes usarem, habilite o módulo Workflow para os perfis deles em **Módulos e permissões**.
+
+## Dashboard
+
+- Primeira linha: tarefas vencidas, urgentes, sob sua responsabilidade e não lidas, cada uma com "Ver tudo" que abre a lista já filtrada.
+- Segunda linha: tarefas em aberto, concluídas em 15 dias, usuários ativos e organizações.
+- Gráfico de tarefas criadas e concluídas por dia nos últimos 15 dias, e a lista de pendências com responsável e prazo.
+- Arrecadação, inadimplentes e economia de energia aparecem como "Sem dados": dependem do módulo Financeiro e de uma fonte de dados de energia, que ainda não existem.
+
 ## Como a segurança funciona
 
 - Senha e código são conferidos pelo Supabase, não pelo navegador.
@@ -114,6 +137,9 @@ O Corporativo master cria apenas operadores da própria organização.
 - **Acesso criado sem vínculo.** Se a criação do acesso der certo e o vínculo ao perfil falhar, o e-mail fica criado sem perfil (não entra no sistema). Conclua por "Vincular acesso existente".
 - **Perda do celular.** Apague o autenticador da pessoa no painel (Authentication > Users > usuário > Factors). Ela cadastra de novo no acesso seguinte.
 - **Redefinição de senha por e-mail.** A tela existe, mas depende do envio de e-mails do Supabase estar configurado. Não foi testada.
+- **Workflow sem times e sem @.** O responsável é uma pessoa; ainda não há "time" como responsável, nem menção com @ no texto. Marcar alguém é feito pela lista de Envolvidos.
+- **Workflow sem aviso por e-mail.** Prazos e marcações aparecem só dentro do sistema (filtros e Dashboard).
+- **Tarefa ligada a um registro.** Hoje a tarefa guarda o módulo e a tela de origem. A ligação a um registro específico (um cadastro, uma fatura) entra quando esses módulos existirem.
 - **Permissão dentro do módulo.** Os níveis definem a quais módulos a pessoa tem acesso. Ainda não há separação entre ver, criar, editar e excluir dentro de cada módulo; isso entra junto com a construção dos módulos.
 
 ## Situação dos testes
@@ -121,12 +147,14 @@ O Corporativo master cria apenas operadores da própria organização.
 Testado antes da entrega, fora do Supabase:
 
 - `supabase.sql` rodado em um Postgres local, tanto em banco novo quanto por cima da versão anterior, e as regras conferidas com cada perfil (segundo fator, organizações diferentes, usuário inativo, níveis, auditoria imutável).
-- As telas percorridas em navegador gravando nesse banco, incluindo criar nível, criar usuário com senha inicial e nível, entrar como esse usuário e trocar a senha.
+- As telas percorridas em navegador gravando nesse banco, incluindo criar nível, criar usuário com senha inicial e nível, entrar como esse usuário, trocar a senha, criar, mover, comentar, concluir e excluir tarefas, e conferir o Dashboard.
 - A função `criar-usuario` executada localmente contra um Supabase simulado: recusa sem sessão, sem segundo fator, com perfil sem permissão, com dados inválidos e com e-mail repetido; cria quando permitido.
 
 Testado no projeto Supabase real pelo Paulo em 12/11/2026: `supabase.sql` da primeira versão, login com senha e tela de cadastro do autenticador.
 
-**Ainda não testado no projeto real:** a função `criar-usuario` publicada, os níveis de permissão e a coluna IP da auditoria.
+No projeto real, em 12/11/2026, também foram conferidos: a versão com níveis de permissão rodada sem erro, a função `criar-usuario` publicada e respondendo, e a auditoria gravando IP e país.
+
+**Ainda não exercitado pela tela no projeto real:** criar usuário pela função publicada, níveis de permissão, Workflow e Dashboard.
 
 ## Roteiro de teste no projeto real
 
@@ -142,3 +170,4 @@ Testado no projeto Supabase real pelo Paulo em 12/11/2026: `supabase.sql` da pri
 10. Em janela anônima, abra o endereço terminado em `#auditoria`: deve cair na tela de acesso.
 11. Em **Usuários**, crie um nível com um ou dois módulos e depois um usuário novo com esse nível. Confira os módulos mostrados na lista.
 12. Entre com o usuário novo (senha inicial), cadastre o autenticador e confira que o menu mostra só os módulos esperados.
+13. Clique em **Nova tarefa** no topo, crie uma tarefa com prazo e confira que ela aparece em **Workflow** e nas pendências do **Dashboard**.
