@@ -52,6 +52,7 @@ input.codigo{font-size:24px;font-weight:600;letter-spacing:.35em;text-align:cent
 .botao.ambar{background:var(--ambar);color:var(--verde)}
 .botao.claro{background:var(--branco);color:var(--verde);border:1px solid var(--verde)}
 .botao.pequeno{height:44px;padding:0 14px;font-size:14px}
+.link-botao{display:inline-flex;align-items:center;text-decoration:none}
 .link{background:none;border:0;padding:0;color:var(--verde);text-decoration:underline;cursor:pointer;font-size:14px;min-height:44px;text-align:left}
 .erro{background:var(--erro-fundo);color:var(--erro);border:1px solid #F0B4B4;border-radius:8px;padding:12px 14px;font-size:14px}
 .sucesso{background:#E4F1EA;color:var(--verde);border:1px solid #B5D3C4;border-radius:8px;padding:12px 14px;font-size:14px}
@@ -102,6 +103,17 @@ td .sub{display:block;font-size:12px;color:var(--texto2)}
 .chave-sw[disabled]{opacity:.5;cursor:not-allowed}
 .situacao{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;background:#E4F1EA;color:var(--verde)}
 .situacao.off{background:#E8E8E8;color:#4A4A4A}
+.chips{display:inline-flex;flex-wrap:wrap;gap:6px;vertical-align:middle}
+.chipm{padding:3px 9px;border-radius:6px;background:#E4F1EA;color:var(--verde);font-size:12px;font-weight:500;white-space:nowrap}
+.chipm.bloq{background:var(--alerta-fundo);color:#7A5400}
+.previa{padding:12px 14px;border-radius:8px;background:var(--nevoa);font-size:14px;line-height:1.9}
+.previa .sub{display:block;font-size:12px;color:var(--texto2);line-height:1.5}
+.caixas{display:flex;flex-wrap:wrap;gap:8px 18px}
+.caixa-mod{display:inline-flex;align-items:center;gap:8px;min-height:44px;font-size:14px;cursor:pointer}
+.caixa-mod input{width:20px;height:20px;accent-color:var(--verde)}
+.junto{display:flex;gap:8px}
+.junto input{flex:1;min-width:0}
+.senha-inicial{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:16px;font-weight:600;letter-spacing:.04em;user-select:all}
 #aviso{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:calc(100% - 32px);padding:12px 18px;border-radius:8px;background:var(--verde);color:var(--nevoa);font-size:14px;box-shadow:0 6px 24px rgba(15,61,46,.25);z-index:10}
 #aviso.ruim{background:var(--erro)}
 #aviso:empty{display:none}
@@ -431,6 +443,7 @@ function montarCasca(){
     '<div class="conteudo">'+
       '<header class="topo"><p class="trilha" id="trilha"></p>'+
         '<div class="quem"><span class="chip">'+esc(PERFIS[a.perfil]||a.perfil)+'</span><span>'+esc(a.nome)+(a.organizacao?' · '+esc(a.organizacao):'')+'</span>'+
+        '<a class="botao claro pequeno link-botao" href="#senha">Trocar senha</a>'+
         '<button class="botao claro pequeno" type="button" id="b-sair-topo">Sair</button></div></header>'+
       '<main class="tela" id="tela"></main>'+
     '</div>'+
@@ -443,7 +456,8 @@ var ROTAS={
   modulos:{titulo:'Módulos e permissões',modulo:'Módulos e permissões',fn:telaModulos,pode:function(){return ehMaster()||ehCorpMaster();}},
   usuarios:{titulo:'Usuários',modulo:'Usuários',fn:telaUsuarios,pode:function(){return ehMaster()||ehCorpMaster();}},
   organizacoes:{titulo:'Organizações',modulo:'Organizações',fn:telaOrganizacoes,pode:ehMaster},
-  auditoria:{titulo:'Auditoria',modulo:'Auditoria',fn:telaAuditoria,pode:function(){return temModulo('auditoria');}}
+  auditoria:{titulo:'Auditoria',modulo:'Auditoria',fn:telaAuditoria,pode:function(){return temModulo('auditoria');}},
+  senha:{titulo:'Trocar senha',modulo:'Acesso',fn:telaSenha,pode:function(){return true;},semGrupo:true}
 };
 
 function rota(){
@@ -455,10 +469,10 @@ function rota(){
   }
   if(!r||!r.pode()){h='inicio';r=ROTAS.inicio;}
   $$('.lateral a').forEach(function(l){if(l.getAttribute('data-rota')===h)l.setAttribute('aria-current','page');else l.removeAttribute('aria-current');});
-  $('#trilha').textContent=(h==='inicio'||mod?'':'Administração / ')+r.titulo;
+  $('#trilha').textContent=(h==='inicio'||mod||r.semGrupo?'':'Administração / ')+r.titulo;
   document.title=r.titulo+' · Celeiro Office';
   evento('Abriu a tela '+r.titulo,r.modulo);
-  r.fn();
+  if(r.fn===telaUsuarios){telaUsuarios();}else{r.fn();}
 }
 window.addEventListener('hashchange',rota);
 
@@ -523,80 +537,261 @@ async function telaOrganizacoes(){
   });
 }
 
-/* ---------- Usuários ---------- */
-async function telaUsuarios(editar){
-  carregando('Usuários');
-  var rs=await Promise.all([sb.from('usuarios').select('*').order('nome'),sb.from('organizacoes').select('*').order('nome')]);
-  if(rs[0].error){falhaTela('Usuários',rs[0].error);return;}
-  if(rs[1].error){falhaTela('Usuários',rs[1].error);return;}
-  var usuarios=rs[0].data||[],orgs=rs[1].data||[],master=ehMaster(),a=E.acesso;
-  var nomeOrg={};orgs.forEach(function(o){nomeOrg[o.id]=o.nome;});
-  var ed=editar?usuarios.filter(function(u){return u.user_id===editar;})[0]:null;
+/* ---------- Usuários, níveis de permissão e módulos de cada pessoa ---------- */
+function gerarSenha(){
+  var abc='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789',v=new Uint32Array(14),s='';
+  window.crypto.getRandomValues(v);
+  for(var i=0;i<v.length;i++){s+=abc[v[i]%abc.length];}
+  return s;
+}
+async function erroFuncao(e){
+  var corpo=null;
+  try{if(e&&e.context&&typeof e.context.json==='function'){corpo=await e.context.json();}}catch(err){}
+  if(corpo&&corpo.erro)return corpo.erro;
+  var st=e&&e.context&&e.context.status;
+  if(st===404||/FunctionsFetchError|FunctionsRelayError/.test((e&&e.name)||'')||/Failed to send|not found/i.test((e&&e.message)||'')){
+    return 'A função de criar usuários ainda não foi publicada no Supabase. Veja "Publicar a função criar-usuario" no LEIA-ME.';
+  }
+  if(st===401)return 'A função não aceitou a sua sessão. Saia, entre de novo e repita.';
+  if(corpo&&corpo.message)return corpo.message;
+  return msgErro(e);
+}
+function nomeModulo(c){
+  var m=E.modulos.filter(function(x){return x.codigo===c;})[0];
+  return m?m.nome:c;
+}
+function chipsModulos(lista,bloqueados){
+  var h=(lista||[]).map(function(c){return '<span class="chipm">'+esc(nomeModulo(c))+'</span>';}).join('');
+  h+=(bloqueados||[]).map(function(c){return '<span class="chipm bloq" title="Está no nível, mas não está habilitado para o perfil em Módulos e permissões">'+esc(nomeModulo(c))+' (bloqueado)</span>';}).join('');
+  return '<span class="chips">'+(h||'<span class="apoio">Nenhum módulo</span>')+'</span>';
+}
 
+async function telaUsuarios(op){
+  op=op||{};
+  carregando('Usuários');
+  var rs=await Promise.all([
+    sb.from('usuarios').select('*').order('nome'),
+    sb.from('organizacoes').select('*').order('nome'),
+    sb.from('niveis_permissao').select('*').order('nome'),
+    sb.from('modulo_permissoes').select('*'),
+    sb.rpc('usuarios_com_modulos')
+  ]);
+  for(var i=0;i<rs.length;i++){if(rs[i].error){falhaTela('Usuários',rs[i].error);return;}}
+  var usuarios=rs[0].data||[],orgs=rs[1].data||[],niveis=rs[2].data||[],perms=rs[3].data||[],mods=rs[4].data||[];
+  var master=ehMaster(),a=E.acesso;
+  var nomeOrg={};orgs.forEach(function(o){nomeOrg[o.id]=o.nome;});
+  var nivelPorId={};niveis.forEach(function(n){nivelPorId[n.id]=n;});
+  var modsDe={};mods.forEach(function(m){modsDe[m.user_id]=m;});
+  var ed=op.editar?usuarios.filter(function(u){return u.user_id===op.editar;})[0]:null;
+  var edN=op.editarNivel?nivelPorId[op.editarNivel]:null;
+  var vincular=!!op.vincular&&!ed;
+
+  /* módulos que um perfil recebe, com ou sem nível */
+  function basePerfil(perfil,org){
+    return E.modulos.map(function(m){return m.codigo;}).filter(function(c){
+      return perms.some(function(p){return p.perfil===perfil&&p.modulo===c&&p.habilitado&&(perfil==='gerencial'?p.organizacao_id===null:p.organizacao_id===org);});
+    });
+  }
+  function previa(perfil,org,nivelId){
+    if(perfil==='master')return {todos:true,modulos:[],bloqueados:[]};
+    var base=basePerfil(perfil,org),n=nivelId?nivelPorId[nivelId]:null;
+    if(!n)return {modulos:base,bloqueados:[]};
+    return {modulos:base.filter(function(c){return n.modulos.indexOf(c)>=0;}),bloqueados:n.modulos.filter(function(c){return base.indexOf(c)<0;})};
+  }
   function podeAlterar(u){return master||(u.perfil==='corp_operador'&&u.organizacao_id===a.organizacao_id);}
+
+  /* ----- tabela de usuários ----- */
   var linhas=usuarios.map(function(u){
-    var eu=u.user_id===a.user_id;
-    return '<tr><td>'+esc(u.nome)+(eu?'<span class="sub">você</span>':'')+'</td><td>'+esc(u.email)+'</td><td>'+esc(PERFIS[u.perfil]||u.perfil)+'</td>'+
-      '<td>'+esc(u.organizacao_id?(nomeOrg[u.organizacao_id]||'—'):'Celeiro')+'</td>'+
+    var eu=u.user_id===a.user_id,m=modsDe[u.user_id]||{modulos:[],bloqueados:[]},n=u.nivel_id?nivelPorId[u.nivel_id]:null;
+    return '<tr><td>'+esc(u.nome)+(eu?'<span class="sub">você</span>':'')+'<span class="sub">'+esc(u.email)+'</span></td>'+
+      '<td>'+esc(PERFIS[u.perfil]||u.perfil)+'<span class="sub">'+esc(u.organizacao_id?(nomeOrg[u.organizacao_id]||'—'):'Celeiro')+'</span></td>'+
+      '<td>'+(u.perfil==='master'?'—':esc(n?n.nome:'Padrão do perfil'))+'</td>'+
+      '<td>'+(u.perfil==='master'?'<span class="chips"><span class="chipm">Todos os módulos</span></span>':(u.ativo?chipsModulos(m.modulos,m.bloqueados):'<span class="apoio">Sem acesso (inativo)</span>'))+'</td>'+
       '<td><span class="situacao'+(u.ativo?'':' off')+'">'+(u.ativo?'Ativo':'Inativo')+'</span></td>'+
       '<td>'+(podeAlterar(u)?'<button class="botao claro pequeno" type="button" data-editar="'+esc(u.user_id)+'">Editar</button> '+
         (eu?'':'<button class="botao claro pequeno" type="button" data-situacao="'+esc(u.user_id)+'">'+(u.ativo?'Desativar':'Ativar')+'</button>'):'')+'</td></tr>';
   }).join('');
 
-  var perfisDisp=master?['master','gerencial','corp_master','corp_operador']:['corp_operador'];
+  /* ----- formulário de usuário ----- */
+  var perfisDisp=master?['gerencial','corp_master','corp_operador','master']:['corp_operador'];
   var optPerfil=perfisDisp.map(function(p){return '<option value="'+p+'"'+(ed&&ed.perfil===p?' selected':'')+'>'+esc(PERFIS[p])+'</option>';}).join('');
   var optOrg=(master?'<option value="">Celeiro (sem organização)</option>':'')+orgs.map(function(o){
     return '<option value="'+esc(o.id)+'"'+(ed&&ed.organizacao_id===o.id?' selected':'')+'>'+esc(o.nome)+(o.ativo?'':' (inativa)')+'</option>';}).join('');
+  var tituloForm=ed?'Editar usuário':(vincular?'Vincular acesso existente':'Novo usuário');
+  var criadoHtml=op.criado?'<div class="sucesso" role="status"><strong>Usuário criado: '+esc(op.criado.nome)+' ('+esc(op.criado.email)+').</strong><br>'+
+    (op.criado.senha?'Senha inicial: <span class="senha-inicial">'+esc(op.criado.senha)+'</span><br>Anote agora: ela não será mostrada de novo. Passe à pessoa por um canal seguro. ':'')+
+    'No primeiro acesso a pessoa cadastra o próprio Google Authenticator e pode trocar a senha em "Trocar senha".</div>':'';
+
+  /* ----- níveis ----- */
+  var escopoNivel=edN?(edN.organizacao_id||''):(master?'':a.organizacao_id);
+  var linhasNiveis=niveis.map(function(n){
+    var qtd=usuarios.filter(function(u){return u.nivel_id===n.id;}).length;
+    return '<tr><td>'+esc(n.nome)+(n.descricao?'<span class="sub">'+esc(n.descricao)+'</span>':'')+'</td>'+
+      '<td>'+esc(n.organizacao_id?(nomeOrg[n.organizacao_id]||'—'):'Equipe Celeiro')+'</td>'+
+      '<td>'+chipsModulos(n.modulos)+'</td><td>'+qtd+'</td>'+
+      '<td><button class="botao claro pequeno" type="button" data-editar-nivel="'+esc(n.id)+'">Editar</button> '+
+      '<button class="botao claro pequeno" type="button" data-excluir-nivel="'+esc(n.id)+'"'+(qtd?' disabled title="Há usuários neste nível"':'')+'>Excluir</button></td></tr>';
+  }).join('');
+  var optEscopo=(master?'<option value="">Equipe Celeiro (perfil Gerencial)</option>':'')+orgs.map(function(o){
+    return '<option value="'+esc(o.id)+'"'+(o.id===escopoNivel?' selected':'')+'>'+esc(o.nome)+'</option>';}).join('');
+  var modsNivel=E.modulos.filter(function(m){return master||temModulo(m.codigo);});
+  var caixasModulos=modsNivel.map(function(m){
+    var marcado=edN&&edN.modulos.indexOf(m.codigo)>=0;
+    return '<label class="caixa-mod"><input type="checkbox" name="n-mod" value="'+esc(m.codigo)+'"'+(marcado?' checked':'')+'> '+esc(m.nome)+'</label>';
+  }).join('');
 
   tela('<div class="cabeca"><div><h1>Usuários</h1><p class="apoio">'+(master?'Todos os usuários do sistema.':'Operadores da sua organização.')+' Cada pessoa usa o próprio acesso, com o próprio autenticador.</p></div></div>'+
-    '<form class="painel" id="f-usuario" novalidate><h2>'+(ed?'Editar usuário':'Vincular usuário')+'</h2>'+
-      (ed?'':'<p class="apoio">Primeiro crie o acesso (e-mail e senha) no painel do Supabase, em Authentication &gt; Users. Depois vincule aqui o e-mail ao perfil.</p>')+
+    criadoHtml+
+    '<form class="painel" id="f-usuario" novalidate><h2>'+tituloForm+'</h2>'+
+      (vincular?'<p class="apoio">Use quando o acesso (e-mail e senha) já foi criado no painel do Supabase. Aqui você só liga esse e-mail a um perfil.</p>':'')+
       '<div class="grade">'+
-      '<div class="campo"><label for="u-email">E-mail</label><input id="u-email" type="email" value="'+esc(ed?ed.email:'')+'"'+(ed?' disabled':'')+' required></div>'+
       '<div class="campo"><label for="u-nome">Nome</label><input id="u-nome" type="text" maxlength="120" value="'+esc(ed?ed.nome:'')+'" required></div>'+
+      '<div class="campo"><label for="u-email">E-mail</label><input id="u-email" type="email" autocomplete="off" value="'+esc(ed?ed.email:'')+'"'+(ed?' disabled':'')+' required></div>'+
+      (ed||vincular?'':'<div class="campo"><label for="u-senha">Senha inicial (mínimo 10 caracteres)</label><div class="junto"><input id="u-senha" type="text" autocomplete="off" maxlength="72" required><button class="botao claro pequeno" type="button" id="b-gerar">Gerar</button></div></div>')+
+      '</div><div class="grade">'+
       '<div class="campo"><label for="u-perfil">Perfil</label><select id="u-perfil"'+(ed&&ed.user_id===a.user_id?' disabled':'')+'>'+optPerfil+'</select></div>'+
       '<div class="campo"><label for="u-org">Organização</label><select id="u-org"'+(master?'':' disabled')+'>'+optOrg+'</select></div>'+
-      '<button class="botao" type="submit">'+(ed?'Salvar':'Vincular')+'</button>'+
-      (ed?'<button class="botao claro" type="button" id="b-cancelar">Cancelar</button>':'')+
+      '<div class="campo"><label for="u-nivel">Nível de permissão</label><select id="u-nivel"></select></div>'+
+      '</div>'+
+      '<div class="previa" id="u-previa" aria-live="polite"></div>'+
+      '<div class="grade"><button class="botao" type="submit">'+(ed?'Salvar':(vincular?'Vincular':'Criar usuário'))+'</button>'+
+      (ed||vincular?'<button class="botao claro" type="button" id="b-cancelar">Cancelar</button>':'<button class="link" type="button" id="b-modo-vincular">O acesso já existe no Supabase? Vincular acesso existente</button>')+
       '</div></form>'+
-    '<div class="rolagem"><table><thead><tr><th scope="col">Nome</th><th scope="col">E-mail</th><th scope="col">Perfil</th><th scope="col">Organização</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead><tbody>'+
+    '<div class="rolagem"><table style="min-width:860px"><thead><tr><th scope="col">Usuário</th><th scope="col">Perfil</th><th scope="col">Nível</th><th scope="col">Módulos que acessa</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead><tbody>'+
       (linhas||'<tr><td colspan="6" class="vazio">Nenhum usuário.</td></tr>')+'</tbody></table></div>'+
+    '<div class="cabeca"><div><h1 style="font-size:22px" id="niveis">Níveis de permissão</h1><p class="apoio">Um nível é um conjunto de módulos com nome. Ao dar um nível a um usuário, ele acessa só os módulos do nível. Sem nível, vale o padrão do perfil. Um nível só libera módulos que também estejam habilitados para o perfil em Módulos e permissões.</p></div></div>'+
+    '<form class="painel" id="f-nivel" novalidate><h2>'+(edN?'Editar nível':'Novo nível')+'</h2><div class="grade">'+
+      '<div class="campo"><label for="n-nome">Nome do nível</label><input id="n-nome" type="text" maxlength="80" value="'+esc(edN?edN.nome:'')+'" required></div>'+
+      '<div class="campo"><label for="n-desc">Descrição (opcional)</label><input id="n-desc" type="text" maxlength="300" value="'+esc(edN?edN.descricao:'')+'"></div>'+
+      '<div class="campo"><label for="n-org">Para quem</label><select id="n-org"'+(master&&!edN?'':' disabled')+'>'+optEscopo+'</select></div></div>'+
+      '<fieldset class="campo" style="border:0;padding:0;margin:0"><legend class="rotulo" style="padding:0;margin-bottom:8px;font-size:14px;font-weight:500">Módulos deste nível</legend><div class="caixas">'+
+        (caixasModulos||'<span class="apoio">Nenhum módulo liberado para a sua organização.</span>')+'</div></fieldset>'+
+      '<div class="grade"><button class="botao" type="submit">'+(edN?'Salvar nível':'Criar nível')+'</button>'+(edN?'<button class="botao claro" type="button" id="b-cancelar-nivel">Cancelar</button>':'')+'</div></form>'+
+    '<div class="rolagem"><table style="min-width:720px"><thead><tr><th scope="col">Nível</th><th scope="col">Para quem</th><th scope="col">Módulos</th><th scope="col">Usuários</th><th scope="col">Ações</th></tr></thead><tbody>'+
+      (linhasNiveis||'<tr><td colspan="5" class="vazio">Nenhum nível criado. Sem nível, cada usuário segue o padrão do perfil.</td></tr>')+'</tbody></table></div>'+
     '<p class="nota">Se alguém perder o celular, apague o autenticador da pessoa no painel do Supabase (Authentication &gt; Users &gt; usuário &gt; Factors). No acesso seguinte ela cadastra de novo.</p>');
 
-  var selPerfil=$('#u-perfil'),selOrg=$('#u-org');
-  function ajustaOrg(){
-    if(!master)return;
-    var corp=selPerfil.value==='corp_master'||selPerfil.value==='corp_operador';
-    selOrg.disabled=!corp;
-    if(!corp)selOrg.value='';
+  /* ----- comportamento do formulário de usuário ----- */
+  var selPerfil=$('#u-perfil'),selOrg=$('#u-org'),selNivel=$('#u-nivel'),elPrevia=$('#u-previa');
+  var nivelInicial=ed?(ed.nivel_id||''):'';
+  function ehCorp(){return selPerfil.value==='corp_master'||selPerfil.value==='corp_operador';}
+  function orgAtual(){return ehCorp()?(selOrg.value||null):null;}
+  function mostraPrevia(){
+    var p=previa(selPerfil.value,orgAtual(),selNivel.disabled?null:(selNivel.value||null));
+    if(p.todos){elPrevia.innerHTML='<strong>Módulos que este usuário vai acessar:</strong> <span class="chips"><span class="chipm">Todos os módulos</span></span>';return;}
+    if(ehCorp()&&!orgAtual()){elPrevia.innerHTML='<span class="apoio">Escolha a organização para ver os módulos.</span>';return;}
+    elPrevia.innerHTML='<strong>Módulos que este usuário vai acessar:</strong> '+chipsModulos(p.modulos,p.bloqueados)+
+      (p.bloqueados.length?'<span class="sub">Os bloqueados estão no nível, mas não estão habilitados para o perfil em Módulos e permissões.</span>':'');
   }
-  selPerfil.onchange=ajustaOrg;ajustaOrg();
-  if(ed){$('#b-cancelar').onclick=function(){telaUsuarios();};}
+  function montaNiveis(manter){
+    var perfil=selPerfil.value,org=orgAtual(),atual=manter;
+    if(perfil==='master'){
+      selNivel.innerHTML='<option value="">Master tem todos os módulos</option>';selNivel.disabled=true;
+    }else{
+      var lista=niveis.filter(function(n){return (n.organizacao_id||null)===org;});
+      selNivel.disabled=false;
+      selNivel.innerHTML='<option value="">Padrão do perfil '+esc(PERFIS[perfil])+'</option>'+lista.map(function(n){
+        return '<option value="'+esc(n.id)+'"'+(n.id===atual?' selected':'')+'>'+esc(n.nome)+'</option>';}).join('');
+    }
+    mostraPrevia();
+  }
+  function ajustaOrg(){
+    if(master){selOrg.disabled=!ehCorp();if(!ehCorp())selOrg.value='';}
+    montaNiveis(selNivel.value||nivelInicial);
+  }
+  selPerfil.onchange=ajustaOrg;
+  selOrg.onchange=function(){montaNiveis('');};
+  selNivel.onchange=mostraPrevia;
+  ajustaOrg();
+  if($('#b-gerar')){$('#b-gerar').onclick=function(){$('#u-senha').value=gerarSenha();};}
+  if($('#b-cancelar')){$('#b-cancelar').onclick=function(){telaUsuarios();};}
+  if($('#b-modo-vincular')){$('#b-modo-vincular').onclick=function(){telaUsuarios({vincular:true});};}
 
   $('#f-usuario').onsubmit=async function(ev){
     ev.preventDefault();
-    var email=$('#u-email').value.trim(),nome=$('#u-nome').value.trim(),perfil=selPerfil.value,org=selOrg.value||null,b=$('button[type=submit]',this);
-    var corp=perfil==='corp_master'||perfil==='corp_operador';
-    if(!email||!nome){aviso('Informe e-mail e nome.',true);return;}
-    if(corp&&!org){aviso('Escolha a organização deste usuário.',true);return;}
+    var email=$('#u-email').value.trim().toLowerCase(),nome=$('#u-nome').value.trim(),perfil=selPerfil.value,org=orgAtual();
+    var nivel=selNivel.disabled?null:(selNivel.value||null),b=$('button[type=submit]',this),senha=$('#u-senha')?$('#u-senha').value:'';
+    if(!email||!nome){aviso('Informe nome e e-mail.',true);return;}
+    if(ehCorp()&&!org){aviso('Escolha a organização deste usuário.',true);return;}
+    if(!ed&&!vincular&&senha.length<10){aviso('A senha inicial precisa ter pelo menos 10 caracteres.',true);return;}
     ocupar(b,true);
-    var r=ed
-      ?await sb.rpc('atualizar_usuario',{p_user:ed.user_id,p_nome:nome,p_perfil:perfil,p_org:corp?org:null,p_ativo:ed.ativo})
-      :await sb.rpc('vincular_usuario',{p_email:email,p_nome:nome,p_perfil:perfil,p_org:corp?org:null});
-    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
-    aviso(ed?'Usuário alterado.':'Usuário vinculado.');telaUsuarios();
+    var r;
+    if(ed){
+      r=await sb.rpc('atualizar_usuario',{p_user:ed.user_id,p_nome:nome,p_perfil:perfil,p_org:org,p_ativo:ed.ativo,p_nivel:nivel});
+      if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+      aviso('Usuário alterado.');telaUsuarios();return;
+    }
+    if(!vincular){
+      var c=await sb.functions.invoke('criar-usuario',{body:{email:email,senha:senha,perfil:perfil,organizacao_id:org}});
+      if(c.error){ocupar(b,false);aviso(await erroFuncao(c.error),true);return;}
+      evento('Criou o acesso de um usuário','Usuários',{email:email,perfil:perfil});
+    }
+    r=await sb.rpc('vincular_usuario',{p_email:email,p_nome:nome,p_perfil:perfil,p_org:org,p_nivel:nivel});
+    if(r.error){
+      ocupar(b,false);
+      aviso((vincular?'':'O acesso foi criado, mas o vínculo falhou: ')+msgErro(r.error)+(vincular?'':' Use "Vincular acesso existente" para concluir.'),true);
+      return;
+    }
+    if(vincular){aviso('Usuário vinculado.');telaUsuarios();}
+    else{telaUsuarios({criado:{nome:nome,email:email,senha:senha}});}
   };
-  $$('[data-editar]').forEach(function(b){b.onclick=function(){telaUsuarios(b.getAttribute('data-editar'));};});
+  $$('[data-editar]').forEach(function(b){b.onclick=function(){telaUsuarios({editar:b.getAttribute('data-editar')});};});
   $$('[data-situacao]').forEach(function(b){
     b.onclick=async function(){
       var u=usuarios.filter(function(x){return x.user_id===b.getAttribute('data-situacao');})[0];
       if(!u)return;
       ocupar(b,true);
-      var r=await sb.rpc('atualizar_usuario',{p_user:u.user_id,p_nome:u.nome,p_perfil:u.perfil,p_org:u.organizacao_id,p_ativo:!u.ativo});
+      var r=await sb.rpc('atualizar_usuario',{p_user:u.user_id,p_nome:u.nome,p_perfil:u.perfil,p_org:u.organizacao_id,p_ativo:!u.ativo,p_nivel:u.nivel_id});
       if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
       aviso(u.ativo?'Usuário desativado.':'Usuário ativado.');telaUsuarios();
     };
   });
+
+  /* ----- comportamento dos níveis ----- */
+  if($('#b-cancelar-nivel')){$('#b-cancelar-nivel').onclick=function(){telaUsuarios();};}
+  $('#f-nivel').onsubmit=async function(ev){
+    ev.preventDefault();
+    var nome=$('#n-nome').value.trim(),b=$('button[type=submit]',this);
+    var marcados=$$('input[name=n-mod]:checked',this).map(function(x){return x.value;});
+    if(!nome){aviso('Dê um nome ao nível.',true);return;}
+    if(!marcados.length){aviso('Marque pelo menos um módulo.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('salvar_nivel',{p_id:edN?edN.id:null,p_nome:nome,p_descricao:$('#n-desc').value.trim(),p_org:$('#n-org').value||null,p_modulos:marcados});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    aviso(edN?'Nível alterado.':'Nível criado.');telaUsuarios();
+  };
+  $$('[data-editar-nivel]').forEach(function(b){b.onclick=function(){telaUsuarios({editarNivel:b.getAttribute('data-editar-nivel')});};});
+  $$('[data-excluir-nivel]').forEach(function(b){
+    b.onclick=async function(){
+      ocupar(b,true);
+      var r=await sb.rpc('excluir_nivel',{p_id:b.getAttribute('data-excluir-nivel')});
+      if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+      aviso('Nível excluído.');telaUsuarios();
+    };
+  });
+  if(op.editarNivel&&$('#f-nivel')){$('#f-nivel').scrollIntoView();}
+}
+
+/* ---------- Trocar a própria senha ---------- */
+function telaSenha(){
+  tela('<div class="cabeca"><div><h1>Trocar senha</h1><p class="apoio">Use pelo menos 10 caracteres. A troca fica registrada na auditoria.</p></div></div>'+
+    '<form class="painel" id="f-senha" novalidate style="max-width:460px">'+
+    '<div class="campo"><label for="t-s1">Nova senha</label><input id="t-s1" type="password" autocomplete="new-password" required></div>'+
+    '<div class="campo"><label for="t-s2">Repita a nova senha</label><input id="t-s2" type="password" autocomplete="new-password" required></div>'+
+    '<button class="botao" type="submit">Salvar senha</button></form>');
+  $('#f-senha').onsubmit=async function(ev){
+    ev.preventDefault();
+    var s1=$('#t-s1').value,s2=$('#t-s2').value,b=$('button[type=submit]',this);
+    if(s1.length<10){aviso('A senha precisa ter pelo menos 10 caracteres.',true);return;}
+    if(s1!==s2){aviso('As duas senhas não são iguais.',true);return;}
+    ocupar(b,true);
+    var r=await sb.auth.updateUser({password:s1});
+    ocupar(b,false);
+    if(r.error){aviso(msgErro(r.error),true);return;}
+    evento('Trocou a própria senha','Acesso');
+    $('#t-s1').value='';$('#t-s2').value='';
+    aviso('Senha alterada.');
+  };
 }
 
 /* ---------- Módulos e permissões ---------- */

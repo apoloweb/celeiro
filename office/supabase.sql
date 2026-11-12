@@ -1,4 +1,4 @@
--- Celeiro Office · backoffice · estrutura no Supabase (fase 1)
+-- Celeiro Office · backoffice · estrutura no Supabase (fase 1 + criação de usuários e níveis de permissão)
 -- Projeto Supabase PRÓPRIO do backoffice (separado do projeto do site).
 -- Rode este arquivo inteiro em: painel do Supabase > SQL Editor > New query > Run.
 -- Pode ser rodado mais de uma vez sem duplicar nada.
@@ -72,6 +72,21 @@ create unique index if not exists modulo_permissoes_unica
     coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid), perfil, modulo
   );
 
+-- Níveis de permissão: conjuntos de módulos que podem ser atribuídos a usuários.
+-- organizacao_id nulo = nível da equipe Celeiro (perfil Gerencial).
+-- Um nível só libera módulos que também estejam habilitados para o perfil em modulo_permissoes.
+create table if not exists public.niveis_permissao (
+  id             uuid primary key default gen_random_uuid(),
+  nome           text not null check (char_length(nome) between 1 and 80),
+  descricao      text not null default '' check (char_length(descricao) <= 300),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  modulos        text[] not null default '{}',
+  criado_em      timestamptz not null default now()
+);
+
+alter table public.usuarios
+  add column if not exists nivel_id uuid references public.niveis_permissao(id);
+
 -- Auditoria: todas as ações de todos os usuários
 create table if not exists public.auditoria (
   id             bigint generated always as identity primary key,
@@ -102,6 +117,7 @@ alter table public.usuarios          enable row level security;
 alter table public.modulos           enable row level security;
 alter table public.modulo_permissoes enable row level security;
 alter table public.auditoria         enable row level security;
+alter table public.niveis_permissao  enable row level security;
 
 -- =====================================================================
 -- 2) FUNÇÕES DE APOIO (quem é o usuário e o que ele pode)
@@ -168,6 +184,40 @@ as $$
   select public.aal2() and coalesce(public.meu_perfil() in ('master','gerencial'), false);
 $$;
 
+-- Módulos que um usuário realmente tem (uso interno).
+-- Master: todos. Demais: módulos habilitados para o perfil (e organização),
+-- limitados aos módulos do nível de permissão do usuário, quando ele tem um.
+create or replace function public.modulos_efetivos(p_user uuid)
+returns text[]
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(array_agg(m.codigo order by m.ordem), '{}'::text[])
+  from public.usuarios u
+  left join public.organizacoes o on o.id = u.organizacao_id
+  left join public.niveis_permissao n on n.id = u.nivel_id
+  cross join public.modulos m
+  where u.user_id = p_user
+    and u.ativo
+    and (u.organizacao_id is null or o.ativo)
+    and (
+      u.perfil = 'master'
+      or (
+        exists (
+          select 1
+          from public.modulo_permissoes p
+          where p.modulo = m.codigo
+            and p.habilitado
+            and p.perfil = u.perfil
+            and p.organizacao_id is not distinct from u.organizacao_id
+        )
+        and (u.nivel_id is null or m.codigo = any(n.modulos))
+      )
+    );
+$$;
+
 -- O usuário atual tem o módulo habilitado? (Master tem todos.)
 create or replace function public.pode_modulo(p_modulo text)
 returns boolean
@@ -176,16 +226,45 @@ stable
 security definer
 set search_path = ''
 as $$
-  select public.aal2() and coalesce(
-    public.meu_perfil() = 'master'
-    or exists (
-      select 1
-      from public.modulo_permissoes p
-      where p.modulo = p_modulo
-        and p.habilitado
-        and p.perfil = public.meu_perfil()
-        and p.organizacao_id is not distinct from public.minha_org()
-    ), false);
+  select public.aal2()
+     and coalesce(p_modulo = any(public.modulos_efetivos((select auth.uid()))), false);
+$$;
+
+-- O usuário atual pode criar um usuário com este perfil nesta organização?
+create or replace function public.pode_criar_usuario(p_perfil text, p_org uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select public.aal2()
+     and coalesce(p_perfil in ('master','gerencial','corp_master','corp_operador'), false)
+     and (p_perfil in ('master','gerencial')) = (p_org is null)
+     and (p_org is null or exists (select 1 from public.organizacoes o where o.id = p_org))
+     and coalesce(
+       public.meu_perfil() = 'master'
+       or (public.meu_perfil() = 'corp_master' and p_perfil = 'corp_operador' and p_org = public.minha_org()),
+       false);
+$$;
+
+-- O nível serve para um usuário com este perfil nesta organização?
+create or replace function public.nivel_valido(p_nivel uuid, p_perfil text, p_org uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p_nivel is null
+      or (
+        p_perfil <> 'master'
+        and exists (
+          select 1 from public.niveis_permissao n
+          where n.id = p_nivel
+            and n.organizacao_id is not distinct from (case when p_perfil = 'gerencial' then null else p_org end)
+        )
+      );
 $$;
 
 -- =====================================================================
@@ -322,6 +401,11 @@ create trigger auditar_modulo_permissoes
   after insert or update or delete on public.modulo_permissoes
   for each row execute function public.auditar('Módulos e permissões');
 
+drop trigger if exists auditar_niveis_permissao on public.niveis_permissao;
+create trigger auditar_niveis_permissao
+  after insert or update or delete on public.niveis_permissao
+  for each row execute function public.auditar('Usuários');
+
 -- A auditoria não pode ser alterada nem apagada
 create or replace function public.auditoria_imutavel()
 returns trigger
@@ -373,10 +457,7 @@ begin
   if not v_u.ativo or (v_u.organizacao_id is not null and not coalesce(v_org.ativo, false)) then
     return jsonb_build_object('situacao', 'inativo');
   end if;
-  select coalesce(jsonb_agg(m.codigo order by m.ordem), '[]'::jsonb)
-    into v_mods
-    from public.modulos m
-    where public.pode_modulo(m.codigo);
+  v_mods := to_jsonb(public.modulos_efetivos(v_u.user_id));
   return jsonb_build_object(
     'situacao', 'ok',
     'user_id', v_u.user_id,
@@ -385,14 +466,16 @@ begin
     'perfil', v_u.perfil,
     'organizacao_id', v_u.organizacao_id,
     'organizacao', v_org.nome,
+    'nivel_id', v_u.nivel_id,
     'modulos', v_mods
   );
 end;
 $$;
 
 -- Vincula um acesso já criado em Authentication a um perfil do backoffice
+drop function if exists public.vincular_usuario(text, text, text, uuid);
 create or replace function public.vincular_usuario(
-  p_email text, p_nome text, p_perfil text, p_org uuid default null
+  p_email text, p_nome text, p_perfil text, p_org uuid default null, p_nivel uuid default null
 )
 returns uuid
 language plpgsql
@@ -400,40 +483,36 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_meu text := public.meu_perfil();
-  v_id  uuid;
+  v_id uuid;
 begin
-  if not public.aal2() or v_meu is null then
+  if not public.aal2() or public.meu_perfil() is null then
     raise exception 'Acesso negado';
   end if;
-  if v_meu = 'master' then
-    null;
-  elsif v_meu = 'corp_master' and p_perfil = 'corp_operador' and p_org = public.minha_org() then
-    null;
-  else
+  if not public.pode_criar_usuario(p_perfil, p_org) then
     raise exception 'Seu perfil não pode criar este tipo de usuário';
+  end if;
+  if not public.nivel_valido(p_nivel, p_perfil, p_org) then
+    raise exception 'Este nível de permissão não serve para este perfil ou organização';
   end if;
 
   select id into v_id from auth.users where lower(email) = lower(trim(p_email));
   if v_id is null then
-    raise exception 'Não existe acesso criado para este e-mail. Crie o usuário em Authentication > Users no painel do Supabase.';
+    raise exception 'Não existe acesso criado para este e-mail.';
   end if;
   if exists (select 1 from public.usuarios where user_id = v_id) then
     raise exception 'Este e-mail já está vinculado a um usuário';
   end if;
 
-  insert into public.usuarios (user_id, nome, email, perfil, organizacao_id)
-  values (
-    v_id, trim(p_nome), lower(trim(p_email)), p_perfil,
-    case when p_perfil in ('master','gerencial') then null else p_org end
-  );
+  insert into public.usuarios (user_id, nome, email, perfil, organizacao_id, nivel_id)
+  values (v_id, trim(p_nome), lower(trim(p_email)), p_perfil, p_org, p_nivel);
   return v_id;
 end;
 $$;
 
--- Altera nome, perfil, organização e situação de um usuário
+-- Altera nome, perfil, organização, nível e situação de um usuário
+drop function if exists public.atualizar_usuario(uuid, text, text, uuid, boolean);
 create or replace function public.atualizar_usuario(
-  p_user uuid, p_nome text, p_perfil text, p_org uuid, p_ativo boolean
+  p_user uuid, p_nome text, p_perfil text, p_org uuid, p_ativo boolean, p_nivel uuid
 )
 returns void
 language plpgsql
@@ -451,6 +530,9 @@ begin
   if v_alvo.user_id is null then
     raise exception 'Usuário não encontrado';
   end if;
+  if p_perfil in ('master','gerencial') then
+    p_org := null;
+  end if;
 
   if v_meu = 'master' then
     if p_user = (select auth.uid()) and (p_perfil <> v_alvo.perfil or not p_ativo) then
@@ -465,14 +547,130 @@ begin
   else
     raise exception 'Seu perfil não pode alterar este usuário';
   end if;
+  if not public.nivel_valido(p_nivel, p_perfil, p_org) then
+    raise exception 'Este nível de permissão não serve para este perfil ou organização';
+  end if;
 
   update public.usuarios
      set nome = trim(p_nome),
          perfil = p_perfil,
-         organizacao_id = case when p_perfil in ('master','gerencial') then null else p_org end,
+         organizacao_id = p_org,
+         nivel_id = p_nivel,
          ativo = p_ativo
    where user_id = p_user;
 end;
+$$;
+
+-- Cria ou altera um nível de permissão (p_id nulo = novo)
+create or replace function public.salvar_nivel(
+  p_id uuid, p_nome text, p_descricao text, p_org uuid, p_modulos text[]
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_meu   text := public.meu_perfil();
+  v_atual public.niveis_permissao%rowtype;
+  v_mods  text[];
+  v_id    uuid;
+begin
+  if not public.aal2() or v_meu is null then
+    raise exception 'Acesso negado';
+  end if;
+  select coalesce(array_agg(m.codigo order by m.ordem), '{}'::text[]) into v_mods
+    from public.modulos m where m.codigo = any(coalesce(p_modulos, '{}'::text[]));
+  if coalesce(array_length(v_mods, 1), 0) <> (select count(distinct x) from unnest(coalesce(p_modulos, '{}'::text[])) x) then
+    raise exception 'Módulo desconhecido na lista';
+  end if;
+
+  if v_meu = 'master' then
+    if p_org is not null and not exists (select 1 from public.organizacoes where id = p_org) then
+      raise exception 'Organização não encontrada';
+    end if;
+  elsif v_meu = 'corp_master'
+        and p_org = public.minha_org()
+        and v_mods <@ public.modulos_efetivos((select auth.uid())) then
+    null;
+  else
+    raise exception 'Seu perfil não pode criar este nível de permissão';
+  end if;
+
+  if p_id is null then
+    insert into public.niveis_permissao (nome, descricao, organizacao_id, modulos)
+    values (trim(p_nome), coalesce(trim(p_descricao), ''), p_org, v_mods)
+    returning id into v_id;
+    return v_id;
+  end if;
+
+  select * into v_atual from public.niveis_permissao where id = p_id;
+  if v_atual.id is null then
+    raise exception 'Nível não encontrado';
+  end if;
+  if v_atual.organizacao_id is distinct from p_org then
+    raise exception 'Não é possível mudar a organização de um nível já criado';
+  end if;
+  update public.niveis_permissao
+     set nome = trim(p_nome), descricao = coalesce(trim(p_descricao), ''), modulos = v_mods
+   where id = p_id;
+  return p_id;
+end;
+$$;
+
+-- Exclui um nível de permissão que não esteja em uso
+create or replace function public.excluir_nivel(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_meu   text := public.meu_perfil();
+  v_atual public.niveis_permissao%rowtype;
+begin
+  if not public.aal2() or v_meu is null then
+    raise exception 'Acesso negado';
+  end if;
+  select * into v_atual from public.niveis_permissao where id = p_id;
+  if v_atual.id is null then
+    raise exception 'Nível não encontrado';
+  end if;
+  if not coalesce(v_meu = 'master' or (v_meu = 'corp_master' and v_atual.organizacao_id = public.minha_org()), false) then
+    raise exception 'Seu perfil não pode excluir este nível de permissão';
+  end if;
+  if exists (select 1 from public.usuarios where nivel_id = p_id) then
+    raise exception 'Há usuários com este nível. Troque o nível deles antes de excluir.';
+  end if;
+  delete from public.niveis_permissao where id = p_id;
+end;
+$$;
+
+-- Módulos de cada usuário que o usuário atual pode ver:
+-- "modulos" = o que a pessoa realmente acessa; "bloqueados" = está no nível dela,
+-- mas não está habilitado para o perfil em Módulos e permissões.
+create or replace function public.usuarios_com_modulos()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'user_id', u.user_id,
+    'modulos', to_jsonb(public.modulos_efetivos(u.user_id)),
+    'bloqueados', to_jsonb(coalesce((
+      select array_agg(x) from unnest(n.modulos) x
+      where x <> all(public.modulos_efetivos(u.user_id))), '{}'::text[]))
+  )), '[]'::jsonb)
+  from public.usuarios u
+  left join public.niveis_permissao n on n.id = u.nivel_id
+  where public.aal2()
+    and (
+      u.user_id = (select auth.uid())
+      or public.eh_equipe()
+      or (public.meu_perfil() = 'corp_master' and u.organizacao_id = public.minha_org())
+    );
 $$;
 
 -- Liga ou desliga um módulo para um perfil
@@ -522,7 +720,7 @@ $$;
 -- =====================================================================
 
 revoke all on public.organizacoes, public.usuarios, public.modulos,
-              public.modulo_permissoes, public.auditoria
+              public.modulo_permissoes, public.auditoria, public.niveis_permissao
   from anon, authenticated;
 
 grant select, insert, update on public.organizacoes to authenticated;
@@ -530,10 +728,12 @@ grant select on public.usuarios          to authenticated;
 grant select on public.modulos           to authenticated;
 grant select on public.modulo_permissoes to authenticated;
 grant select on public.auditoria         to authenticated;
+grant select on public.niveis_permissao  to authenticated;
 
 revoke all on function public.grava_auditoria(text, text, text, text, jsonb, text) from public, anon, authenticated;
 revoke all on function public.auditar()            from public, anon, authenticated;
 revoke all on function public.auditoria_imutavel() from public, anon, authenticated;
+revoke all on function public.modulos_efetivos(uuid) from public, anon, authenticated;
 
 revoke all on function public.aal2()              from public, anon;
 revoke all on function public.cabecalho(text)     from public, anon;
@@ -544,8 +744,13 @@ revoke all on function public.eh_equipe()         from public, anon;
 revoke all on function public.pode_modulo(text)   from public, anon;
 revoke all on function public.meu_acesso()        from public, anon;
 revoke all on function public.registrar_evento(text, text, jsonb)             from public, anon;
-revoke all on function public.vincular_usuario(text, text, text, uuid)         from public, anon;
-revoke all on function public.atualizar_usuario(uuid, text, text, uuid, boolean) from public, anon;
+revoke all on function public.vincular_usuario(text, text, text, uuid, uuid)   from public, anon;
+revoke all on function public.atualizar_usuario(uuid, text, text, uuid, boolean, uuid) from public, anon;
+revoke all on function public.pode_criar_usuario(text, uuid)                   from public, anon;
+revoke all on function public.nivel_valido(uuid, text, uuid)                   from public, anon;
+revoke all on function public.salvar_nivel(uuid, text, text, uuid, text[])     from public, anon;
+revoke all on function public.excluir_nivel(uuid)                              from public, anon;
+revoke all on function public.usuarios_com_modulos()                           from public, anon;
 revoke all on function public.definir_modulo(uuid, text, text, boolean)        from public, anon;
 
 grant execute on function public.aal2()            to authenticated;
@@ -557,8 +762,13 @@ grant execute on function public.eh_equipe()       to authenticated;
 grant execute on function public.pode_modulo(text) to authenticated;
 grant execute on function public.meu_acesso()      to authenticated;
 grant execute on function public.registrar_evento(text, text, jsonb)             to authenticated;
-grant execute on function public.vincular_usuario(text, text, text, uuid)         to authenticated;
-grant execute on function public.atualizar_usuario(uuid, text, text, uuid, boolean) to authenticated;
+grant execute on function public.vincular_usuario(text, text, text, uuid, uuid)   to authenticated;
+grant execute on function public.atualizar_usuario(uuid, text, text, uuid, boolean, uuid) to authenticated;
+grant execute on function public.pode_criar_usuario(text, uuid)                   to authenticated;
+grant execute on function public.nivel_valido(uuid, text, uuid)                   to authenticated;
+grant execute on function public.salvar_nivel(uuid, text, text, uuid, text[])     to authenticated;
+grant execute on function public.excluir_nivel(uuid)                              to authenticated;
+grant execute on function public.usuarios_com_modulos()                           to authenticated;
 grant execute on function public.definir_modulo(uuid, text, text, boolean)        to authenticated;
 
 -- =====================================================================
@@ -600,6 +810,11 @@ create policy "modulos leitura" on public.modulos
 
 drop policy if exists "modulo_permissoes leitura" on public.modulo_permissoes;
 create policy "modulo_permissoes leitura" on public.modulo_permissoes
+  for select to authenticated
+  using ((select public.eh_equipe()) or ((select public.aal2()) and organizacao_id = (select public.minha_org())));
+
+drop policy if exists "niveis_permissao leitura" on public.niveis_permissao;
+create policy "niveis_permissao leitura" on public.niveis_permissao
   for select to authenticated
   using ((select public.eh_equipe()) or ((select public.aal2()) and organizacao_id = (select public.minha_org())));
 

@@ -11,7 +11,10 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | Google Authenticator obrigatório (cadastro no primeiro acesso, código nos seguintes) | Pronto |
 | Perfis: Master, Gerencial, Corporativo master, Corporativo operador | Pronto |
 | Organizações (clientes corporativos) | Pronto |
-| Usuários: vincular acesso a perfil, editar, ativar e desativar | Pronto |
+| Usuários: criar dentro do sistema (e-mail e senha inicial), editar, ativar e desativar | Pronto (depende de publicar a função `criar-usuario`) |
+| Níveis de permissão: conjuntos de módulos com nome, atribuídos a cada usuário | Pronto |
+| Lista de usuários mostrando o nível e os módulos que cada um acessa | Pronto |
+| Trocar a própria senha | Pronto |
 | Habilitação de módulos por perfil e por organização | Pronto |
 | Auditoria: registro de todas as ações, consulta com filtros, exportação | Pronto |
 | Dashboard, Workflow, Cadastro, Financeiro, Investimentos, Conexão MCP, Conteúdo | Aparecem no menu quando habilitados, com aviso da fase em que serão construídos |
@@ -23,6 +26,7 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | `index.html` | O sistema inteiro (telas de acesso e área interna) |
 | `config.js` | Endereço e chave pública do projeto Supabase do backoffice (já preenchidos) |
 | `supabase.sql` | Tabelas, regras de segurança e auditoria, para rodar no painel do Supabase |
+| `supabase/functions/criar-usuario/index.ts` | Função do servidor que cria o acesso de um novo usuário (para publicar no Supabase) |
 | `assets/` | Logo e favicon |
 
 ## Configuração (uma vez)
@@ -42,13 +46,44 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 8. **Publicar.** Envie a pasta `office/` para uma hospedagem de arquivos estáticos (Vercel, Netlify, Cloudflare Pages ou o servidor do domínio) e aponte o subdomínio `office.celeiroadministradora.com.br` para ela. Precisa abrir em `https://`.
 9. **Informar o endereço ao Supabase.** Painel > Authentication > URL Configuration: coloque `https://office.celeiroadministradora.com.br` em "Site URL".
 
-## Como criar os demais usuários
+## Atualização: criação de usuários e níveis de permissão
 
-1. Crie o acesso (e-mail e senha) no painel do Supabase, em Authentication > Users.
-2. No Celeiro Office, em **Usuários**, vincule o e-mail a um nome, perfil e organização.
-3. No primeiro acesso a pessoa cadastra o próprio Google Authenticator.
+Quem já tinha rodado o `supabase.sql` antes desta versão precisa de dois passos:
 
-O Corporativo master faz o passo 2 sozinho para os operadores da própria organização. O passo 1 hoje é feito por quem tem acesso ao painel do Supabase.
+1. **Rodar o `supabase.sql` de novo**, inteiro, no SQL Editor. Ele só acrescenta o que falta e não apaga dados.
+2. **Publicar a função `criar-usuario`** (abaixo).
+
+## Publicar a função criar-usuario
+
+A criação do acesso (e-mail e senha) precisa de uma chave que não pode ir para o navegador, por isso roda no servidor do Supabase.
+
+1. Painel do Supabase (projeto do backoffice) > **Edge Functions**.
+2. Crie uma função nova pelo editor do próprio painel.
+3. Dê o nome exato **`criar-usuario`**.
+4. Apague o código de exemplo e cole o conteúdo de `supabase/functions/criar-usuario/index.ts`.
+5. Publique (Deploy). Mantenha ligada a verificação de JWT, que é o padrão.
+
+Os nomes dos botões do painel podem variar um pouco. Quem usa a linha de comando pode publicar com `supabase functions deploy criar-usuario`, a partir da pasta `office/`.
+
+Enquanto a função não estiver publicada, o botão **Criar usuário** avisa que ela falta, e o caminho "Vincular acesso existente" continua funcionando.
+
+## Como criar usuários
+
+1. Em **Usuários**, preencha nome, e-mail e uma senha inicial (o botão **Gerar** cria uma).
+2. Escolha o perfil, a organização e, se quiser, um nível de permissão. A tela mostra na hora os módulos que a pessoa vai acessar.
+3. Clique em **Criar usuário**. A senha inicial aparece uma única vez: anote e passe à pessoa por um canal seguro.
+4. No primeiro acesso a pessoa cadastra o próprio Google Authenticator e pode trocar a senha em **Trocar senha**.
+
+O Corporativo master cria apenas operadores da própria organização.
+
+## Níveis de permissão
+
+- Um nível é um conjunto de módulos com nome (por exemplo, "Financeiro"), criado na tela **Usuários**.
+- Cada nível pertence à equipe Celeiro (usuários Gerenciais) ou a uma organização (usuários corporativos dela).
+- Usuário **com** nível acessa só os módulos do nível. Usuário **sem** nível segue o padrão do perfil.
+- O nível não passa por cima de **Módulos e permissões**: um módulo do nível que não esteja habilitado para o perfil aparece na lista como "bloqueado" e não é liberado.
+- Master tem sempre todos os módulos e não recebe nível.
+- Um nível em uso não pode ser excluído; troque antes o nível dos usuários.
 
 ## Como a segurança funciona
 
@@ -75,19 +110,23 @@ O Corporativo master faz o passo 2 sozinho para os operadores da própria organi
 - **Senha errada no login** não entra na Auditoria do sistema, porque ainda não há usuário identificado. Essas tentativas ficam nos registros do próprio Supabase (painel > Logs > Auth). Códigos do autenticador recusados entram na Auditoria.
 - **Telas abertas** são registradas pelo navegador. Alguém com conhecimento técnico poderia ler dados pela API sem abrir a tela; nesse caso a leitura não fica registrada (as gravações ficam sempre).
 - **Ações feitas direto no painel do Supabase** aparecem na auditoria sem usuário e sem IP.
-- **Convite por e-mail** de dentro do sistema ainda não existe; o acesso é criado no painel do Supabase.
+- **Convite por e-mail** ainda não existe: quem cria o usuário define a senha inicial e a repassa. O sistema não obriga a troca no primeiro acesso.
+- **Acesso criado sem vínculo.** Se a criação do acesso der certo e o vínculo ao perfil falhar, o e-mail fica criado sem perfil (não entra no sistema). Conclua por "Vincular acesso existente".
 - **Perda do celular.** Apague o autenticador da pessoa no painel (Authentication > Users > usuário > Factors). Ela cadastra de novo no acesso seguinte.
 - **Redefinição de senha por e-mail.** A tela existe, mas depende do envio de e-mails do Supabase estar configurado. Não foi testada.
-- **Permissão por operador.** Hoje a habilitação é por perfil dentro da organização, não pessoa a pessoa.
+- **Permissão dentro do módulo.** Os níveis definem a quais módulos a pessoa tem acesso. Ainda não há separação entre ver, criar, editar e excluir dentro de cada módulo; isso entra junto com a construção dos módulos.
 
 ## Situação dos testes
 
-Testado aqui, antes da entrega:
+Testado antes da entrega, fora do Supabase:
 
-- `supabase.sql` rodou duas vezes seguidas, sem erro, em um Postgres local, e as regras de acesso foram conferidas com cada perfil (com e sem segundo fator, organização diferente, usuário inativo, auditoria imutável).
-- As telas foram percorridas em um navegador de verdade, gravando nesse mesmo banco: login, senha errada, cadastro do autenticador, código errado, organizações, usuários, módulos, auditoria com filtro e exportação, saída, bloqueio por 5 códigos, acesso de cliente corporativo, usuário sem perfil e organização desativada.
+- `supabase.sql` rodado em um Postgres local, tanto em banco novo quanto por cima da versão anterior, e as regras conferidas com cada perfil (segundo fator, organizações diferentes, usuário inativo, níveis, auditoria imutável).
+- As telas percorridas em navegador gravando nesse banco, incluindo criar nível, criar usuário com senha inicial e nível, entrar como esse usuário e trocar a senha.
+- A função `criar-usuario` executada localmente contra um Supabase simulado: recusa sem sessão, sem segundo fator, com perfil sem permissão, com dados inválidos e com e-mail repetido; cria quando permitido.
 
-**Não foi testado contra um projeto Supabase real.** O serviço de login e de autenticador foi simulado no teste. No primeiro uso, siga o roteiro abaixo e confira em especial se a coluna IP aparece preenchida.
+Testado no projeto Supabase real pelo Paulo em 12/11/2026: `supabase.sql` da primeira versão, login com senha e tela de cadastro do autenticador.
+
+**Ainda não testado no projeto real:** a função `criar-usuario` publicada, os níveis de permissão e a coluna IP da auditoria.
 
 ## Roteiro de teste no projeto real
 
@@ -101,3 +140,5 @@ Testado aqui, antes da entrega:
 8. Em **Auditoria**, confira que as ações acima aparecem com IP, data e hora.
 9. Saia, entre com o segundo acesso e confira que ele vê só a própria organização.
 10. Em janela anônima, abra o endereço terminado em `#auditoria`: deve cair na tela de acesso.
+11. Em **Usuários**, crie um nível com um ou dois módulos e depois um usuário novo com esse nível. Confira os módulos mostrados na lista.
+12. Entre com o usuário novo (senha inicial), cadastre o autenticador e confira que o menu mostra só os módulos esperados.
