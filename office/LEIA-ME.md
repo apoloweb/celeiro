@@ -20,7 +20,9 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | Workflow: tarefas em lista e em quadro, responsável, envolvidos, prazo, comentários, confidenciais | Pronto |
 | Botão "Nova tarefa" em todas as telas, guardando a tela de origem | Pronto |
 | Dashboard: tarefas vencidas, urgentes, suas e não lidas, gráfico de 15 dias e pendências | Pronto (arrecadação, inadimplentes e energia sem dados até o Financeiro existir) |
-| Cadastro, Financeiro, Investimentos, Conexão MCP, Conteúdo | Aparecem no menu quando habilitados, com aviso da fase em que serão construídos |
+| Cadastro de pessoas físicas: dados pessoais, contatos, endereço, profissional e financeiro | Pronto |
+| Cadastro de pessoas jurídicas: empresa, quadro de sócios (QSA), representante e responsável financeiro | Pronto |
+| Financeiro, Investimentos, Conexão MCP, Conteúdo | Aparecem no menu quando habilitados, com aviso da fase em que serão construídos |
 
 ## Arquivos
 
@@ -101,6 +103,25 @@ O Corporativo master cria apenas operadores da própria organização.
 
 Para os clientes usarem, habilite o módulo Workflow para os perfis deles em **Módulos e permissões**.
 
+## Cadastro
+
+**Pessoas físicas**
+- Seções: dados pessoais, contatos, endereço, profissional e financeiro (profissão, fonte de renda, renda mensal, MEI, isento de IR, PEP, FATCA e CRS).
+- Obrigatórios: nome completo e CPF. O CPF é conferido pelos dígitos verificadores e não pode repetir dentro da mesma origem (Celeiro ou a mesma organização).
+- O CEP preenche o endereço pela base pública ViaCEP, quando ela responde.
+- "Verificado" em celular e e-mail é uma marcação manual de quem preenche. Não há confirmação automática por código.
+
+**Pessoas jurídicas**
+- Aba **Empresa**: razão social, nome fantasia, CNPJ, situação cadastral, contatos, endereço e responsável financeiro.
+- **Buscar dados pelo CNPJ** consulta a base pública BrasilAPI e preenche empresa, endereço e quadro societário. Fica registrado quando isso foi feito ("enriquecimento"). Não é a validação oficial contratada da Receita.
+- Aba **Representantes**: quadro de sócios e administradores (QSA), com a escolha do responsável, e os dados completos do representante.
+- O representante é um cadastro de pessoa física ligado à empresa. Se já existir uma pessoa com o mesmo CPF, o cadastro dela é atualizado e reaproveitado.
+
+**Regras**
+- Quem tem o módulo Cadastro vê e altera. A equipe Celeiro vê todos; cada cliente vê só os da própria organização.
+- Cadastro não é apagado: é inativado e pode ser reativado.
+- Toda inclusão e alteração fica na Auditoria, com os valores de antes e depois.
+
 ## Dashboard
 
 - Primeira linha: tarefas vencidas, urgentes, sob sua responsabilidade e não lidas, cada uma com "Ver tudo" que abre a lista já filtrada.
@@ -140,6 +161,10 @@ Para os clientes usarem, habilite o módulo Workflow para os perfis deles em **M
 - **Workflow sem times e sem @.** O responsável é uma pessoa; ainda não há "time" como responsável, nem menção com @ no texto. Marcar alguém é feito pela lista de Envolvidos.
 - **Workflow sem aviso por e-mail.** Prazos e marcações aparecem só dentro do sistema (filtros e Dashboard).
 - **Tarefa ligada a um registro.** Hoje a tarefa guarda o módulo e a tela de origem. A ligação a um registro específico (um cadastro, uma fatura) entra quando esses módulos existirem.
+- **Cadastro sem arquivos.** O envio de documentos (RG, contrato social) ainda não existe.
+- **Cadastro sem validação oficial.** CPF e CNPJ são conferidos pelos dígitos. A consulta de CNPJ e de CEP usa bases públicas gratuitas (BrasilAPI e ViaCEP), que podem ficar fora do ar; a consulta contratada à Receita (CPF, situação) não foi feita.
+- **Auditoria guarda dados pessoais.** Cada alteração de cadastro registra os valores de antes e depois, inclusive CPF e renda. Considere isso na política de retenção.
+- **Cadastro de produtos** (Energia, Financiamento, Captação) ainda não foi construído.
 - **Permissão dentro do módulo.** Os níveis definem a quais módulos a pessoa tem acesso. Ainda não há separação entre ver, criar, editar e excluir dentro de cada módulo; isso entra junto com a construção dos módulos.
 
 ## Situação dos testes
@@ -209,3 +234,4 @@ O app lê os módulos ligados pela função `app_config` (mesmo endereço, `rpc/
 ## Troca de e-mail de um usuário
 
 Em **Usuários > Editar**, o campo E-mail agora pode ser alterado. A troca muda o e-mail de login no Supabase e o cadastro do backoffice, e entra na auditoria. Quem pode: Master (qualquer usuário) e Corporativo master (operadores da própria organização). Regras conferidas em Postgres local (8 verificações); não testado contra o projeto Supabase real.
+14. Em **Cadastro**, crie uma pessoa física (teste o CEP) e uma pessoa jurídica (teste "Buscar dados pelo CNPJ"), escolha o responsável no quadro de sócios e informe os dados do representante.

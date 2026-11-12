@@ -1,5 +1,5 @@
 -- Celeiro Office · backoffice · estrutura no Supabase
--- (acesso, perfis, módulos, níveis de permissão, auditoria e Workflow)
+-- (acesso, perfis, módulos, níveis de permissão, auditoria, Workflow e Cadastro de pessoas físicas e jurídicas)
 -- Projeto Supabase PRÓPRIO do backoffice (separado do projeto do site).
 -- Rode este arquivo inteiro em: painel do Supabase > SQL Editor > New query > Run.
 -- Pode ser rodado mais de uma vez sem duplicar nada.
@@ -1347,7 +1347,669 @@ create policy "workflow_leituras leitura" on public.workflow_leituras
   using (user_id = (select auth.uid()) and public.workflow_pode_ver(tarefa_id));
 
 -- =====================================================================
--- 9) PRIMEIRO USUÁRIO MASTER
+-- 9) CADASTRO: PESSOAS FÍSICAS
+--    Cadastro da Celeiro: organizacao_id nulo. Cadastro de um cliente corporativo: organizacao_id dele.
+--    Quem vê e altera: quem tem o módulo Cadastro; equipe Celeiro vê todos, cliente vê os da própria organização.
+--    Não há exclusão: o cadastro é inativado. Toda gravação passa pelas funções abaixo.
+-- =====================================================================
+
+-- Confere os dígitos verificadores do CPF
+create or replace function public.cpf_valido(p_cpf text)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  d text := regexp_replace(coalesce(p_cpf, ''), '[^0-9]', '', 'g');
+  s int;
+  r int;
+  i int;
+begin
+  if char_length(d) <> 11 or d ~ '^(.)\1{10}$' then
+    return false;
+  end if;
+  s := 0;
+  for i in 1..9 loop s := s + substr(d, i, 1)::int * (11 - i); end loop;
+  r := (s * 10) % 11;
+  if r = 10 then r := 0; end if;
+  if r <> substr(d, 10, 1)::int then
+    return false;
+  end if;
+  s := 0;
+  for i in 1..10 loop s := s + substr(d, i, 1)::int * (12 - i); end loop;
+  r := (s * 10) % 11;
+  if r = 10 then r := 0; end if;
+  return r = substr(d, 11, 1)::int;
+end;
+$$;
+
+create table if not exists public.cadastro_pf (
+  id                 uuid primary key default gen_random_uuid(),
+  organizacao_id     uuid references public.organizacoes(id) on delete cascade,
+  situacao           text not null default 'ativo' check (situacao in ('ativo','inativo')),
+  -- dados pessoais
+  nome_completo      text not null check (char_length(nome_completo) between 1 and 160),
+  nome_social        text not null default '' check (char_length(nome_social) <= 160),
+  cpf                text not null check (cpf ~ '^[0-9]{11}$'),
+  nascimento         date,
+  sexo               text not null default '' check (sexo in ('','masculino','feminino','outro','nao_informado')),
+  nome_mae           text not null default '' check (char_length(nome_mae) <= 160),
+  naturalidade       text not null default '' check (char_length(naturalidade) <= 120),
+  nacionalidade      text not null default '' check (char_length(nacionalidade) <= 60),
+  estado_civil       text not null default ''
+                     check (estado_civil in ('','solteiro','casado','uniao_estavel','separado','divorciado','viuvo')),
+  -- contatos
+  telefone_celular   text not null default '' check (telefone_celular ~ '^[0-9]{0,13}$'),
+  celular_verificado boolean not null default false,
+  telefone_fixo      text not null default '' check (telefone_fixo ~ '^[0-9]{0,13}$'),
+  email              text not null default '' check (char_length(email) <= 254),
+  email_verificado   boolean not null default false,
+  -- endereço
+  cep                text not null default '' check (cep ~ '^([0-9]{8})?$'),
+  logradouro         text not null default '' check (char_length(logradouro) <= 160),
+  numero             text not null default '' check (char_length(numero) <= 20),
+  complemento        text not null default '' check (char_length(complemento) <= 80),
+  bairro             text not null default '' check (char_length(bairro) <= 100),
+  cidade             text not null default '' check (char_length(cidade) <= 100),
+  uf                 text not null default '' check (uf in ('','AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO')),
+  -- profissional e financeiro
+  profissao          text not null default '' check (char_length(profissao) <= 100),
+  fonte_renda        text not null default ''
+                     check (fonte_renda in ('','assalariado','empresario','autonomo','profissional_liberal','servidor_publico','aposentado','rendimentos','outros')),
+  renda_mensal       numeric(14,2) check (renda_mensal is null or renda_mensal >= 0),
+  mei                boolean not null default false,
+  isento_ir          boolean not null default false,
+  pep                boolean not null default false,
+  fatca              boolean not null default false,
+  crs                boolean not null default false,
+  observacoes        text not null default '' check (char_length(observacoes) <= 2000),
+  -- controle
+  criado_por         uuid references public.usuarios(user_id) on delete set null,
+  criado_em          timestamptz not null default now(),
+  atualizado_por     uuid references public.usuarios(user_id) on delete set null,
+  atualizado_em      timestamptz not null default now()
+);
+
+create unique index if not exists cadastro_pf_cpf_unico
+  on public.cadastro_pf (coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid), cpf);
+create index if not exists cadastro_pf_nome on public.cadastro_pf (nome_completo);
+
+alter table public.cadastro_pf enable row level security;
+
+-- O usuário atual pode ver e alterar cadastros desta organização (nulo = Celeiro)?
+create or replace function public.cadastro_escopo_ok(p_org uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select public.pode_modulo('cadastro')
+     and coalesce(public.eh_equipe() or p_org = public.minha_org(), false);
+$$;
+
+-- Texto de um campo do formulário: sem espaços nas pontas e limitado ao tamanho
+create or replace function public.campo_texto(p_dados jsonb, p_chave text, p_max int)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select left(trim(coalesce(p_dados ->> p_chave, '')), p_max);
+$$;
+
+-- Cria (p_id nulo) ou altera um cadastro de pessoa física. p_dados traz os campos do formulário.
+create or replace function public.cadastro_pf_salvar(p_id uuid, p_org uuid, p_dados jsonb)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid   uuid := (select auth.uid());
+  v_org   uuid;
+  v_id    uuid;
+  v_cpf   text := regexp_replace(coalesce(p_dados ->> 'cpf', ''), '[^0-9]', '', 'g');
+  v_nome  text := public.campo_texto(p_dados, 'nome_completo', 160);
+  v_email text := lower(public.campo_texto(p_dados, 'email', 254));
+  v_cep   text := regexp_replace(coalesce(p_dados ->> 'cep', ''), '[^0-9]', '', 'g');
+  v_cel   text := regexp_replace(coalesce(p_dados ->> 'telefone_celular', ''), '[^0-9]', '', 'g');
+  v_fixo  text := regexp_replace(coalesce(p_dados ->> 'telefone_fixo', ''), '[^0-9]', '', 'g');
+  v_uf    text := upper(public.campo_texto(p_dados, 'uf', 2));
+  v_sexo  text := public.campo_texto(p_dados, 'sexo', 20);
+  v_civil text := public.campo_texto(p_dados, 'estado_civil', 20);
+  v_fonte text := public.campo_texto(p_dados, 'fonte_renda', 30);
+  v_nasc  date;
+  v_renda numeric(14,2);
+begin
+  if p_id is null then
+    if not public.cadastro_escopo_ok(p_org) then
+      raise exception 'Você não pode criar cadastros para esta organização';
+    end if;
+    if p_org is not null and not exists (select 1 from public.organizacoes where id = p_org and ativo) then
+      raise exception 'Organização não encontrada ou inativa';
+    end if;
+    v_org := p_org;
+  else
+    select organizacao_id into v_org from public.cadastro_pf where id = p_id;
+    if not found or not public.cadastro_escopo_ok(v_org) then
+      raise exception 'Cadastro não encontrado';
+    end if;
+  end if;
+
+  if v_nome = '' then
+    raise exception 'Informe o nome completo';
+  end if;
+  if not public.cpf_valido(v_cpf) then
+    raise exception 'CPF inválido. Confira os números.';
+  end if;
+  if exists (
+    select 1 from public.cadastro_pf c
+    where c.cpf = v_cpf and c.organizacao_id is not distinct from v_org and c.id is distinct from p_id
+  ) then
+    raise exception 'Já existe um cadastro com este CPF';
+  end if;
+
+  if coalesce(p_dados ->> 'nascimento', '') <> '' then
+    begin
+      v_nasc := (p_dados ->> 'nascimento')::date;
+    exception when others then
+      raise exception 'Data de nascimento inválida';
+    end;
+    if v_nasc > current_date or v_nasc < date '1900-01-01' then
+      raise exception 'Data de nascimento inválida';
+    end if;
+  end if;
+  if coalesce(p_dados ->> 'renda_mensal', '') <> '' then
+    begin
+      v_renda := round((p_dados ->> 'renda_mensal')::numeric, 2);
+    exception when others then
+      raise exception 'Renda mensal inválida';
+    end;
+    if v_renda < 0 or v_renda > 999999999999 then
+      raise exception 'Renda mensal inválida';
+    end if;
+  end if;
+  if v_email <> '' and v_email !~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$' then
+    raise exception 'E-mail inválido';
+  end if;
+  if v_cep <> '' and char_length(v_cep) <> 8 then
+    raise exception 'CEP inválido: são 8 números';
+  end if;
+  if (v_cel <> '' and char_length(v_cel) not between 10 and 13)
+     or (v_fixo <> '' and char_length(v_fixo) not between 10 and 13) then
+    raise exception 'Telefone inválido: informe DDD e número';
+  end if;
+  if v_uf not in ('','AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO') then
+    raise exception 'UF inválida';
+  end if;
+  if v_sexo not in ('','masculino','feminino','outro','nao_informado') then
+    raise exception 'Sexo inválido';
+  end if;
+  if v_civil not in ('','solteiro','casado','uniao_estavel','separado','divorciado','viuvo') then
+    raise exception 'Estado civil inválido';
+  end if;
+  if v_fonte not in ('','assalariado','empresario','autonomo','profissional_liberal','servidor_publico','aposentado','rendimentos','outros') then
+    raise exception 'Fonte de renda inválida';
+  end if;
+
+  if p_id is null then
+    insert into public.cadastro_pf (organizacao_id, nome_completo, cpf, criado_por, atualizado_por)
+    values (v_org, v_nome, v_cpf, v_uid, v_uid)
+    returning id into v_id;
+  else
+    v_id := p_id;
+  end if;
+
+  update public.cadastro_pf set
+    nome_completo      = v_nome,
+    nome_social        = public.campo_texto(p_dados, 'nome_social', 160),
+    cpf                = v_cpf,
+    nascimento         = v_nasc,
+    sexo               = v_sexo,
+    nome_mae           = public.campo_texto(p_dados, 'nome_mae', 160),
+    naturalidade       = public.campo_texto(p_dados, 'naturalidade', 120),
+    nacionalidade      = public.campo_texto(p_dados, 'nacionalidade', 60),
+    estado_civil       = v_civil,
+    telefone_celular   = v_cel,
+    celular_verificado = v_cel <> '' and coalesce(p_dados ->> 'celular_verificado', '') = 'true',
+    telefone_fixo      = v_fixo,
+    email              = v_email,
+    email_verificado   = v_email <> '' and coalesce(p_dados ->> 'email_verificado', '') = 'true',
+    cep                = v_cep,
+    logradouro         = public.campo_texto(p_dados, 'logradouro', 160),
+    numero             = public.campo_texto(p_dados, 'numero', 20),
+    complemento        = public.campo_texto(p_dados, 'complemento', 80),
+    bairro             = public.campo_texto(p_dados, 'bairro', 100),
+    cidade             = public.campo_texto(p_dados, 'cidade', 100),
+    uf                 = v_uf,
+    profissao          = public.campo_texto(p_dados, 'profissao', 100),
+    fonte_renda        = v_fonte,
+    renda_mensal       = v_renda,
+    mei                = coalesce(p_dados ->> 'mei', '') = 'true',
+    isento_ir          = coalesce(p_dados ->> 'isento_ir', '') = 'true',
+    pep                = coalesce(p_dados ->> 'pep', '') = 'true',
+    fatca              = coalesce(p_dados ->> 'fatca', '') = 'true',
+    crs                = coalesce(p_dados ->> 'crs', '') = 'true',
+    observacoes        = public.campo_texto(p_dados, 'observacoes', 2000),
+    atualizado_por     = v_uid,
+    atualizado_em      = now()
+  where id = v_id;
+
+  return v_id;
+end;
+$$;
+
+-- Ativa ou inativa um cadastro
+create or replace function public.cadastro_pf_situacao(p_id uuid, p_situacao text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid;
+begin
+  if coalesce(p_situacao, '') not in ('ativo','inativo') then
+    raise exception 'Situação inválida';
+  end if;
+  select organizacao_id into v_org from public.cadastro_pf where id = p_id;
+  if not found or not public.cadastro_escopo_ok(v_org) then
+    raise exception 'Cadastro não encontrado';
+  end if;
+  update public.cadastro_pf
+     set situacao = p_situacao, atualizado_por = (select auth.uid()), atualizado_em = now()
+   where id = p_id and situacao <> p_situacao;
+end;
+$$;
+
+drop trigger if exists auditar_cadastro_pf on public.cadastro_pf;
+create trigger auditar_cadastro_pf
+  after insert or update or delete on public.cadastro_pf
+  for each row execute function public.auditar('Cadastro');
+
+revoke all on public.cadastro_pf from anon, authenticated;
+grant select on public.cadastro_pf to authenticated;
+
+revoke all on function public.cpf_valido(text)                        from public, anon;
+revoke all on function public.campo_texto(jsonb, text, int)           from public, anon;
+revoke all on function public.cadastro_escopo_ok(uuid)                from public, anon;
+revoke all on function public.cadastro_pf_salvar(uuid, uuid, jsonb)   from public, anon;
+revoke all on function public.cadastro_pf_situacao(uuid, text)        from public, anon;
+
+grant execute on function public.cpf_valido(text)                      to authenticated;
+grant execute on function public.campo_texto(jsonb, text, int)         to authenticated;
+grant execute on function public.cadastro_escopo_ok(uuid)              to authenticated;
+grant execute on function public.cadastro_pf_salvar(uuid, uuid, jsonb) to authenticated;
+grant execute on function public.cadastro_pf_situacao(uuid, text)      to authenticated;
+
+drop policy if exists "cadastro_pf leitura" on public.cadastro_pf;
+create policy "cadastro_pf leitura" on public.cadastro_pf
+  for select to authenticated
+  using ((select public.pode_modulo('cadastro'))
+         and ((select public.eh_equipe()) or organizacao_id = (select public.minha_org())));
+
+-- =====================================================================
+-- 10) CADASTRO: PESSOAS JURÍDICAS
+--     Empresa, quadro de sócios e administradores (QSA) e representante.
+--     O representante é um cadastro de pessoa física (cadastro_pf) ligado à empresa.
+--     Mesmas regras de acesso do cadastro de pessoas físicas.
+-- =====================================================================
+
+-- Confere os dígitos verificadores do CNPJ
+create or replace function public.cnpj_valido(p_cnpj text)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  d  text := regexp_replace(coalesce(p_cnpj, ''), '[^0-9]', '', 'g');
+  p1 int[] := array[5,4,3,2,9,8,7,6,5,4,3,2];
+  p2 int[] := array[6,5,4,3,2,9,8,7,6,5,4,3,2];
+  s  int;
+  r  int;
+  i  int;
+begin
+  if char_length(d) <> 14 or d ~ '^(.)\1{13}$' then
+    return false;
+  end if;
+  s := 0;
+  for i in 1..12 loop s := s + substr(d, i, 1)::int * p1[i]; end loop;
+  r := s % 11;
+  r := case when r < 2 then 0 else 11 - r end;
+  if r <> substr(d, 13, 1)::int then
+    return false;
+  end if;
+  s := 0;
+  for i in 1..13 loop s := s + substr(d, i, 1)::int * p2[i]; end loop;
+  r := s % 11;
+  r := case when r < 2 then 0 else 11 - r end;
+  return r = substr(d, 14, 1)::int;
+end;
+$$;
+
+create table if not exists public.cadastro_pj (
+  id                   uuid primary key default gen_random_uuid(),
+  organizacao_id       uuid references public.organizacoes(id) on delete cascade,
+  situacao             text not null default 'ativo' check (situacao in ('ativo','inativo')),
+  -- dados da empresa
+  razao_social         text not null check (char_length(razao_social) between 1 and 200),
+  nome_fantasia        text not null default '' check (char_length(nome_fantasia) <= 200),
+  cnpj                 text not null check (cnpj ~ '^[0-9]{14}$'),
+  situacao_cadastral   text not null default '' check (char_length(situacao_cadastral) <= 60),
+  enriquecimento       text not null default 'nao_feito' check (enriquecimento in ('nao_feito','concluido')),
+  enriquecido_em       timestamptz,
+  -- contatos
+  email                text not null default '' check (char_length(email) <= 254),
+  telefone_fixo        text not null default '' check (telefone_fixo ~ '^[0-9]{0,13}$'),
+  telefone_celular     text not null default '' check (telefone_celular ~ '^[0-9]{0,13}$'),
+  -- endereço
+  cep                  text not null default '' check (cep ~ '^([0-9]{8})?$'),
+  logradouro           text not null default '' check (char_length(logradouro) <= 160),
+  numero               text not null default '' check (char_length(numero) <= 20),
+  complemento          text not null default '' check (char_length(complemento) <= 80),
+  bairro               text not null default '' check (char_length(bairro) <= 100),
+  cidade               text not null default '' check (char_length(cidade) <= 100),
+  uf                   text not null default '' check (uf in ('','AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO')),
+  -- responsável financeiro
+  financeiro_nome      text not null default '' check (char_length(financeiro_nome) <= 160),
+  financeiro_email     text not null default '' check (char_length(financeiro_email) <= 254),
+  financeiro_telefone  text not null default '' check (financeiro_telefone ~ '^[0-9]{0,13}$'),
+  -- representante (responsável legal): um cadastro de pessoa física
+  representante_pf_id  uuid references public.cadastro_pf(id) on delete set null,
+  observacoes          text not null default '' check (char_length(observacoes) <= 2000),
+  -- controle
+  criado_por           uuid references public.usuarios(user_id) on delete set null,
+  criado_em            timestamptz not null default now(),
+  atualizado_por       uuid references public.usuarios(user_id) on delete set null,
+  atualizado_em        timestamptz not null default now()
+);
+
+create unique index if not exists cadastro_pj_cnpj_unico
+  on public.cadastro_pj (coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid), cnpj);
+create index if not exists cadastro_pj_razao on public.cadastro_pj (razao_social);
+
+-- Quadro de sócios e administradores
+create table if not exists public.cadastro_pj_socios (
+  id           uuid primary key default gen_random_uuid(),
+  pj_id        uuid not null references public.cadastro_pj(id) on delete cascade,
+  nome         text not null check (char_length(nome) between 1 and 160),
+  documento    text not null default '' check (char_length(documento) <= 20),
+  qualificacao text not null default '' check (char_length(qualificacao) <= 100),
+  selecionado  boolean not null default false,
+  ordem        int not null default 0
+);
+create index if not exists cadastro_pj_socios_pj on public.cadastro_pj_socios (pj_id);
+create unique index if not exists cadastro_pj_socios_um_selecionado
+  on public.cadastro_pj_socios (pj_id) where selecionado;
+
+alter table public.cadastro_pj        enable row level security;
+alter table public.cadastro_pj_socios enable row level security;
+
+-- O usuário atual pode ver e alterar esta empresa?
+create or replace function public.cadastro_pj_pode(p_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.cadastro_pj j
+    where j.id = p_id and public.cadastro_escopo_ok(j.organizacao_id)
+  );
+$$;
+
+-- Cria (p_id nulo) ou altera uma empresa. p_dados traz os campos do formulário.
+create or replace function public.cadastro_pj_salvar(p_id uuid, p_org uuid, p_dados jsonb)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid   uuid := (select auth.uid());
+  v_org   uuid;
+  v_id    uuid;
+  v_cnpj  text := regexp_replace(coalesce(p_dados ->> 'cnpj', ''), '[^0-9]', '', 'g');
+  v_razao text := public.campo_texto(p_dados, 'razao_social', 200);
+  v_email text := lower(public.campo_texto(p_dados, 'email', 254));
+  v_fmail text := lower(public.campo_texto(p_dados, 'financeiro_email', 254));
+  v_cep   text := regexp_replace(coalesce(p_dados ->> 'cep', ''), '[^0-9]', '', 'g');
+  v_fixo  text := regexp_replace(coalesce(p_dados ->> 'telefone_fixo', ''), '[^0-9]', '', 'g');
+  v_cel   text := regexp_replace(coalesce(p_dados ->> 'telefone_celular', ''), '[^0-9]', '', 'g');
+  v_ftel  text := regexp_replace(coalesce(p_dados ->> 'financeiro_telefone', ''), '[^0-9]', '', 'g');
+  v_uf    text := upper(public.campo_texto(p_dados, 'uf', 2));
+  v_enr   boolean := coalesce(p_dados ->> 'enriquecido', '') = 'true';
+begin
+  if p_id is null then
+    if not public.cadastro_escopo_ok(p_org) then
+      raise exception 'Você não pode criar cadastros para esta organização';
+    end if;
+    if p_org is not null and not exists (select 1 from public.organizacoes where id = p_org and ativo) then
+      raise exception 'Organização não encontrada ou inativa';
+    end if;
+    v_org := p_org;
+  else
+    select organizacao_id into v_org from public.cadastro_pj where id = p_id;
+    if not found or not public.cadastro_escopo_ok(v_org) then
+      raise exception 'Cadastro não encontrado';
+    end if;
+  end if;
+
+  if v_razao = '' then
+    raise exception 'Informe a razão social';
+  end if;
+  if not public.cnpj_valido(v_cnpj) then
+    raise exception 'CNPJ inválido. Confira os números.';
+  end if;
+  if exists (
+    select 1 from public.cadastro_pj c
+    where c.cnpj = v_cnpj and c.organizacao_id is not distinct from v_org and c.id is distinct from p_id
+  ) then
+    raise exception 'Já existe um cadastro com este CNPJ';
+  end if;
+  if (v_email <> '' and v_email !~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$')
+     or (v_fmail <> '' and v_fmail !~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$') then
+    raise exception 'E-mail inválido';
+  end if;
+  if v_cep <> '' and char_length(v_cep) <> 8 then
+    raise exception 'CEP inválido: são 8 números';
+  end if;
+  if (v_fixo <> '' and char_length(v_fixo) not between 10 and 13)
+     or (v_cel <> '' and char_length(v_cel) not between 10 and 13)
+     or (v_ftel <> '' and char_length(v_ftel) not between 10 and 13) then
+    raise exception 'Telefone inválido: informe DDD e número';
+  end if;
+  if v_uf not in ('','AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO') then
+    raise exception 'UF inválida';
+  end if;
+
+  if p_id is null then
+    insert into public.cadastro_pj (organizacao_id, razao_social, cnpj, criado_por, atualizado_por)
+    values (v_org, v_razao, v_cnpj, v_uid, v_uid)
+    returning id into v_id;
+  else
+    v_id := p_id;
+  end if;
+
+  update public.cadastro_pj set
+    razao_social        = v_razao,
+    nome_fantasia       = public.campo_texto(p_dados, 'nome_fantasia', 200),
+    cnpj                = v_cnpj,
+    situacao_cadastral  = public.campo_texto(p_dados, 'situacao_cadastral', 60),
+    enriquecimento      = case when v_enr then 'concluido' else enriquecimento end,
+    enriquecido_em      = case when v_enr then now() else enriquecido_em end,
+    email               = v_email,
+    telefone_fixo       = v_fixo,
+    telefone_celular    = v_cel,
+    cep                 = v_cep,
+    logradouro          = public.campo_texto(p_dados, 'logradouro', 160),
+    numero              = public.campo_texto(p_dados, 'numero', 20),
+    complemento         = public.campo_texto(p_dados, 'complemento', 80),
+    bairro              = public.campo_texto(p_dados, 'bairro', 100),
+    cidade              = public.campo_texto(p_dados, 'cidade', 100),
+    uf                  = v_uf,
+    financeiro_nome     = public.campo_texto(p_dados, 'financeiro_nome', 160),
+    financeiro_email    = v_fmail,
+    financeiro_telefone = v_ftel,
+    observacoes         = public.campo_texto(p_dados, 'observacoes', 2000),
+    atualizado_por      = v_uid,
+    atualizado_em       = now()
+  where id = v_id;
+
+  return v_id;
+end;
+$$;
+
+-- Ativa ou inativa uma empresa
+create or replace function public.cadastro_pj_situacao(p_id uuid, p_situacao text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(p_situacao, '') not in ('ativo','inativo') then
+    raise exception 'Situação inválida';
+  end if;
+  if not public.cadastro_pj_pode(p_id) then
+    raise exception 'Cadastro não encontrado';
+  end if;
+  update public.cadastro_pj
+     set situacao = p_situacao, atualizado_por = (select auth.uid()), atualizado_em = now()
+   where id = p_id and situacao <> p_situacao;
+end;
+$$;
+
+-- Substitui o quadro de sócios e administradores.
+-- p_socios: lista de {nome, documento, qualificacao, selecionado}. No máximo um selecionado.
+create or replace function public.cadastro_pj_socios_definir(p_pj uuid, p_socios jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_s   jsonb;
+  v_i   int := 0;
+  v_sel boolean := false;
+  v_e   boolean;
+begin
+  if not public.cadastro_pj_pode(p_pj) then
+    raise exception 'Cadastro não encontrado';
+  end if;
+  if p_socios is null or jsonb_typeof(p_socios) <> 'array' or jsonb_array_length(p_socios) > 100 then
+    raise exception 'Lista de sócios inválida';
+  end if;
+  delete from public.cadastro_pj_socios where pj_id = p_pj;
+  for v_s in select * from jsonb_array_elements(p_socios) loop
+    if public.campo_texto(v_s, 'nome', 160) = '' then
+      raise exception 'Informe o nome de cada sócio ou administrador';
+    end if;
+    v_e := coalesce(v_s ->> 'selecionado', '') = 'true' and not v_sel;
+    v_sel := v_sel or v_e;
+    v_i := v_i + 1;
+    insert into public.cadastro_pj_socios (pj_id, nome, documento, qualificacao, selecionado, ordem)
+    values (p_pj, public.campo_texto(v_s, 'nome', 160), public.campo_texto(v_s, 'documento', 20),
+            public.campo_texto(v_s, 'qualificacao', 100), v_e, v_i);
+  end loop;
+  update public.cadastro_pj
+     set atualizado_por = (select auth.uid()), atualizado_em = now()
+   where id = p_pj;
+end;
+$$;
+
+-- Escolhe quem do quadro é o representante da empresa
+create or replace function public.cadastro_pj_selecionar_socio(p_pj uuid, p_socio uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.cadastro_pj_pode(p_pj) then
+    raise exception 'Cadastro não encontrado';
+  end if;
+  if not exists (select 1 from public.cadastro_pj_socios where id = p_socio and pj_id = p_pj) then
+    raise exception 'Sócio não encontrado neste cadastro';
+  end if;
+  update public.cadastro_pj_socios set selecionado = false where pj_id = p_pj and selecionado and id <> p_socio;
+  update public.cadastro_pj_socios set selecionado = true  where id = p_socio and not selecionado;
+end;
+$$;
+
+-- Grava os dados do representante (pessoa física) e liga à empresa.
+-- Se já existir um cadastro de pessoa física com o mesmo CPF na mesma origem, ele é atualizado e usado.
+create or replace function public.cadastro_pj_representante_salvar(p_pj uuid, p_dados jsonb)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid;
+  v_cpf text := regexp_replace(coalesce(p_dados ->> 'cpf', ''), '[^0-9]', '', 'g');
+  v_pf  uuid;
+begin
+  if not public.cadastro_pj_pode(p_pj) then
+    raise exception 'Cadastro não encontrado';
+  end if;
+  select organizacao_id into v_org from public.cadastro_pj where id = p_pj;
+  select id into v_pf from public.cadastro_pf
+   where cpf = v_cpf and organizacao_id is not distinct from v_org;
+  v_pf := public.cadastro_pf_salvar(v_pf, v_org, p_dados);
+  update public.cadastro_pj
+     set representante_pf_id = v_pf, atualizado_por = (select auth.uid()), atualizado_em = now()
+   where id = p_pj;
+  return v_pf;
+end;
+$$;
+
+drop trigger if exists auditar_cadastro_pj on public.cadastro_pj;
+create trigger auditar_cadastro_pj
+  after insert or update or delete on public.cadastro_pj
+  for each row execute function public.auditar('Cadastro');
+
+drop trigger if exists auditar_cadastro_pj_socios on public.cadastro_pj_socios;
+create trigger auditar_cadastro_pj_socios
+  after insert or update or delete on public.cadastro_pj_socios
+  for each row execute function public.auditar('Cadastro');
+
+revoke all on public.cadastro_pj, public.cadastro_pj_socios from anon, authenticated;
+grant select on public.cadastro_pj, public.cadastro_pj_socios to authenticated;
+
+revoke all on function public.cnpj_valido(text)                              from public, anon;
+revoke all on function public.cadastro_pj_pode(uuid)                         from public, anon;
+revoke all on function public.cadastro_pj_salvar(uuid, uuid, jsonb)          from public, anon;
+revoke all on function public.cadastro_pj_situacao(uuid, text)               from public, anon;
+revoke all on function public.cadastro_pj_socios_definir(uuid, jsonb)        from public, anon;
+revoke all on function public.cadastro_pj_selecionar_socio(uuid, uuid)       from public, anon;
+revoke all on function public.cadastro_pj_representante_salvar(uuid, jsonb)  from public, anon;
+
+grant execute on function public.cnpj_valido(text)                             to authenticated;
+grant execute on function public.cadastro_pj_pode(uuid)                        to authenticated;
+grant execute on function public.cadastro_pj_salvar(uuid, uuid, jsonb)         to authenticated;
+grant execute on function public.cadastro_pj_situacao(uuid, text)              to authenticated;
+grant execute on function public.cadastro_pj_socios_definir(uuid, jsonb)       to authenticated;
+grant execute on function public.cadastro_pj_selecionar_socio(uuid, uuid)      to authenticated;
+grant execute on function public.cadastro_pj_representante_salvar(uuid, jsonb) to authenticated;
+
+drop policy if exists "cadastro_pj leitura" on public.cadastro_pj;
+create policy "cadastro_pj leitura" on public.cadastro_pj
+  for select to authenticated
+  using ((select public.pode_modulo('cadastro'))
+         and ((select public.eh_equipe()) or organizacao_id = (select public.minha_org())));
+
+drop policy if exists "cadastro_pj_socios leitura" on public.cadastro_pj_socios;
+create policy "cadastro_pj_socios leitura" on public.cadastro_pj_socios
+  for select to authenticated
+  using (public.cadastro_pj_pode(pj_id));
+
+-- =====================================================================
+-- 11) PRIMEIRO USUÁRIO MASTER
 --    Depois de criar o usuário em Authentication > Users, troque o e-mail e o nome,
 --    tire os dois traços do início das linhas e rode:
 -- =====================================================================

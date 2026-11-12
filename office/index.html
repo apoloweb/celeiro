@@ -165,6 +165,17 @@ tr.grupo-l th{background:var(--nevoa);font-size:13px;font-weight:600;padding:8px
 .lista-p{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
 .lista-p li{padding:10px 0;border-top:1px solid var(--linha);display:flex;flex-direction:column;gap:2px}
 .lista-p li:first-child{border-top:0}
+.dados{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px 24px}
+.dado{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dado .rot{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--texto2)}
+.dado .val{font-size:15px;word-break:break-word}
+.copiar{background:none;border:0;padding:0 4px;font-size:12px;color:var(--texto2);text-decoration:underline;cursor:pointer;min-height:24px}
+.contatos{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.contato{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--linha);border-radius:10px;background:var(--nevoa)}
+.grade3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;align-items:start}
+.acoes{display:flex;flex-wrap:wrap;gap:10px;flex:1 1 100%}
+.linha-socio{flex-direction:row!important;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px!important}
+.linha-socio>div:first-child{display:flex;flex-direction:column;gap:2px}
 #aviso{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:calc(100% - 32px);padding:12px 18px;border-radius:8px;background:var(--verde);color:var(--nevoa);font-size:14px;box-shadow:0 6px 24px rgba(15,61,46,.25);z-index:2147483647}
 #aviso.ruim{background:var(--erro)}
 #aviso:empty{display:none}
@@ -190,7 +201,7 @@ var app=document.getElementById('app');
 var elAviso=document.getElementById('aviso');
 
 var PERFIS={master:'Master',gerencial:'Gerencial',corp_master:'Corporativo master',corp_operador:'Corporativo operador'};
-var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true};
+var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true};
 var INATIVIDADE_MS=15*60*1000;
 var MAX_TENTATIVAS=5;
 var E={acesso:null,modulos:[],recuperando:/type=recovery/.test(hashInicial),novoLogin:false,tentativas:0,relogio:null,avisoRelogio:null};
@@ -517,6 +528,7 @@ var ROTAS={
   senha:{titulo:'Trocar senha',modulo:'Acesso',fn:telaSenha,pode:function(){return true;},semGrupo:true},
   workflow:{titulo:'Workflow',modulo:'Workflow',fn:telaWorkflow,pode:function(){return temModulo('workflow');},semGrupo:true},
   dashboard:{titulo:'Dashboard',modulo:'Dashboard',fn:telaDashboard,pode:function(){return temModulo('dashboard');},semGrupo:true},
+  cadastro:{titulo:'Cadastro',modulo:'Cadastro',fn:telaCadPessoas,pode:function(){return temModulo('cadastro');},semGrupo:true},
   app:{titulo:'Aplicativo',modulo:'Aplicativo',fn:telaApp,pode:function(){return temModulo('app');},semGrupo:true}
 };
 
@@ -1351,6 +1363,369 @@ async function telaApp(){
       aviso(novo?'Módulo do aplicativo ligado.':'Módulo do aplicativo desligado.');
     };
   });
+}
+
+/* ---------- Cadastro: pessoas físicas e jurídicas ---------- */
+var CAD={aba:'pf',pf:[],pj:[],orgs:[],busca:''};
+var UFS=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+var SEXOS=[['masculino','Masculino'],['feminino','Feminino'],['outro','Outro'],['nao_informado','Prefere não informar']];
+var CIVIS=[['solteiro','Solteiro(a)'],['casado','Casado(a)'],['uniao_estavel','União estável'],['separado','Separado(a)'],['divorciado','Divorciado(a)'],['viuvo','Viúvo(a)']];
+var FONTES=[['assalariado','Assalariado(a)'],['empresario','Empresário(a)'],['autonomo','Autônomo(a)'],['profissional_liberal','Profissional liberal'],['servidor_publico','Servidor(a) público(a)'],['aposentado','Aposentado(a) ou pensionista'],['rendimentos','Rendimentos de aplicações ou aluguéis'],['outros','Outros']];
+function soNum(v){return String(v==null?'':v).replace(/\D/g,'');}
+function fmtCpf(v){var n=soNum(v);return n.length===11?n.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/,'$1.$2.$3-$4'):String(v||'');}
+function fmtCep(v){var n=soNum(v);return n.length===8?n.slice(0,5)+'-'+n.slice(5):String(v||'');}
+function fmtTel(v){var n=soNum(v);if(n.length===11)return '('+n.slice(0,2)+') '+n.slice(2,7)+'-'+n.slice(7);if(n.length===10)return '('+n.slice(0,2)+') '+n.slice(2,6)+'-'+n.slice(6);return String(v||'');}
+function fmtMoeda(v){if(v===null||v===undefined||v==='')return '';return Number(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
+function leMoeda(txt){var t=String(txt||'').replace(/[^\d,.]/g,'');if(!t)return '';if(t.indexOf(',')>=0){t=t.replace(/\./g,'').replace(',','.');}return isNaN(Number(t))?'':String(Number(t));}
+function cpfValido(v){
+  var n=soNum(v);if(n.length!==11||/^(\d)\1+$/.test(n))return false;
+  function dv(q){var s=0;for(var i=0;i<q;i++){s+=Number(n[i])*(q+1-i);}var r=(s*10)%11;return r===10?0:r;}
+  return dv(9)===Number(n[9])&&dv(10)===Number(n[10]);
+}
+function simNao(b){return b?'Sim':'Não';}
+function dado(rotulo,valor,copiavel){
+  var tem=valor!==null&&valor!==undefined&&String(valor)!=='';
+  return '<div class="dado"><span class="rot">'+esc(rotulo)+'</span><span class="val">'+(tem?esc(valor):'—')+
+    (tem&&copiavel?' <button type="button" class="copiar" data-copiar="'+esc(valor)+'" aria-label="Copiar '+esc(rotulo.toLowerCase())+'">Copiar</button>':'')+'</span></div>';
+}
+function seloVerificado(sim){return '<span class="selo'+(sim?'':' claro')+'">'+(sim?'Verificado':'Não verificado')+'</span>';}
+function ligaCopiar(){
+  $$('[data-copiar]').forEach(function(b){b.onclick=function(){
+    var v=b.getAttribute('data-copiar');
+    try{navigator.clipboard.writeText(v).then(function(){aviso('Copiado.');},function(){aviso('Não foi possível copiar.',true);});}catch(err){aviso('Não foi possível copiar.',true);}
+  };});
+}
+function ci(id,rotulo,valor,extra){return '<div class="campo"><label for="'+id+'">'+esc(rotulo)+'</label><input id="'+id+'" type="text" value="'+esc(valor==null?'':valor)+'" '+(extra||'')+'></div>';}
+function cs(id,rotulo,valor,opcoes,vazio){
+  return '<div class="campo"><label for="'+id+'">'+esc(rotulo)+'</label><select id="'+id+'"><option value="">'+esc(vazio||'Não informado')+'</option>'+
+    opcoes.map(function(o){var v=typeof o==='string'?[o,o]:o;return '<option value="'+esc(v[0])+'"'+(v[0]===valor?' selected':'')+'>'+esc(v[1])+'</option>';}).join('')+'</select></div>';
+}
+function cb(id,rotulo,marcado){return '<label class="caixa-mod"><input type="checkbox" id="'+id+'"'+(marcado?' checked':'')+'> '+esc(rotulo)+'</label>';}
+function seletorOrg(id,org,novo){
+  if(!ehEquipe())return '';
+  return '<div class="campo" style="max-width:420px"><label for="'+id+'">De quem é o cadastro</label><select id="'+id+'"'+(novo?'':' disabled')+'><option value="">Celeiro</option>'+
+    CAD.orgs.filter(function(o){return o.ativo||o.id===org;}).map(function(o){return '<option value="'+esc(o.id)+'"'+(o.id===org?' selected':'')+'>'+esc(o.nome)+'</option>';}).join('')+'</select></div>';
+}
+function ligaCep(pre){
+  var c=$('#'+pre+'cep');if(!c)return;
+  c.onblur=async function(){
+    var n=soNum(c.value);if(n.length!==8)return;
+    c.value=fmtCep(n);
+    try{
+      var r=await fetch('https://viacep.com.br/ws/'+n+'/json/');
+      var j=await r.json();
+      if(!j||j.erro){aviso('CEP não encontrado. Preencha o endereço manualmente.',true);return;}
+      [['logradouro',j.logradouro],['bairro',j.bairro],['cidade',j.localidade],['uf',j.uf]].forEach(function(p){var el=$('#'+pre+p[0]);if(el&&!el.value&&p[1])el.value=p[1];});
+      aviso('Endereço preenchido pelo CEP. Confira e complete o número.');
+    }catch(err){aviso('Não foi possível consultar o CEP agora. Preencha o endereço manualmente.',true);}
+  };
+}
+
+/* ----- blocos de pessoa física (usados no cadastro PF e no representante da PJ) ----- */
+function pfDetalheHtml(p){
+  return '<h2 class="titulo-s">Dados pessoais</h2><div class="dados">'+
+      dado('Nome completo',p.nome_completo,true)+dado('Nome social',p.nome_social)+dado('CPF',fmtCpf(p.cpf),true)+
+      dado('Nascimento',p.nascimento?dataBr(p.nascimento):'')+dado('Sexo',p.sexo?rotuloDe(SEXOS,p.sexo):'')+dado('Nome da mãe',p.nome_mae)+
+      dado('Naturalidade',p.naturalidade)+dado('Nacionalidade',p.nacionalidade)+dado('Estado civil',p.estado_civil?rotuloDe(CIVIS,p.estado_civil):'')+'</div>'+
+    '<h2 class="titulo-s">Contatos</h2><div class="contatos">'+
+      '<div class="contato"><div>'+dado('Telefone celular',fmtTel(p.telefone_celular),true)+'</div>'+(p.telefone_celular?seloVerificado(p.celular_verificado):'')+'</div>'+
+      '<div class="contato"><div>'+dado('E-mail',p.email,true)+'</div>'+(p.email?seloVerificado(p.email_verificado):'')+'</div></div>'+
+      (p.telefone_fixo?'<div class="dados">'+dado('Telefone fixo',fmtTel(p.telefone_fixo),true)+'</div>':'')+
+    '<h2 class="titulo-s">Endereço</h2><div class="dados">'+
+      dado('CEP',fmtCep(p.cep),true)+dado('Logradouro',p.logradouro)+dado('Número',p.numero)+
+      dado('Complemento',p.complemento)+dado('Bairro',p.bairro)+dado('Cidade',p.cidade)+dado('UF',p.uf)+'</div>'+
+    '<h2 class="titulo-s">Profissional e financeiro</h2><div class="dados">'+
+      dado('Profissão',p.profissao)+dado('Fonte de renda',p.fonte_renda?rotuloDe(FONTES,p.fonte_renda):'')+dado('Renda mensal',fmtMoeda(p.renda_mensal))+
+      dado('MEI',simNao(p.mei))+dado('Isento IR',simNao(p.isento_ir))+dado('PEP',simNao(p.pep))+
+      dado('Tributável nos EUA (FATCA)',simNao(p.fatca))+dado('Tributável em outros países (CRS)',simNao(p.crs))+'</div>'+
+    (p.observacoes?'<h2 class="titulo-s">Observações</h2><p style="white-space:pre-wrap">'+esc(p.observacoes)+'</p>':'');
+}
+function pfFormHtml(p){
+  p=p||{};
+  return '<h2 class="titulo-s">Dados pessoais</h2><div class="grade3">'+
+      ci('p-nome_completo','Nome completo',p.nome_completo,'maxlength="160" required')+ci('p-nome_social','Nome social (opcional)',p.nome_social,'maxlength="160"')+ci('p-cpf','CPF',fmtCpf(p.cpf),'inputmode="numeric" maxlength="14" required')+
+      '<div class="campo"><label for="p-nascimento">Nascimento</label><input id="p-nascimento" type="date" value="'+esc(p.nascimento||'')+'"></div>'+cs('p-sexo','Sexo',p.sexo,SEXOS)+ci('p-nome_mae','Nome da mãe',p.nome_mae,'maxlength="160"')+
+      ci('p-naturalidade','Naturalidade (cidade - UF)',p.naturalidade,'maxlength="120"')+ci('p-nacionalidade','Nacionalidade',p.nacionalidade==null?'BRA':p.nacionalidade,'maxlength="60"')+cs('p-estado_civil','Estado civil',p.estado_civil,CIVIS)+'</div>'+
+    '<h2 class="titulo-s">Contatos</h2><div class="grade3">'+
+      '<div>'+ci('p-telefone_celular','Telefone celular',fmtTel(p.telefone_celular),'inputmode="tel" maxlength="20"')+cb('p-celular_verificado','Celular conferido',p.celular_verificado)+'</div>'+
+      '<div>'+ci('p-email','E-mail',p.email,'maxlength="254"')+cb('p-email_verificado','E-mail conferido',p.email_verificado)+'</div>'+
+      ci('p-telefone_fixo','Telefone fixo (opcional)',fmtTel(p.telefone_fixo),'inputmode="tel" maxlength="20"')+'</div>'+
+    '<h2 class="titulo-s">Endereço</h2><div class="grade3">'+
+      ci('p-cep','CEP',fmtCep(p.cep),'inputmode="numeric" maxlength="9"')+ci('p-logradouro','Logradouro',p.logradouro,'maxlength="160"')+ci('p-numero','Número',p.numero,'maxlength="20"')+
+      ci('p-complemento','Complemento',p.complemento,'maxlength="80"')+ci('p-bairro','Bairro',p.bairro,'maxlength="100"')+ci('p-cidade','Cidade',p.cidade,'maxlength="100"')+cs('p-uf','UF',p.uf,UFS)+'</div>'+
+    '<h2 class="titulo-s">Profissional e financeiro</h2><div class="grade3">'+
+      ci('p-profissao','Profissão',p.profissao,'maxlength="100"')+cs('p-fonte_renda','Fonte de renda',p.fonte_renda,FONTES)+ci('p-renda_mensal','Renda mensal (R$)',p.renda_mensal==null?'':fmtMoeda(p.renda_mensal),'inputmode="decimal" maxlength="24"')+'</div>'+
+    '<div class="caixas">'+cb('p-mei','MEI',p.mei)+cb('p-isento_ir','Isento de IR',p.isento_ir)+cb('p-pep','PEP (pessoa exposta politicamente)',p.pep)+cb('p-fatca','Tributável nos EUA (FATCA)',p.fatca)+cb('p-crs','Tributável em outros países (CRS)',p.crs)+'</div>'+
+    '<div class="campo"><label for="p-observacoes">Observações (opcional)</label><textarea id="p-observacoes" rows="2" maxlength="2000">'+esc(p.observacoes||'')+'</textarea></div>';
+}
+function pfLer(){
+  var d={};
+  ['nome_completo','nome_social','cpf','nascimento','sexo','nome_mae','naturalidade','nacionalidade','estado_civil','telefone_celular','telefone_fixo','email','cep','logradouro','numero','complemento','bairro','cidade','uf','profissao','fonte_renda','observacoes'].forEach(function(k){d[k]=$('#p-'+k).value.trim();});
+  ['celular_verificado','email_verificado','mei','isento_ir','pep','fatca','crs'].forEach(function(k){d[k]=$('#p-'+k).checked;});
+  d.renda_mensal=leMoeda($('#p-renda_mensal').value);
+  return d;
+}
+function pfConfere(d){
+  if(!d.nome_completo)return 'Informe o nome completo.';
+  if(!cpfValido(d.cpf))return 'CPF inválido. Confira os números.';
+  if($('#p-renda_mensal').value.trim()&&d.renda_mensal==='')return 'Renda mensal inválida.';
+  return '';
+}
+function pfLigaMascaras(){
+  var c=$('#p-cpf');if(c){c.onblur=function(){c.value=fmtCpf(c.value);};}
+  ['p-telefone_celular','p-telefone_fixo'].forEach(function(id){var t=$('#'+id);if(t){t.onblur=function(){t.value=fmtTel(t.value);};}});
+  var r=$('#p-renda_mensal');if(r){r.onblur=function(){var n=leMoeda(r.value);r.value=n===''?'':fmtMoeda(n);};}
+  ligaCep('p-');
+}
+
+/* ----- tela principal do Cadastro ----- */
+async function telaCadPessoas(){
+  carregando('Cadastro');
+  var rs=await Promise.all([
+    sb.from('cadastro_pf').select('id,organizacao_id,situacao,nome_completo,nome_social,cpf,cidade,uf,telefone_celular,email').order('nome_completo'),
+    sb.from('cadastro_pj').select('id,organizacao_id,situacao,razao_social,nome_fantasia,cnpj,cidade,uf,situacao_cadastral').order('razao_social'),
+    ehEquipe()?sb.from('organizacoes').select('*').order('nome'):Promise.resolve({data:[],error:null})
+  ]);
+  if(rs[0].error){falhaTela('Cadastro',rs[0].error);return;}
+  if(rs[1].error){falhaTela('Cadastro',rs[1].error);return;}
+  CAD.pf=rs[0].data||[];CAD.pj=rs[1].data||[];CAD.orgs=rs[2].error?[]:(rs[2].data||[]);
+  desenhaCadastro();
+}
+function nomeOrgCad(id){if(!id)return 'Celeiro';var o=CAD.orgs.filter(function(x){return x.id===id;})[0];return o?o.nome:'—';}
+function desenhaCadastro(){
+  var pf=CAD.aba==='pf';
+  tela('<div class="cabeca"><div><h1>Cadastro</h1><p class="apoio">Pessoas físicas e jurídicas. Cadastros não são apagados: podem ser inativados.</p></div>'+
+      '<button class="botao" type="button" id="cad-novo">'+(pf?'Nova pessoa física':'Nova pessoa jurídica')+'</button></div>'+
+    '<div class="segmento" role="group" aria-label="Tipo de cadastro">'+
+      '<button type="button" class="aba" data-cad="pf" aria-pressed="'+(pf?'true':'false')+'">Pessoas físicas <span class="conta">'+CAD.pf.length+'</span></button>'+
+      '<button type="button" class="aba" data-cad="pj" aria-pressed="'+(pf?'false':'true')+'">Pessoas jurídicas <span class="conta">'+CAD.pj.length+'</span></button></div>'+
+    '<div class="campo"><label class="oculto-visual" for="cad-busca">Buscar</label><input id="cad-busca" type="text" placeholder="'+(pf?'Buscar por nome ou CPF':'Buscar por razão social, nome fantasia ou CNPJ')+'" value="'+esc(CAD.busca)+'"></div>'+
+    '<div id="cad-resultado"></div>');
+  $$('[data-cad]').forEach(function(b){b.onclick=function(){CAD.aba=b.getAttribute('data-cad');CAD.busca='';desenhaCadastro();};});
+  $('#cad-busca').oninput=function(){CAD.busca=this.value;desenhaCadResultado();};
+  $('#cad-novo').onclick=function(){if(pf)editarPf(null);else editarPj(null);};
+  desenhaCadResultado();
+}
+function desenhaCadResultado(){
+  var alvo=$('#cad-resultado');if(!alvo)return;
+  var b=CAD.busca.trim().toLowerCase(),bn=soNum(b),eq=ehEquipe(),linhas;
+  function sit(s){return '<span class="situacao'+(s==='ativo'?'':' off')+'">'+(s==='ativo'?'Ativo':'Inativo')+'</span>';}
+  if(CAD.aba==='pf'){
+    linhas=CAD.pf.filter(function(p){return !b||p.nome_completo.toLowerCase().indexOf(b)>=0||(p.nome_social||'').toLowerCase().indexOf(b)>=0||(bn&&p.cpf.indexOf(bn)>=0);}).map(function(p){
+      return '<tr><td><button type="button" class="titulo-t" data-pf="'+esc(p.id)+'">'+esc(p.nome_completo)+'</button>'+(p.nome_social?'<span class="sub">'+esc(p.nome_social)+'</span>':'')+'</td>'+
+        '<td>'+esc(fmtCpf(p.cpf))+'</td><td>'+esc(p.cidade?(p.cidade+(p.uf?' - '+p.uf:'')):'—')+'</td>'+
+        '<td>'+esc(fmtTel(p.telefone_celular)||'—')+'<span class="sub">'+esc(p.email||'')+'</span></td>'+(eq?'<td>'+esc(nomeOrgCad(p.organizacao_id))+'</td>':'')+'<td>'+sit(p.situacao)+'</td></tr>';
+    }).join('');
+    alvo.innerHTML='<div class="rolagem"><table style="min-width:760px"><thead><tr><th scope="col">Nome</th><th scope="col">CPF</th><th scope="col">Cidade</th><th scope="col">Contato</th>'+(eq?'<th scope="col">De quem</th>':'')+'<th scope="col">Situação</th></tr></thead><tbody>'+
+      (linhas||'<tr><td colspan="'+(eq?6:5)+'" class="vazio">'+(CAD.pf.length?'Nenhuma pessoa nesta busca.':'Nenhuma pessoa física cadastrada.')+'</td></tr>')+'</tbody></table></div>';
+    $$('[data-pf]',alvo).forEach(function(x){x.onclick=function(){verPf(x.getAttribute('data-pf'));};});
+  }else{
+    linhas=CAD.pj.filter(function(j){return !b||j.razao_social.toLowerCase().indexOf(b)>=0||(j.nome_fantasia||'').toLowerCase().indexOf(b)>=0||(bn&&j.cnpj.indexOf(bn)>=0);}).map(function(j){
+      return '<tr><td><button type="button" class="titulo-t" data-pj="'+esc(j.id)+'">'+esc(j.razao_social)+'</button>'+(j.nome_fantasia?'<span class="sub">'+esc(j.nome_fantasia)+'</span>':'')+'</td>'+
+        '<td>'+esc(formataCnpj(j.cnpj))+'</td><td>'+esc(j.cidade?(j.cidade+(j.uf?' - '+j.uf:'')):'—')+'</td><td>'+esc(j.situacao_cadastral||'—')+'</td>'+(eq?'<td>'+esc(nomeOrgCad(j.organizacao_id))+'</td>':'')+'<td>'+sit(j.situacao)+'</td></tr>';
+    }).join('');
+    alvo.innerHTML='<div class="rolagem"><table style="min-width:760px"><thead><tr><th scope="col">Razão social</th><th scope="col">CNPJ</th><th scope="col">Cidade</th><th scope="col">Situação cadastral</th>'+(eq?'<th scope="col">De quem</th>':'')+'<th scope="col">Situação</th></tr></thead><tbody>'+
+      (linhas||'<tr><td colspan="'+(eq?6:5)+'" class="vazio">'+(CAD.pj.length?'Nenhuma empresa nesta busca.':'Nenhuma pessoa jurídica cadastrada.')+'</td></tr>')+'</tbody></table></div>';
+    $$('[data-pj]',alvo).forEach(function(x){x.onclick=function(){verPj(x.getAttribute('data-pj'));};});
+  }
+}
+function botoesFicha(situacao){
+  return '<div class="acoes"><button class="botao claro" type="button" id="f-voltar">Voltar</button><button class="botao" type="button" id="f-editar">Editar</button>'+
+    '<button class="botao claro" type="button" id="f-situacao">'+(situacao==='ativo'?'Inativar':'Reativar')+'</button>'+
+    (temModulo('workflow')?'<button class="botao ambar" type="button" id="f-tarefa">Nova tarefa</button>':'')+'</div>';
+}
+
+/* ----- pessoa física ----- */
+async function verPf(id){
+  carregando('Cadastro');
+  var r=await sb.from('cadastro_pf').select('*').eq('id',id);
+  if(r.error||!r.data||!r.data.length){falhaTela('Cadastro',r.error||{message:'Cadastro não encontrado.'});return;}
+  var p=r.data[0];
+  evento('Abriu um cadastro de pessoa física','Cadastro',{id:p.id});
+  tela('<div class="cabeca"><div><h1>'+esc(p.nome_completo)+'</h1><p class="apoio">Pessoa física · '+esc(ehEquipe()?nomeOrgCad(p.organizacao_id):'cadastro da sua organização')+' · '+(p.situacao==='ativo'?'Ativo':'Inativo')+'</p></div>'+botoesFicha(p.situacao)+'</div>'+
+    '<div class="painel">'+pfDetalheHtml(p)+'</div>'+
+    '<p class="nota">"Verificado" indica conferência feita manualmente por quem preencheu o cadastro. A confirmação automática por código (SMS ou e-mail) ainda não existe.</p>');
+  ligaCopiar();
+  $('#f-voltar').onclick=function(){telaCadPessoas();};
+  $('#f-editar').onclick=function(){editarPf(p);};
+  $('#f-situacao').onclick=async function(){
+    ocupar(this,true);
+    var s=await sb.rpc('cadastro_pf_situacao',{p_id:p.id,p_situacao:p.situacao==='ativo'?'inativo':'ativo'});
+    if(s.error){ocupar(this,false);aviso(msgErro(s.error),true);return;}
+    aviso(p.situacao==='ativo'?'Cadastro inativado.':'Cadastro reativado.');verPf(p.id);
+  };
+  if($('#f-tarefa')){$('#f-tarefa').onclick=function(){abrirTarefa(null,{origem:'Cadastro de '+p.nome_completo,modulo:'Cadastro'});};}
+}
+function editarPf(p){
+  var novo=!p;
+  tela('<div class="cabeca"><div><h1>'+(novo?'Nova pessoa física':'Editar pessoa física')+'</h1><p class="apoio">Obrigatórios: nome completo e CPF. Os demais campos podem ser completados depois.</p></div></div>'+
+    '<form class="painel" id="f-pf" novalidate>'+seletorOrg('p-org',novo?'':(p.organizacao_id||''),novo)+pfFormHtml(p)+
+    '<div class="grade"><button class="botao" type="submit">'+(novo?'Cadastrar':'Salvar')+'</button><button class="botao claro" type="button" id="p-cancelar">Cancelar</button></div></form>');
+  pfLigaMascaras();
+  $('#p-cancelar').onclick=function(){if(novo)telaCadPessoas();else verPf(p.id);};
+  $('#f-pf').onsubmit=async function(ev){
+    ev.preventDefault();
+    var d=pfLer(),erro=pfConfere(d),b=$('button[type=submit]',this);
+    if(erro){aviso(erro,true);return;}
+    ocupar(b,true);
+    var org=ehEquipe()?($('#p-org').value||null):E.acesso.organizacao_id;
+    var r=await sb.rpc('cadastro_pf_salvar',{p_id:novo?null:p.id,p_org:org,p_dados:d});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    aviso(novo?'Pessoa física cadastrada.':'Cadastro salvo.');verPf(r.data);
+  };
+}
+
+/* ----- pessoa jurídica ----- */
+async function verPj(id,aba){
+  carregando('Cadastro');
+  var r=await sb.from('cadastro_pj').select('*').eq('id',id);
+  if(r.error||!r.data||!r.data.length){falhaTela('Cadastro',r.error||{message:'Cadastro não encontrado.'});return;}
+  var j=r.data[0];aba=aba||'empresa';
+  var rs=await Promise.all([
+    sb.from('cadastro_pj_socios').select('*').eq('pj_id',id).order('ordem'),
+    j.representante_pf_id?sb.from('cadastro_pf').select('*').eq('id',j.representante_pf_id):Promise.resolve({data:[],error:null})
+  ]);
+  var socios=rs[0].error?[]:(rs[0].data||[]),rep=(rs[1].data&&rs[1].data[0])||null;
+  if(aba==='empresa')evento('Abriu um cadastro de pessoa jurídica','Cadastro',{id:j.id});
+  var corpo;
+  if(aba==='empresa'){
+    corpo='<div class="painel"><h2 class="titulo-s">Dados da empresa</h2><div class="dados">'+
+        dado('Razão social',j.razao_social,true)+dado('Nome fantasia',j.nome_fantasia)+dado('CNPJ',formataCnpj(j.cnpj),true)+
+        dado('Situação cadastral',j.situacao_cadastral)+dado('Status enriquecimento',j.enriquecimento==='concluido'?'Concluído':'Não feito')+
+        dado('Enriquecido em',j.enriquecido_em?(dataHora(j.enriquecido_em).data+' '+dataHora(j.enriquecido_em).hora.slice(0,5)):'')+'</div>'+
+      '<h2 class="titulo-s">Contatos</h2><div class="dados">'+dado('E-mail',j.email,true)+dado('Telefone fixo',fmtTel(j.telefone_fixo),true)+dado('Telefone celular',fmtTel(j.telefone_celular),true)+'</div>'+
+      '<h2 class="titulo-s">Endereço</h2><div class="dados">'+dado('CEP',fmtCep(j.cep),true)+dado('Logradouro',j.logradouro)+dado('Número',j.numero)+dado('Complemento',j.complemento)+dado('Bairro',j.bairro)+dado('Cidade',j.cidade)+dado('UF',j.uf)+'</div>'+
+      '<h2 class="titulo-s">Responsável financeiro</h2><div class="dados">'+dado('Nome',j.financeiro_nome)+dado('E-mail',j.financeiro_email,true)+dado('Telefone',fmtTel(j.financeiro_telefone),true)+'</div>'+
+      (j.observacoes?'<h2 class="titulo-s">Observações</h2><p style="white-space:pre-wrap">'+esc(j.observacoes)+'</p>':'')+'</div>';
+  }else{
+    var sel=socios.filter(function(s){return s.selecionado;})[0];
+    corpo='<div class="painel"><div class="cartao-d-topo"><div><h2 class="titulo-s">Quadro de sócios e administradores (QSA)</h2><p class="apoio" style="font-size:13px">Escolha quem do quadro é o responsável pelo cadastro.</p></div>'+
+        '<span class="selo'+(sel?'':' claro')+'">'+(sel?'Definido':'A definir')+'</span></div>'+
+      (socios.length?'<ul class="lista-p">'+socios.map(function(s){
+        return '<li class="linha-socio"><div><strong>'+esc(s.nome)+'</strong><span class="meta">'+esc([s.documento?('CPF/CNPJ '+s.documento):'',s.qualificacao].filter(Boolean).join(' · ')||'Sem qualificação informada')+'</span></div>'+
+          '<div class="mover">'+(s.selecionado?'<span class="selo">Selecionado</span>':'<button type="button" class="botao claro pequeno" data-selecionar="'+esc(s.id)+'">Selecionar</button>')+
+          '<button type="button" class="botao claro pequeno" data-remover-socio="'+esc(s.id)+'" aria-label="Remover '+esc(s.nome)+' do quadro">Remover</button></div></li>';}).join('')+'</ul>'
+        :'<p class="apoio">Nenhum sócio ou administrador informado.</p>')+
+      '<form id="f-socio" class="grade" novalidate>'+ci('s-nome','Nome','','maxlength="160"')+ci('s-doc','CPF ou CNPJ (opcional)','','maxlength="20"')+ci('s-qual','Qualificação','','maxlength="100" placeholder="Ex.: Sócio-administrador"')+
+        '<button class="botao claro" type="submit">Adicionar ao quadro</button></form></div>'+
+      '<div class="painel"><div class="cartao-d-topo"><div><h2 class="titulo-s">Representante</h2><p class="apoio" style="font-size:13px">Dados detalhados do responsável legal da empresa.</p></div>'+
+        '<button class="botao'+(rep?' claro':'')+' pequeno" type="button" id="rep-editar">'+(rep?'Editar dados do representante':'Informar dados do representante')+'</button></div>'+
+      (rep?pfDetalheHtml(rep):'<p class="apoio">Ainda sem dados do representante.'+(sel?' Selecionado no quadro: '+esc(sel.nome)+'.':'')+'</p>')+'</div>';
+  }
+  tela('<div class="cabeca"><div><h1>'+esc(j.razao_social)+'</h1><p class="apoio">Pessoa jurídica · '+esc(ehEquipe()?nomeOrgCad(j.organizacao_id):'cadastro da sua organização')+' · '+(j.situacao==='ativo'?'Ativo':'Inativo')+'</p></div>'+botoesFicha(j.situacao)+'</div>'+
+    '<div class="segmento" role="group" aria-label="Partes do cadastro"><button type="button" class="aba" data-pj-aba="empresa" aria-pressed="'+(aba==='empresa'?'true':'false')+'">Empresa</button>'+
+      '<button type="button" class="aba" data-pj-aba="representantes" aria-pressed="'+(aba==='representantes'?'true':'false')+'">Representantes <span class="conta">'+socios.length+'</span></button></div>'+corpo);
+  ligaCopiar();
+  $$('[data-pj-aba]').forEach(function(b){b.onclick=function(){verPj(j.id,b.getAttribute('data-pj-aba'));};});
+  $('#f-voltar').onclick=function(){telaCadPessoas();};
+  $('#f-editar').onclick=function(){editarPj(j);};
+  $('#f-situacao').onclick=async function(){
+    ocupar(this,true);
+    var s=await sb.rpc('cadastro_pj_situacao',{p_id:j.id,p_situacao:j.situacao==='ativo'?'inativo':'ativo'});
+    if(s.error){ocupar(this,false);aviso(msgErro(s.error),true);return;}
+    aviso(j.situacao==='ativo'?'Cadastro inativado.':'Cadastro reativado.');verPj(j.id,aba);
+  };
+  if($('#f-tarefa')){$('#f-tarefa').onclick=function(){abrirTarefa(null,{origem:'Cadastro de '+j.razao_social,modulo:'Cadastro'});};}
+  if(aba==='representantes'){
+    async function gravaQuadro(lista,msg){
+      var g=await sb.rpc('cadastro_pj_socios_definir',{p_pj:j.id,p_socios:lista});
+      if(g.error){aviso(msgErro(g.error),true);return;}
+      aviso(msg);verPj(j.id,'representantes');
+    }
+    function comoLista(){return socios.map(function(s){return {nome:s.nome,documento:s.documento,qualificacao:s.qualificacao,selecionado:s.selecionado};});}
+    $('#f-socio').onsubmit=function(ev){
+      ev.preventDefault();
+      var nome=$('#s-nome').value.trim();
+      if(!nome){aviso('Informe o nome.',true);return;}
+      gravaQuadro(comoLista().concat([{nome:nome,documento:$('#s-doc').value.trim(),qualificacao:$('#s-qual').value.trim(),selecionado:false}]),'Adicionado ao quadro.');
+    };
+    $$('[data-remover-socio]').forEach(function(b){b.onclick=function(){
+      var id=b.getAttribute('data-remover-socio');
+      gravaQuadro(socios.filter(function(s){return s.id!==id;}).map(function(s){return {nome:s.nome,documento:s.documento,qualificacao:s.qualificacao,selecionado:s.selecionado};}),'Removido do quadro.');
+    };});
+    $$('[data-selecionar]').forEach(function(b){b.onclick=async function(){
+      ocupar(b,true);
+      var g=await sb.rpc('cadastro_pj_selecionar_socio',{p_pj:j.id,p_socio:b.getAttribute('data-selecionar')});
+      if(g.error){ocupar(b,false);aviso(msgErro(g.error),true);return;}
+      aviso('Responsável selecionado.');verPj(j.id,'representantes');
+    };});
+    $('#rep-editar').onclick=function(){editarRepresentante(j,rep,socios.filter(function(s){return s.selecionado;})[0]);};
+  }
+}
+function editarRepresentante(j,rep,sel){
+  var base=rep||{nome_completo:sel?sel.nome:''};
+  tela('<div class="cabeca"><div><h1>Representante de '+esc(j.razao_social)+'</h1><p class="apoio">Obrigatórios: nome completo e CPF. Se já existir uma pessoa física com este CPF, o cadastro dela é atualizado e usado.</p></div></div>'+
+    '<form class="painel" id="f-rep" novalidate>'+pfFormHtml(base)+
+    '<div class="grade"><button class="botao" type="submit">Salvar representante</button><button class="botao claro" type="button" id="p-cancelar">Cancelar</button></div></form>');
+  pfLigaMascaras();
+  $('#p-cancelar').onclick=function(){verPj(j.id,'representantes');};
+  $('#f-rep').onsubmit=async function(ev){
+    ev.preventDefault();
+    var d=pfLer(),erro=pfConfere(d),b=$('button[type=submit]',this);
+    if(erro){aviso(erro,true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('cadastro_pj_representante_salvar',{p_pj:j.id,p_dados:d});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    aviso('Representante salvo.');verPj(j.id,'representantes');
+  };
+}
+function editarPj(j){
+  var novo=!j,qsaNovo=null,enriquecido=false;j=j||{};
+  tela('<div class="cabeca"><div><h1>'+(novo?'Nova pessoa jurídica':'Editar pessoa jurídica')+'</h1><p class="apoio">Obrigatórios: razão social e CNPJ. "Buscar dados pelo CNPJ" preenche o que estiver na base pública de CNPJ.</p></div></div>'+
+    '<form class="painel" id="f-pj" novalidate>'+seletorOrg('j-org',novo?'':(j.organizacao_id||''),novo)+
+    '<h2 class="titulo-s">Dados da empresa</h2><div class="grade3">'+
+      '<div class="campo"><label for="j-cnpj">CNPJ</label><div class="junto"><input id="j-cnpj" type="text" inputmode="numeric" maxlength="18" value="'+esc(formataCnpj(j.cnpj))+'" required><button class="botao claro pequeno" type="button" id="j-buscar">Buscar dados pelo CNPJ</button></div></div>'+
+      ci('j-razao_social','Razão social',j.razao_social,'maxlength="200" required')+ci('j-nome_fantasia','Nome fantasia',j.nome_fantasia,'maxlength="200"')+
+      ci('j-situacao_cadastral','Situação cadastral',j.situacao_cadastral,'maxlength="60" placeholder="Ex.: ATIVA"')+'</div>'+
+    '<p class="apoio oculto" id="j-qsa-aviso" style="font-size:13px"></p>'+
+    '<h2 class="titulo-s">Contatos</h2><div class="grade3">'+ci('j-email','E-mail',j.email,'maxlength="254"')+ci('j-telefone_fixo','Telefone fixo',fmtTel(j.telefone_fixo),'inputmode="tel" maxlength="20"')+ci('j-telefone_celular','Telefone celular',fmtTel(j.telefone_celular),'inputmode="tel" maxlength="20"')+'</div>'+
+    '<h2 class="titulo-s">Endereço</h2><div class="grade3">'+ci('j-cep','CEP',fmtCep(j.cep),'inputmode="numeric" maxlength="9"')+ci('j-logradouro','Logradouro',j.logradouro,'maxlength="160"')+ci('j-numero','Número',j.numero,'maxlength="20"')+
+      ci('j-complemento','Complemento',j.complemento,'maxlength="80"')+ci('j-bairro','Bairro',j.bairro,'maxlength="100"')+ci('j-cidade','Cidade',j.cidade,'maxlength="100"')+cs('j-uf','UF',j.uf,UFS)+'</div>'+
+    '<h2 class="titulo-s">Responsável financeiro</h2><div class="grade3">'+ci('j-financeiro_nome','Nome',j.financeiro_nome,'maxlength="160"')+ci('j-financeiro_email','E-mail',j.financeiro_email,'maxlength="254"')+ci('j-financeiro_telefone','Telefone',fmtTel(j.financeiro_telefone),'inputmode="tel" maxlength="20"')+'</div>'+
+    '<div class="campo"><label for="j-observacoes">Observações (opcional)</label><textarea id="j-observacoes" rows="2" maxlength="2000">'+esc(j.observacoes||'')+'</textarea></div>'+
+    '<div class="grade"><button class="botao" type="submit">'+(novo?'Cadastrar':'Salvar')+'</button><button class="botao claro" type="button" id="j-cancelar">Cancelar</button></div></form>');
+  ligaCep('j-');
+  var inC=$('#j-cnpj');inC.onblur=function(){inC.value=formataCnpj(inC.value);};
+  ['j-telefone_fixo','j-telefone_celular','j-financeiro_telefone'].forEach(function(id){var t=$('#'+id);t.onblur=function(){t.value=fmtTel(t.value);};});
+  $('#j-cancelar').onclick=function(){if(novo)telaCadPessoas();else verPj(j.id);};
+  $('#j-buscar').onclick=async function(){
+    var n=soNum(inC.value),b=this;
+    if(!cnpjValido(n)){aviso('CNPJ inválido. Confira os números.',true);return;}
+    ocupar(b,true);
+    try{
+      var r=await fetch('https://brasilapi.com.br/api/cnpj/v1/'+n);
+      if(!r.ok)throw new Error('sem resposta');
+      var d=await r.json();
+      function poe(id,v){var el=$('#'+id);if(el&&v!==undefined&&v!==null&&String(v).trim()!=='')el.value=String(v).trim();}
+      poe('j-razao_social',d.razao_social);poe('j-nome_fantasia',d.nome_fantasia);poe('j-situacao_cadastral',d.descricao_situacao_cadastral);
+      poe('j-cep',fmtCep(d.cep));poe('j-logradouro',[d.descricao_tipo_de_logradouro,d.logradouro].filter(Boolean).join(' '));poe('j-numero',d.numero);poe('j-complemento',d.complemento);
+      poe('j-bairro',d.bairro);poe('j-cidade',d.municipio);if(UFS.indexOf(d.uf)>=0)$('#j-uf').value=d.uf;
+      poe('j-email',d.email);poe('j-telefone_fixo',fmtTel(d.ddd_telefone_1));
+      qsaNovo=(Array.isArray(d.qsa)?d.qsa:[]).map(function(s){return {nome:String(s.nome_socio||s.nome||'').trim(),documento:String(s.cnpj_cpf_do_socio||'').trim().slice(0,20),qualificacao:String(s.qualificacao_socio||'').trim(),selecionado:false};}).filter(function(s){return s.nome;});
+      enriquecido=true;
+      var av=$('#j-qsa-aviso');av.classList.remove('oculto');
+      av.textContent='Dados preenchidos pela base pública de CNPJ. '+(qsaNovo.length?qsaNovo.length+(qsaNovo.length===1?' pessoa do quadro societário será gravada':' pessoas do quadro societário serão gravadas')+' ao salvar'+(novo?'.':', substituindo o quadro atual.'):'A base não trouxe quadro societário.');
+      aviso('Dados da empresa preenchidos. Confira antes de salvar.');
+    }catch(err){aviso('Não foi possível consultar o CNPJ agora. Preencha os dados manualmente.',true);}
+    ocupar(b,false);
+  };
+  $('#f-pj').onsubmit=async function(ev){
+    ev.preventDefault();
+    var d={},b=$('button[type=submit]',this);
+    ['cnpj','razao_social','nome_fantasia','situacao_cadastral','email','telefone_fixo','telefone_celular','cep','logradouro','numero','complemento','bairro','cidade','uf','financeiro_nome','financeiro_email','financeiro_telefone','observacoes'].forEach(function(k){d[k]=$('#j-'+k).value.trim();});
+    d.enriquecido=enriquecido;
+    if(!d.razao_social){aviso('Informe a razão social.',true);return;}
+    if(!cnpjValido(d.cnpj)){aviso('CNPJ inválido. Confira os números.',true);return;}
+    ocupar(b,true);
+    var org=ehEquipe()?($('#j-org').value||null):E.acesso.organizacao_id;
+    var r=await sb.rpc('cadastro_pj_salvar',{p_id:novo?null:j.id,p_org:org,p_dados:d});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    if(qsaNovo&&qsaNovo.length){
+      var g=await sb.rpc('cadastro_pj_socios_definir',{p_pj:r.data,p_socios:qsaNovo});
+      if(g.error){aviso('Empresa salva, mas o quadro societário não foi gravado: '+msgErro(g.error),true);verPj(r.data,'representantes');return;}
+    }
+    aviso(novo?'Pessoa jurídica cadastrada.':'Cadastro salvo.');verPj(r.data,qsaNovo&&qsaNovo.length?'representantes':'empresa');
+  };
 }
 
 /* ---------- Auditoria ---------- */
