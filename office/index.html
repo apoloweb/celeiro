@@ -173,7 +173,11 @@ tr.grupo-l th{background:var(--nevoa);font-size:13px;font-weight:600;padding:8px
 .contatos{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
 .contato{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--linha);border-radius:10px;background:var(--nevoa)}
 .grade3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;align-items:start}
-.acoes{display:flex;flex-wrap:wrap;gap:10px;flex:1 1 100%}
+.cabeca>.acoes{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px;max-width:none;flex:0 1 auto}
+.botao.sutil{background:none;color:var(--texto2);font-weight:500;text-decoration:underline;padding:0 10px}
+.botao.sutil:hover{background:none;color:var(--verde)}
+.voltar{align-self:flex-start;background:none;border:0;padding:0;min-height:32px;font-size:14px;color:var(--texto2);cursor:pointer;margin-bottom:-10px}
+.voltar:hover{color:var(--verde);text-decoration:underline}
 .linha-socio{flex-direction:row!important;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px!important}
 .linha-socio>div:first-child{display:flex;flex-direction:column;gap:2px}
 #aviso{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:calc(100% - 32px);padding:12px 18px;border-radius:8px;background:var(--verde);color:var(--nevoa);font-size:14px;box-shadow:0 6px 24px rgba(15,61,46,.25);z-index:2147483647}
@@ -1530,10 +1534,11 @@ function desenhaCadResultado(){
   }
 }
 function botoesFicha(situacao){
-  return '<div class="acoes"><button class="botao claro" type="button" id="f-voltar">Voltar</button><button class="botao" type="button" id="f-editar">Editar</button>'+
-    '<button class="botao claro" type="button" id="f-situacao">'+(situacao==='ativo'?'Inativar':'Reativar')+'</button>'+
-    (temModulo('workflow')?'<button class="botao ambar" type="button" id="f-tarefa">Nova tarefa</button>':'')+'</div>';
+  return '<div class="acoes"><button class="botao pequeno" type="button" id="f-editar">Editar</button>'+
+    (temModulo('workflow')?'<button class="botao claro pequeno" type="button" id="f-tarefa">Nova tarefa</button>':'')+
+    '<button class="botao sutil pequeno" type="button" id="f-situacao">'+(situacao==='ativo'?'Inativar':'Reativar')+'</button></div>';
 }
+var VOLTAR_FICHA='<button class="voltar" type="button" id="f-voltar"><span aria-hidden="true">←</span> Voltar para a lista</button>';
 
 /* ----- pessoa física ----- */
 async function verPf(id){
@@ -1542,7 +1547,7 @@ async function verPf(id){
   if(r.error||!r.data||!r.data.length){falhaTela('Cadastro',r.error||{message:'Cadastro não encontrado.'});return;}
   var p=r.data[0];
   evento('Abriu um cadastro de pessoa física','Cadastro',{id:p.id});
-  tela('<div class="cabeca"><div><h1>'+esc(p.nome_completo)+'</h1><p class="apoio">Pessoa física · '+esc(ehEquipe()?nomeOrgCad(p.organizacao_id):'cadastro da sua organização')+' · '+(p.situacao==='ativo'?'Ativo':'Inativo')+'</p></div>'+botoesFicha(p.situacao)+'</div>'+
+  tela(VOLTAR_FICHA+'<div class="cabeca"><div><h1>'+esc(p.nome_completo)+'</h1><p class="apoio">Pessoa física · '+esc(ehEquipe()?nomeOrgCad(p.organizacao_id):'cadastro da sua organização')+' · '+(p.situacao==='ativo'?'Ativo':'Inativo')+'</p></div>'+botoesFicha(p.situacao)+'</div>'+
     '<div class="painel">'+pfDetalheHtml(p)+'</div>'+
     '<p class="nota">"Verificado" indica conferência feita manualmente por quem preencheu o cadastro. A confirmação automática por código (SMS ou e-mail) ainda não existe.</p>');
   ligaCopiar();
@@ -1612,7 +1617,7 @@ async function verPj(id,aba){
         '<button class="botao'+(rep?' claro':'')+' pequeno" type="button" id="rep-editar">'+(rep?'Editar dados do representante':'Informar dados do representante')+'</button></div>'+
       (rep?pfDetalheHtml(rep):'<p class="apoio">Ainda sem dados do representante.'+(sel?' Selecionado no quadro: '+esc(sel.nome)+'.':'')+'</p>')+'</div>';
   }
-  tela('<div class="cabeca"><div><h1>'+esc(j.razao_social)+'</h1><p class="apoio">Pessoa jurídica · '+esc(ehEquipe()?nomeOrgCad(j.organizacao_id):'cadastro da sua organização')+' · '+(j.situacao==='ativo'?'Ativo':'Inativo')+'</p></div>'+botoesFicha(j.situacao)+'</div>'+
+  tela(VOLTAR_FICHA+'<div class="cabeca"><div><h1>'+esc(j.razao_social)+'</h1><p class="apoio">Pessoa jurídica · '+esc(ehEquipe()?nomeOrgCad(j.organizacao_id):'cadastro da sua organização')+' · '+(j.situacao==='ativo'?'Ativo':'Inativo')+'</p></div>'+botoesFicha(j.situacao)+'</div>'+
     '<div class="segmento" role="group" aria-label="Partes do cadastro"><button type="button" class="aba" data-pj-aba="empresa" aria-pressed="'+(aba==='empresa'?'true':'false')+'">Empresa</button>'+
       '<button type="button" class="aba" data-pj-aba="representantes" aria-pressed="'+(aba==='representantes'?'true':'false')+'">Representantes <span class="conta">'+socios.length+'</span></button></div>'+corpo);
   ligaCopiar();
