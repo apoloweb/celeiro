@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Celeiro Office</title>
-<link rel="icon" href="assets/favicon.png">
+<script>
+/* Raiz do sistema: funciona em /office, /office/ e na raiz do subdomínio */
+(function(){var p=location.pathname.replace(/[^\/]*\.html$/,'');if(p.charAt(p.length-1)!=='/')p+='/';window.CELEIRO_OFFICE_RAIZ=p;
+document.write('<link rel="icon" href="'+p+'assets/favicon.png">');})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -109,12 +113,13 @@ td .sub{display:block;font-size:12px;color:var(--texto2)}
 <div id="aviso" role="status" aria-live="polite"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.104.1"></script>
-<script src="config.js"></script>
+<script>document.write('<script src="'+window.CELEIRO_OFFICE_RAIZ+'config.js"><\/script>');</script>
 <script>
 (function(){
 'use strict';
 
 var cfg=window.CELEIRO_OFFICE_CONFIG||{};
+var RAIZ=window.CELEIRO_OFFICE_RAIZ||'';
 var configurado=!!(cfg.url&&cfg.anonKey&&!/COLE_AQUI/.test(String(cfg.url)+String(cfg.anonKey))&&window.supabase&&window.supabase.createClient);
 var hashInicial=location.hash||'';
 var sb=configurado?window.supabase.createClient(cfg.url,cfg.anonKey):null;
@@ -175,7 +180,7 @@ function publico(html){
   app.innerHTML=
   '<div class="publico">'+
     '<section class="marca">'+
-      '<img src="assets/logo-negativa.png" alt="Celeiro Administradora">'+
+      '<img src="'+RAIZ+'assets/logo-negativa.png" alt="Celeiro Administradora">'+
       '<div><p class="olho">Celeiro Office</p>'+
       '<h1>Sistema de gestão da Celeiro Administradora</h1>'+
       '<ul><li>Acesso restrito a usuários convidados</li><li>Autenticação em dois fatores obrigatória</li><li>Todas as ações registradas em auditoria</li></ul></div>'+
@@ -421,7 +426,7 @@ function montarCasca(){
   if(temModulo('auditoria')){adm+='<a href="#auditoria" data-rota="auditoria">Auditoria</a>';}
   app.innerHTML=
   '<div class="casca">'+
-    '<nav class="lateral" aria-label="Menu do sistema"><img src="assets/logo-negativa.png" alt="Celeiro Administradora">'+
+    '<nav class="lateral" aria-label="Menu do sistema"><img src="'+RAIZ+'assets/logo-negativa.png" alt="Celeiro Administradora">'+
       '<div class="itens">'+itens+(adm?'<p class="grupo">Administração</p>'+adm:'')+'</div></nav>'+
     '<div class="conteudo">'+
       '<header class="topo"><p class="trilha" id="trilha"></p>'+
