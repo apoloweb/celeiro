@@ -2009,7 +2009,785 @@ create policy "cadastro_pj_socios leitura" on public.cadastro_pj_socios
   using (public.cadastro_pj_pode(pj_id));
 
 -- =====================================================================
--- 11) PRIMEIRO USUÁRIO MASTER
+-- 11) CONEXÃO MCP
+--    O backoffice expõe um servidor MCP próprio (função "mcp"), para que
+--    assistentes de IA consultem e operem o sistema em nome de um usuário.
+--    - Cada conexão pertence a um usuário e nunca vê mais do que ele vê na tela.
+--    - Nada funciona até o Master liberar: por organização e módulo
+--      (mcp_liberacoes) e por usuário (mcp_usuarios).
+--    - Somente leitura por padrão; escrita exige liberação do Master no módulo
+--      e a opção marcada na própria conexão.
+--    - O token aparece uma única vez; o banco guarda só o resumo (SHA-256).
+--    - Toda chamada entra na Auditoria com origem "mcp".
+-- =====================================================================
+
+-- Liberação por organização (nulo = equipe Celeiro) e módulo
+create table if not exists public.mcp_liberacoes (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  modulo         text not null references public.modulos(codigo),
+  leitura        boolean not null default false,
+  escrita        boolean not null default false,
+  atualizado_em  timestamptz not null default now(),
+  constraint mcp_liberacoes_escrita_pede_leitura check (leitura or not escrita)
+);
+create unique index if not exists mcp_liberacoes_unica
+  on public.mcp_liberacoes (coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid), modulo);
+
+-- Liberação por usuário (o Master não precisa de linha aqui)
+create table if not exists public.mcp_usuarios (
+  user_id       uuid primary key references public.usuarios(user_id) on delete cascade,
+  liberado      boolean not null default false,
+  atualizado_em timestamptz not null default now()
+);
+
+-- Conexões (uma por assistente ligado). O token em si não é guardado.
+create table if not exists public.mcp_conexoes (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        uuid not null references public.usuarios(user_id) on delete cascade,
+  nome           text not null check (char_length(nome) between 1 and 80),
+  prefixo        text not null,
+  token_hash     text not null unique,
+  escrita        boolean not null default false,
+  criado_em      timestamptz not null default now(),
+  expira_em      timestamptz not null,
+  ultimo_uso     timestamptz,
+  chamadas       bigint not null default 0,
+  janela_inicio  timestamptz,
+  janela_chamadas int not null default 0,
+  revogada_em    timestamptz,
+  revogada_por   uuid
+);
+create index if not exists mcp_conexoes_user on public.mcp_conexoes (user_id);
+
+-- Catálogo de ferramentas oferecidas pelo servidor MCP
+create table if not exists public.mcp_ferramentas (
+  nome       text primary key,
+  modulo     text references public.modulos(codigo),
+  escrita    boolean not null default false,
+  titulo     text not null,
+  descricao  text not null,
+  parametros jsonb not null default '{"type":"object","properties":{}}'::jsonb,
+  ordem      int not null default 0
+);
+
+insert into public.mcp_ferramentas (nome, modulo, escrita, titulo, descricao, parametros, ordem) values
+  ('quem_sou_eu', null, false, 'Quem sou eu',
+   'Mostra em nome de qual usuário do Celeiro Office esta conexão atua, o perfil, a organização e quais módulos estão liberados para leitura e para escrita. Use antes de qualquer outra ferramenta.',
+   '{"type":"object","properties":{},"additionalProperties":false}', 1),
+  ('dashboard_resumo', 'dashboard', false, 'Resumo do dashboard',
+   'Resumo dos indicadores que o usuário enxerga: tarefas por situação, vencidas, urgentes, sob responsabilidade dele, e quantidade de cadastros.',
+   '{"type":"object","properties":{},"additionalProperties":false}', 10),
+  ('workflow_listar_tarefas', 'workflow', false, 'Listar tarefas',
+   'Lista as tarefas do Workflow que o usuário pode ver, das mais recentes para as mais antigas.',
+   '{"type":"object","properties":{"situacao":{"type":"string","enum":["abertas","a_fazer","em_andamento","em_revisao","concluida","todas"],"description":"Padrão: abertas (tudo que não foi concluído)."},"texto":{"type":"string","description":"Trecho do título ou da descrição."},"somente_minhas":{"type":"boolean","description":"Só as tarefas em que o usuário é responsável."},"limite":{"type":"integer","minimum":1,"maximum":100,"description":"Padrão: 30."}},"additionalProperties":false}', 20),
+  ('workflow_ver_tarefa', 'workflow', false, 'Ver tarefa',
+   'Mostra uma tarefa completa, com descrição, participantes e comentários.',
+   '{"type":"object","properties":{"codigo":{"type":"string","description":"Código da tarefa, por exemplo WF-0012."}},"required":["codigo"],"additionalProperties":false}', 21),
+  ('workflow_criar_tarefa', 'workflow', true, 'Criar tarefa',
+   'Cria uma tarefa no Workflow, com o usuário desta conexão como responsável. Confirme título e prazo com a pessoa antes de criar.',
+   '{"type":"object","properties":{"titulo":{"type":"string","maxLength":500},"descricao":{"type":"string","maxLength":4000},"prazo":{"type":"string","description":"Data no formato AAAA-MM-DD."},"prioridade":{"type":"string","enum":["baixa","media","alta","urgente"],"description":"Padrão: media."}},"required":["titulo"],"additionalProperties":false}', 22),
+  ('workflow_mover_tarefa', 'workflow', true, 'Mover tarefa',
+   'Muda a situação de uma tarefa (coluna do quadro).',
+   '{"type":"object","properties":{"codigo":{"type":"string","description":"Código da tarefa, por exemplo WF-0012."},"situacao":{"type":"string","enum":["a_fazer","em_andamento","em_revisao","concluida"]}},"required":["codigo","situacao"],"additionalProperties":false}', 23),
+  ('workflow_comentar', 'workflow', true, 'Comentar tarefa',
+   'Acrescenta um comentário a uma tarefa, em nome do usuário desta conexão.',
+   '{"type":"object","properties":{"codigo":{"type":"string","description":"Código da tarefa, por exemplo WF-0012."},"texto":{"type":"string","maxLength":2000}},"required":["codigo","texto"],"additionalProperties":false}', 24),
+  ('cadastro_buscar', 'cadastro', false, 'Buscar cadastros',
+   'Procura pessoas físicas e empresas no Cadastro por nome ou por documento. A lista traz o documento mascarado; use as ferramentas de ver cadastro para os dados completos.',
+   '{"type":"object","properties":{"texto":{"type":"string","description":"Parte do nome, da razão social ou os números do CPF/CNPJ."},"tipo":{"type":"string","enum":["todos","pf","pj"],"description":"Padrão: todos."},"situacao":{"type":"string","enum":["ativo","inativo","todas"],"description":"Padrão: ativo."},"limite":{"type":"integer","minimum":1,"maximum":50,"description":"Padrão: 20."}},"additionalProperties":false}', 30),
+  ('cadastro_ver_pessoa_fisica', 'cadastro', false, 'Ver pessoa física',
+   'Mostra o cadastro completo de uma pessoa física. Contém dados pessoais: use só o que a tarefa pedir.',
+   '{"type":"object","properties":{"id":{"type":"string","description":"Identificador devolvido por cadastro_buscar."}},"required":["id"],"additionalProperties":false}', 31),
+  ('cadastro_ver_empresa', 'cadastro', false, 'Ver empresa',
+   'Mostra o cadastro completo de uma empresa, com quadro societário e representante.',
+   '{"type":"object","properties":{"id":{"type":"string","description":"Identificador devolvido por cadastro_buscar."}},"required":["id"],"additionalProperties":false}', 32),
+  ('auditoria_consultar', 'auditoria', false, 'Consultar auditoria',
+   'Consulta o registro de auditoria que o usuário pode ver: quem fez o quê, quando, de qual IP e por qual origem (tela, banco ou mcp).',
+   '{"type":"object","properties":{"dias":{"type":"integer","minimum":1,"maximum":90,"description":"Quantos dias para trás. Padrão: 7."},"texto":{"type":"string","description":"Trecho da ação ou do nome do usuário."},"origem":{"type":"string","enum":["tela","banco","mcp"]},"limite":{"type":"integer","minimum":1,"maximum":100,"description":"Padrão: 30."}},"additionalProperties":false}', 40)
+on conflict (nome) do update
+  set modulo = excluded.modulo, escrita = excluded.escrita, titulo = excluded.titulo,
+      descricao = excluded.descricao, parametros = excluded.parametros, ordem = excluded.ordem;
+
+alter table public.mcp_liberacoes  enable row level security;
+alter table public.mcp_usuarios    enable row level security;
+alter table public.mcp_conexoes    enable row level security;
+alter table public.mcp_ferramentas enable row level security;
+
+drop trigger if exists auditar_mcp_liberacoes on public.mcp_liberacoes;
+create trigger auditar_mcp_liberacoes
+  after insert or update or delete on public.mcp_liberacoes
+  for each row execute function public.auditar('Conexão MCP');
+
+drop trigger if exists auditar_mcp_usuarios on public.mcp_usuarios;
+create trigger auditar_mcp_usuarios
+  after insert or update or delete on public.mcp_usuarios
+  for each row execute function public.auditar('Conexão MCP');
+
+-- (mcp_conexoes não tem gatilho de auditoria: criar e revogar são registrados
+--  pelas próprias operações, sem copiar o resumo do token para a auditoria,
+--  e o "último uso" mudaria a cada chamada.)
+
+-- O usuário pode usar o MCP? (ativo, com o módulo Conexão MCP e liberado pelo Master)
+create or replace function public.mcp_usuario_liberado(p_user uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce('mcp' = any(public.modulos_efetivos(p_user)), false)
+     and exists (
+       select 1 from public.usuarios u
+       where u.user_id = p_user
+         and (u.perfil = 'master'
+              or exists (select 1 from public.mcp_usuarios m where m.user_id = u.user_id and m.liberado))
+     );
+$$;
+
+-- Módulos que o usuário alcança pelo MCP: os que ele tem na tela e que o Master
+-- liberou para a organização dele (nulo = equipe Celeiro).
+create or replace function public.mcp_modulos(p_user uuid)
+returns table (modulo text, nome text, escrita boolean)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select m.codigo, m.nome, l.escrita
+  from public.usuarios u
+  join public.mcp_liberacoes l on l.organizacao_id is not distinct from u.organizacao_id and l.leitura
+  join public.modulos m on m.codigo = l.modulo
+  where u.user_id = p_user
+    and public.mcp_usuario_liberado(p_user)
+    and m.codigo = any(public.modulos_efetivos(p_user))
+  order by m.ordem;
+$$;
+
+-- Ferramentas que uma conexão alcança
+create or replace function public.mcp_ferramentas_de(p_user uuid, p_conexao_escrita boolean)
+returns setof public.mcp_ferramentas
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select f.*
+  from public.mcp_ferramentas f
+  where public.mcp_usuario_liberado(p_user)
+    and (
+      f.modulo is null
+      or exists (
+        select 1 from public.mcp_modulos(p_user) m
+        where m.modulo = f.modulo
+          and (not f.escrita or (m.escrita and coalesce(p_conexao_escrita, false)))
+      )
+    )
+  order by f.ordem, f.nome;
+$$;
+
+-- Tudo o que a tela "Conexão MCP" precisa, em uma chamada
+create or replace function public.mcp_painel()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_r   jsonb;
+begin
+  if not public.pode_modulo('mcp') then
+    raise exception 'Módulo Conexão MCP não habilitado para você';
+  end if;
+
+  v_r := jsonb_build_object(
+    'liberado', public.mcp_usuario_liberado(v_uid),
+    'modulos', coalesce((
+      select jsonb_agg(jsonb_build_object('modulo', m.modulo, 'nome', m.nome, 'escrita', m.escrita))
+      from public.mcp_modulos(v_uid) m), '[]'::jsonb),
+    'ferramentas', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'nome', f.nome, 'titulo', f.titulo, 'descricao', f.descricao, 'modulo', f.modulo,
+        'modulo_nome', mo.nome, 'escrita', f.escrita,
+        'disponivel', exists (select 1 from public.mcp_ferramentas_de(v_uid, true) d where d.nome = f.nome)
+      ) order by f.ordem, f.nome)
+      from public.mcp_ferramentas f
+      left join public.modulos mo on mo.codigo = f.modulo), '[]'::jsonb),
+    'conexoes', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', c.id, 'nome', c.nome, 'prefixo', c.prefixo, 'escrita', c.escrita,
+        'criado_em', c.criado_em, 'expira_em', c.expira_em, 'ultimo_uso', c.ultimo_uso,
+        'chamadas', c.chamadas, 'revogada_em', c.revogada_em
+      ) order by c.criado_em desc)
+      from public.mcp_conexoes c where c.user_id = v_uid), '[]'::jsonb)
+  );
+
+  if public.eh_master() then
+    v_r := v_r || jsonb_build_object(
+      'organizacoes', coalesce((
+        select jsonb_agg(jsonb_build_object('id', o.id, 'nome', o.nome) order by o.nome)
+        from public.organizacoes o where o.ativo), '[]'::jsonb),
+      'modulos_com_ferramentas', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'modulo', mo.codigo, 'nome', mo.nome,
+          'tem_escrita', exists (select 1 from public.mcp_ferramentas f where f.modulo = mo.codigo and f.escrita)
+        ) order by mo.ordem)
+        from public.modulos mo
+        where exists (select 1 from public.mcp_ferramentas f where f.modulo = mo.codigo)), '[]'::jsonb),
+      'liberacoes', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'organizacao_id', l.organizacao_id, 'modulo', l.modulo, 'leitura', l.leitura, 'escrita', l.escrita))
+        from public.mcp_liberacoes l), '[]'::jsonb),
+      'usuarios', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'user_id', u.user_id, 'nome', u.nome, 'email', u.email, 'perfil', u.perfil,
+          'organizacao', o.nome, 'ativo', u.ativo,
+          'tem_modulo', 'mcp' = any(public.modulos_efetivos(u.user_id)),
+          'liberado', u.perfil = 'master' or coalesce(mu.liberado, false)
+        ) order by u.nome)
+        from public.usuarios u
+        left join public.organizacoes o on o.id = u.organizacao_id
+        left join public.mcp_usuarios mu on mu.user_id = u.user_id), '[]'::jsonb),
+      'todas_conexoes', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'id', c.id, 'nome', c.nome, 'prefixo', c.prefixo, 'escrita', c.escrita,
+          'usuario', u.nome, 'organizacao', o.nome,
+          'criado_em', c.criado_em, 'expira_em', c.expira_em, 'ultimo_uso', c.ultimo_uso,
+          'chamadas', c.chamadas, 'revogada_em', c.revogada_em
+        ) order by c.criado_em desc)
+        from public.mcp_conexoes c
+        join public.usuarios u on u.user_id = c.user_id
+        left join public.organizacoes o on o.id = u.organizacao_id
+        where c.user_id <> v_uid), '[]'::jsonb)
+    );
+  end if;
+  return v_r;
+end;
+$$;
+
+-- Cria uma conexão e devolve o token. É a única vez em que o token aparece.
+create or replace function public.mcp_criar_conexao(p_nome text, p_dias int, p_escrita boolean)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid   uuid := (select auth.uid());
+  v_token text;
+  v_id    uuid;
+  v_nome  text := left(trim(coalesce(p_nome, '')), 80);
+begin
+  if not public.pode_modulo('mcp') then
+    raise exception 'Módulo Conexão MCP não habilitado para você';
+  end if;
+  if not public.mcp_usuario_liberado(v_uid) then
+    raise exception 'Seu usuário ainda não foi liberado pelo Master para usar o MCP';
+  end if;
+  if char_length(v_nome) = 0 then
+    raise exception 'Dê um nome à conexão';
+  end if;
+  if p_dias is null or p_dias < 1 or p_dias > 365 then
+    raise exception 'A validade precisa ficar entre 1 e 365 dias';
+  end if;
+  if (select count(*) from public.mcp_conexoes
+      where user_id = v_uid and revogada_em is null and expira_em > now()) >= 5 then
+    raise exception 'Limite de 5 conexões ativas por usuário. Revogue uma antes de criar outra';
+  end if;
+
+  v_token := 'clro_' || replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
+  insert into public.mcp_conexoes (user_id, nome, prefixo, token_hash, escrita, expira_em)
+  values (v_uid, v_nome, left(v_token, 11),
+          encode(sha256(convert_to(v_token, 'UTF8')), 'hex'),
+          coalesce(p_escrita, false), now() + make_interval(days => p_dias))
+  returning id into v_id;
+
+  perform public.grava_auditoria('Criou conexão MCP', 'Conexão MCP', 'mcp_conexoes', v_id::text,
+    jsonb_build_object('nome', v_nome, 'escrita', coalesce(p_escrita, false), 'dias', p_dias), 'banco');
+
+  return jsonb_build_object('id', v_id, 'token', v_token);
+end;
+$$;
+
+-- Revoga uma conexão: o dono, o Master ou o Corporativo master (usuários da própria organização)
+create or replace function public.mcp_revogar_conexao(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_c   public.mcp_conexoes%rowtype;
+  v_org uuid;
+begin
+  if not public.aal2() or public.meu_perfil() is null then
+    raise exception 'Sessão sem permissão';
+  end if;
+  select * into v_c from public.mcp_conexoes where id = p_id;
+  if v_c.id is null then
+    raise exception 'Conexão não encontrada';
+  end if;
+  select organizacao_id into v_org from public.usuarios where user_id = v_c.user_id;
+  if not coalesce(
+       v_c.user_id = v_uid
+       or public.eh_master()
+       or (public.meu_perfil() = 'corp_master' and v_org = public.minha_org()), false) then
+    raise exception 'Conexão não encontrada';
+  end if;
+  if v_c.revogada_em is not null then
+    return;
+  end if;
+  update public.mcp_conexoes set revogada_em = now(), revogada_por = v_uid where id = p_id;
+  perform public.grava_auditoria('Revogou conexão MCP', 'Conexão MCP', 'mcp_conexoes', p_id::text,
+    jsonb_build_object('nome', v_c.nome, 'dono', v_c.user_id), 'banco');
+end;
+$$;
+
+-- Master: liga ou desliga o MCP de um módulo para uma organização (nulo = equipe Celeiro)
+create or replace function public.mcp_definir_liberacao(p_org uuid, p_modulo text, p_leitura boolean, p_escrita boolean)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_leitura boolean := coalesce(p_leitura, false);
+  v_escrita boolean := coalesce(p_leitura, false) and coalesce(p_escrita, false);
+begin
+  if not public.eh_master() then
+    raise exception 'Só o Master libera o MCP';
+  end if;
+  if not exists (select 1 from public.mcp_ferramentas where modulo = p_modulo) then
+    raise exception 'Este módulo ainda não tem ferramentas no MCP';
+  end if;
+  if p_org is not null and not exists (select 1 from public.organizacoes where id = p_org) then
+    raise exception 'Organização não encontrada';
+  end if;
+  update public.mcp_liberacoes
+     set leitura = v_leitura, escrita = v_escrita, atualizado_em = now()
+   where organizacao_id is not distinct from p_org and modulo = p_modulo
+     and (leitura, escrita) is distinct from (v_leitura, v_escrita);
+  if not exists (select 1 from public.mcp_liberacoes
+                 where organizacao_id is not distinct from p_org and modulo = p_modulo) then
+    insert into public.mcp_liberacoes (organizacao_id, modulo, leitura, escrita)
+    values (p_org, p_modulo, v_leitura, v_escrita);
+  end if;
+end;
+$$;
+
+-- Master: libera ou bloqueia o MCP para um usuário
+create or replace function public.mcp_liberar_usuario(p_user uuid, p_liberado boolean)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.eh_master() then
+    raise exception 'Só o Master libera o MCP';
+  end if;
+  if not exists (select 1 from public.usuarios where user_id = p_user) then
+    raise exception 'Usuário não encontrado';
+  end if;
+  if (select perfil from public.usuarios where user_id = p_user) = 'master' then
+    raise exception 'Usuários Master já têm o MCP liberado';
+  end if;
+  insert into public.mcp_usuarios (user_id, liberado) values (p_user, coalesce(p_liberado, false))
+  on conflict (user_id) do update
+    set liberado = excluded.liberado, atualizado_em = now()
+    where public.mcp_usuarios.liberado is distinct from excluded.liberado;
+end;
+$$;
+
+-- Acha a tarefa pelo código (WF-0012 ou 12), só entre as que o usuário atual vê
+create or replace function public.mcp_tarefa(p_codigo text)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_n  bigint;
+  v_id uuid;
+begin
+  v_n := nullif(regexp_replace(coalesce(p_codigo, ''), '[^0-9]', '', 'g'), '')::bigint;
+  if v_n is null then
+    raise exception 'Informe o código da tarefa, por exemplo WF-0012';
+  end if;
+  select t.id into v_id from public.workflow_tarefas t
+   where t.numero = v_n and public.workflow_pode_ver(t.id);
+  if v_id is null then
+    raise exception 'Tarefa não encontrada';
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Executa uma ferramenta. Uso interno: só é chamada por mcp_chamar, depois que a
+-- conexão foi conferida e a sessão passou a valer como a do usuário dono dela.
+create or replace function public.mcp_executar(p_nome text, p_args jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid   uuid := (select auth.uid());
+  v_u     public.usuarios%rowtype;
+  v_a     jsonb := coalesce(p_args, '{}'::jsonb);
+  v_lim   int;
+  v_txt   text := lower(trim(coalesce(p_args ->> 'texto', '')));
+  v_num   text := regexp_replace(coalesce(p_args ->> 'texto', ''), '[^0-9]', '', 'g');
+  v_id    uuid;
+  v_ts    jsonb;
+  v_r     jsonb;
+  v_sit   text;
+  v_tipo  text;
+begin
+  select * into v_u from public.usuarios where user_id = v_uid;
+
+  if p_nome = 'quem_sou_eu' then
+    return jsonb_build_object(
+      'nome', v_u.nome, 'perfil', v_u.perfil,
+      'organizacao', coalesce((select o.nome from public.organizacoes o where o.id = v_u.organizacao_id), 'Celeiro (equipe)'),
+      'modulos_liberados', coalesce((
+        select jsonb_agg(jsonb_build_object('modulo', m.nome, 'leitura', true, 'escrita_liberada_pelo_master', m.escrita))
+        from public.mcp_modulos(v_uid) m), '[]'::jsonb),
+      'conexao_permite_escrita', coalesce((select auth.jwt() ->> 'mcp_escrita') = 'true', false)
+    );
+
+  elsif p_nome = 'dashboard_resumo' then
+    v_r := '{}'::jsonb;
+    if public.pode_modulo('workflow') then
+      v_ts := public.workflow_listar();
+      v_r := v_r || jsonb_build_object('tarefas', (
+        select jsonb_build_object(
+          'a_fazer',      count(*) filter (where t ->> 'status' = 'a_fazer'),
+          'em_andamento', count(*) filter (where t ->> 'status' = 'em_andamento'),
+          'em_revisao',   count(*) filter (where t ->> 'status' = 'em_revisao'),
+          'concluidas',   count(*) filter (where t ->> 'status' = 'concluida'),
+          'vencidas',     count(*) filter (where t ->> 'status' <> 'concluida' and (t ->> 'prazo')::date < current_date),
+          'urgentes',     count(*) filter (where t ->> 'status' <> 'concluida' and t ->> 'prioridade' = 'urgente'),
+          'sob_minha_responsabilidade', count(*) filter (where t ->> 'status' <> 'concluida' and exists (
+              select 1 from jsonb_array_elements(t -> 'participantes') p
+              where p ->> 'user_id' = v_uid::text and p ->> 'papel' = 'responsavel'))
+        ) from jsonb_array_elements(v_ts) t));
+    end if;
+    if public.pode_modulo('cadastro') then
+      v_r := v_r || jsonb_build_object('cadastros', jsonb_build_object(
+        'pessoas_fisicas_ativas', (select count(*) from public.cadastro_pf f
+                                   where f.situacao = 'ativo' and public.cadastro_escopo_ok(f.organizacao_id)),
+        'empresas_ativas',        (select count(*) from public.cadastro_pj j
+                                   where j.situacao = 'ativo' and public.cadastro_escopo_ok(j.organizacao_id))));
+    end if;
+    return v_r;
+
+  elsif p_nome = 'workflow_listar_tarefas' then
+    v_lim := least(greatest(coalesce((v_a ->> 'limite')::int, 30), 1), 100);
+    v_sit := coalesce(nullif(v_a ->> 'situacao', ''), 'abertas');
+    if v_sit not in ('abertas','a_fazer','em_andamento','em_revisao','concluida','todas') then
+      raise exception 'Situação inválida';
+    end if;
+    v_ts := public.workflow_listar();
+    return (
+      with f as (
+        select t, row_number() over (order by (t ->> 'numero')::bigint desc) as n
+        from jsonb_array_elements(v_ts) t
+        where (v_sit = 'todas'
+               or (v_sit = 'abertas' and t ->> 'status' <> 'concluida')
+               or t ->> 'status' = v_sit)
+          and (v_txt = '' or position(v_txt in lower((t ->> 'titulo') || ' ' || (t ->> 'descricao'))) > 0)
+          and (not coalesce((v_a ->> 'somente_minhas')::boolean, false) or exists (
+                select 1 from jsonb_array_elements(t -> 'participantes') p
+                where p ->> 'user_id' = v_uid::text and p ->> 'papel' = 'responsavel'))
+      )
+      select jsonb_build_object(
+        'encontradas', (select count(*) from f),
+        'tarefas', coalesce((
+          select jsonb_agg(jsonb_build_object(
+            'codigo', t ->> 'codigo', 'titulo', t ->> 'titulo', 'situacao', t ->> 'status',
+            'prioridade', t ->> 'prioridade', 'prazo', t ->> 'prazo', 'organizacao', t ->> 'organizacao',
+            'responsaveis', coalesce((select jsonb_agg(p ->> 'nome') from jsonb_array_elements(t -> 'participantes') p
+                                      where p ->> 'papel' = 'responsavel'), '[]'::jsonb),
+            'comentarios', t -> 'comentarios', 'criada_em', t ->> 'criado_em'
+          ) order by n) from f where n <= v_lim), '[]'::jsonb))
+    );
+
+  elsif p_nome = 'workflow_ver_tarefa' then
+    v_id := public.mcp_tarefa(v_a ->> 'codigo');
+    select t into v_r from jsonb_array_elements(public.workflow_listar()) t where t ->> 'id' = v_id::text;
+    return jsonb_build_object(
+      'codigo', v_r ->> 'codigo', 'titulo', v_r ->> 'titulo', 'descricao', v_r ->> 'descricao',
+      'situacao', v_r ->> 'status', 'prioridade', v_r ->> 'prioridade', 'prazo', v_r ->> 'prazo',
+      'organizacao', v_r ->> 'organizacao', 'confidencial', v_r -> 'confidencial',
+      'criada_por', v_r ->> 'criado_por_nome', 'criada_em', v_r ->> 'criado_em',
+      'concluida_em', v_r ->> 'concluida_em',
+      'participantes', coalesce((select jsonb_agg(jsonb_build_object('nome', p ->> 'nome', 'papel', p ->> 'papel'))
+                                 from jsonb_array_elements(v_r -> 'participantes') p), '[]'::jsonb),
+      'comentarios', coalesce((select jsonb_agg(jsonb_build_object(
+                                   'autor', k ->> 'nome', 'texto', k ->> 'texto', 'quando', k ->> 'criado_em'))
+                               from jsonb_array_elements(public.workflow_detalhe(v_id) -> 'comentarios') k), '[]'::jsonb)
+    );
+
+  elsif p_nome = 'workflow_criar_tarefa' then
+    v_id := public.workflow_salvar(
+      null, v_a ->> 'titulo', coalesce(v_a ->> 'descricao', ''), v_u.organizacao_id, 'a_fazer',
+      nullif(v_a ->> 'prazo', '')::date, coalesce(nullif(v_a ->> 'prioridade', ''), 'media'),
+      '', '', false, array[v_uid], '{}'::uuid[], 'Criada por assistente (MCP)');
+    return jsonb_build_object('criada', true,
+      'codigo', (select 'WF-' || lpad(t.numero::text, 4, '0') from public.workflow_tarefas t where t.id = v_id));
+
+  elsif p_nome = 'workflow_mover_tarefa' then
+    v_id := public.mcp_tarefa(v_a ->> 'codigo');
+    perform public.workflow_mover(v_id, v_a ->> 'situacao');
+    return jsonb_build_object('movida', true, 'situacao', v_a ->> 'situacao');
+
+  elsif p_nome = 'workflow_comentar' then
+    v_id := public.mcp_tarefa(v_a ->> 'codigo');
+    perform public.workflow_comentar(v_id, v_a ->> 'texto');
+    return jsonb_build_object('comentado', true);
+
+  elsif p_nome = 'cadastro_buscar' then
+    v_lim  := least(greatest(coalesce((v_a ->> 'limite')::int, 20), 1), 50);
+    v_tipo := coalesce(nullif(v_a ->> 'tipo', ''), 'todos');
+    v_sit  := coalesce(nullif(v_a ->> 'situacao', ''), 'ativo');
+    if v_tipo not in ('todos','pf','pj') or v_sit not in ('ativo','inativo','todas') then
+      raise exception 'Filtro inválido';
+    end if;
+    return (
+      with tudo as (
+        select 'pf' as tipo, f.id, f.nome_completo as nome,
+               '***.' || substr(f.cpf, 4, 3) || '.' || substr(f.cpf, 7, 3) || '-**' as documento,
+               f.cidade, f.uf, f.situacao, o.nome as organizacao
+        from public.cadastro_pf f
+        left join public.organizacoes o on o.id = f.organizacao_id
+        where v_tipo in ('todos','pf')
+          and public.cadastro_escopo_ok(f.organizacao_id)
+          and (v_sit = 'todas' or f.situacao = v_sit)
+          and (v_txt = '' or position(v_txt in lower(f.nome_completo || ' ' || f.nome_social)) > 0
+               or (char_length(v_num) >= 3 and position(v_num in f.cpf) > 0))
+        union all
+        select 'pj', j.id, j.razao_social,
+               substr(j.cnpj, 1, 2) || '.' || substr(j.cnpj, 3, 3) || '.***/' || substr(j.cnpj, 9, 4) || '-**',
+               j.cidade, j.uf, j.situacao, o.nome
+        from public.cadastro_pj j
+        left join public.organizacoes o on o.id = j.organizacao_id
+        where v_tipo in ('todos','pj')
+          and public.cadastro_escopo_ok(j.organizacao_id)
+          and (v_sit = 'todas' or j.situacao = v_sit)
+          and (v_txt = '' or position(v_txt in lower(j.razao_social || ' ' || j.nome_fantasia)) > 0
+               or (char_length(v_num) >= 3 and position(v_num in j.cnpj) > 0))
+      ), num as (
+        select tudo.*, row_number() over (order by nome) as n from tudo
+      )
+      select jsonb_build_object(
+        'encontrados', (select count(*) from num),
+        'cadastros', coalesce((
+          select jsonb_agg(jsonb_build_object(
+            'tipo', tipo, 'id', id, 'nome', nome, 'documento', documento,
+            'cidade', cidade, 'uf', uf, 'situacao', situacao, 'organizacao', organizacao) order by n)
+          from num where n <= v_lim), '[]'::jsonb))
+    );
+
+  elsif p_nome = 'cadastro_ver_pessoa_fisica' then
+    select to_jsonb(f) - 'criado_por' - 'atualizado_por' - 'organizacao_id' into v_r
+    from public.cadastro_pf f
+    where f.id = (v_a ->> 'id')::uuid and public.cadastro_escopo_ok(f.organizacao_id);
+    if v_r is null then
+      raise exception 'Cadastro não encontrado';
+    end if;
+    return v_r;
+
+  elsif p_nome = 'cadastro_ver_empresa' then
+    select to_jsonb(j) - 'criado_por' - 'atualizado_por' - 'organizacao_id' - 'representante_pf_id'
+           || jsonb_build_object(
+             'representante', (select jsonb_build_object('id', f.id, 'nome', f.nome_completo)
+                               from public.cadastro_pf f where f.id = j.representante_pf_id),
+             'socios', coalesce((select jsonb_agg(jsonb_build_object(
+                                   'nome', s.nome, 'qualificacao', s.qualificacao, 'selecionado', s.selecionado)
+                                   order by s.ordem)
+                                 from public.cadastro_pj_socios s where s.pj_id = j.id), '[]'::jsonb))
+      into v_r
+    from public.cadastro_pj j
+    where j.id = (v_a ->> 'id')::uuid and public.cadastro_escopo_ok(j.organizacao_id);
+    if v_r is null then
+      raise exception 'Cadastro não encontrado';
+    end if;
+    return v_r;
+
+  elsif p_nome = 'auditoria_consultar' then
+    v_lim := least(greatest(coalesce((v_a ->> 'limite')::int, 30), 1), 100);
+    return (
+      with f as (
+        select a.*, row_number() over (order by a.ocorrido_em desc, a.id desc) as n
+        from public.auditoria a
+        where a.ocorrido_em >= now() - make_interval(days => least(greatest(coalesce((v_a ->> 'dias')::int, 7), 1), 90))
+          and (public.eh_master()
+               or (public.pode_modulo('auditoria')
+                   and (public.meu_perfil() = 'gerencial' or a.organizacao_id = public.minha_org())))
+          and (v_txt = '' or position(v_txt in lower(a.acao || ' ' || coalesce(a.usuario_nome, ''))) > 0)
+          and (coalesce(v_a ->> 'origem', '') = '' or a.origem = v_a ->> 'origem')
+      )
+      select jsonb_build_object(
+        'encontrados', (select count(*) from f),
+        'registros', coalesce((
+          select jsonb_agg(jsonb_build_object(
+            'quando', ocorrido_em, 'usuario', usuario_nome, 'perfil', perfil, 'acao', acao,
+            'modulo', modulo, 'ip', ip, 'pais', pais, 'origem', origem) order by n)
+          from f where n <= v_lim), '[]'::jsonb))
+    );
+  end if;
+
+  raise exception 'Ferramenta desconhecida';
+end;
+$$;
+
+-- Porta de entrada do servidor MCP. Só a função "mcp" (com a chave secreta do
+-- projeto) chama isto; o navegador não. Recebe o resumo do token, confere a
+-- conexão, passa a agir como o usuário dono dela e registra tudo na auditoria.
+create or replace function public.mcp_chamar(
+  p_hash text, p_metodo text, p_ferramenta text, p_args jsonb,
+  p_ip text, p_pais text, p_agente text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_c    public.mcp_conexoes%rowtype;
+  v_f    public.mcp_ferramentas%rowtype;
+  v_mod  text;
+  v_res  jsonb;
+  v_erro text;
+  v_args jsonb := coalesce(p_args, '{}'::jsonb);
+begin
+  select * into v_c from public.mcp_conexoes where token_hash = p_hash;
+  if v_c.id is null then
+    return jsonb_build_object('ok', false, 'codigo', 'token_invalido', 'erro', 'Token não reconhecido');
+  end if;
+
+  -- A partir daqui a chamada vale como a do usuário dono da conexão: as mesmas
+  -- regras da tela (perfil, organização, módulos) decidem o que ele vê e faz.
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_c.user_id, 'role', 'authenticated', 'aal', 'aal2',
+    'mcp_conexao', v_c.id, 'mcp_escrita', v_c.escrita)::text, true);
+  perform set_config('request.jwt.claim.sub', v_c.user_id::text, true);
+  perform set_config('request.headers', jsonb_build_object(
+    'x-forwarded-for', coalesce(p_ip, ''), 'cf-ipcountry', coalesce(p_pais, ''),
+    'user-agent', left('MCP · ' || v_c.nome || ' · ' || coalesce(p_agente, ''), 300))::text, true);
+
+  if v_c.revogada_em is not null or v_c.expira_em <= now() then
+    perform public.grava_auditoria('MCP: conexão recusada', 'Conexão MCP', 'mcp_conexoes', v_c.id::text,
+      jsonb_build_object('conexao', v_c.nome,
+        'motivo', case when v_c.revogada_em is not null then 'revogada' else 'expirada' end), 'mcp');
+    return jsonb_build_object('ok', false, 'codigo', 'token_invalido',
+      'erro', case when v_c.revogada_em is not null then 'Conexão revogada' else 'Conexão expirada' end);
+  end if;
+
+  if not public.mcp_usuario_liberado(v_c.user_id) then
+    perform public.grava_auditoria('MCP: conexão recusada', 'Conexão MCP', 'mcp_conexoes', v_c.id::text,
+      jsonb_build_object('conexao', v_c.nome, 'motivo', 'usuário sem liberação'), 'mcp');
+    return jsonb_build_object('ok', false, 'codigo', 'sem_acesso',
+      'erro', 'O uso do MCP não está liberado para este usuário');
+  end if;
+
+  -- Limite de 120 chamadas por minuto por conexão
+  if v_c.janela_inicio is null or v_c.janela_inicio < now() - interval '1 minute' then
+    update public.mcp_conexoes
+       set janela_inicio = now(), janela_chamadas = 1, ultimo_uso = now(), chamadas = chamadas + 1
+     where id = v_c.id;
+  elsif v_c.janela_chamadas >= 120 then
+    return jsonb_build_object('ok', false, 'codigo', 'limite',
+      'erro', 'Muitas chamadas em pouco tempo. Aguarde um minuto');
+  else
+    update public.mcp_conexoes
+       set janela_chamadas = janela_chamadas + 1, ultimo_uso = now(), chamadas = chamadas + 1
+     where id = v_c.id;
+  end if;
+
+  if p_metodo = 'iniciar' then
+    perform public.grava_auditoria('MCP: assistente conectou', 'Conexão MCP', 'mcp_conexoes', v_c.id::text,
+      jsonb_build_object('conexao', v_c.nome, 'cliente', left(coalesce(p_agente, ''), 200)), 'mcp');
+    return jsonb_build_object('ok', true,
+      'usuario', (select u.nome from public.usuarios u where u.user_id = v_c.user_id));
+
+  elsif p_metodo = 'ferramentas' then
+    return jsonb_build_object('ok', true, 'ferramentas', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'nome', f.nome, 'titulo', f.titulo, 'descricao', f.descricao,
+        'parametros', f.parametros, 'escrita', f.escrita) order by f.ordem, f.nome)
+      from public.mcp_ferramentas_de(v_c.user_id, v_c.escrita) f), '[]'::jsonb));
+
+  elsif p_metodo = 'chamar' then
+    select * into v_f from public.mcp_ferramentas where nome = p_ferramenta;
+    if v_f.nome is null then
+      return jsonb_build_object('ok', false, 'codigo', 'ferramenta_desconhecida', 'erro', 'Ferramenta desconhecida');
+    end if;
+    v_mod := coalesce((select nome from public.modulos where codigo = v_f.modulo), 'Conexão MCP');
+    if pg_column_size(v_args) > 2000 then
+      v_args := jsonb_build_object('resumo', 'argumentos longos, não copiados');
+    end if;
+
+    if not exists (select 1 from public.mcp_ferramentas_de(v_c.user_id, v_c.escrita) d where d.nome = v_f.nome) then
+      perform public.grava_auditoria('MCP: chamada recusada', v_mod, null, null,
+        jsonb_build_object('conexao', v_c.nome, 'ferramenta', v_f.nome, 'escrita', v_f.escrita), 'mcp');
+      return jsonb_build_object('ok', false, 'codigo', 'negado', 'erro',
+        case when v_f.escrita
+          then 'Esta conexão não tem permissão de escrita neste módulo. A escrita precisa ser liberada pelo Master e marcada na conexão'
+          else 'Este módulo não está liberado para uso pelo MCP' end);
+    end if;
+
+    begin
+      v_res := public.mcp_executar(v_f.nome, coalesce(p_args, '{}'::jsonb));
+    exception when others then
+      v_erro := sqlerrm;
+    end;
+
+    if v_erro is not null then
+      perform public.grava_auditoria('MCP: ' || v_f.titulo || ' (falhou)', v_mod, null, null,
+        jsonb_build_object('conexao', v_c.nome, 'ferramenta', v_f.nome, 'argumentos', v_args, 'erro', left(v_erro, 300)), 'mcp');
+      return jsonb_build_object('ok', false, 'codigo', 'erro', 'erro', v_erro);
+    end if;
+
+    perform public.grava_auditoria('MCP: ' || v_f.titulo, v_mod, null, null,
+      jsonb_build_object('conexao', v_c.nome, 'ferramenta', v_f.nome, 'argumentos', v_args, 'escrita', v_f.escrita), 'mcp');
+    return jsonb_build_object('ok', true, 'resultado', v_res);
+  end if;
+
+  return jsonb_build_object('ok', false, 'codigo', 'metodo', 'erro', 'Método desconhecido');
+end;
+$$;
+
+revoke all on public.mcp_liberacoes, public.mcp_usuarios, public.mcp_conexoes, public.mcp_ferramentas
+  from anon, authenticated;
+
+revoke all on function public.mcp_usuario_liberado(uuid)      from public, anon, authenticated;
+revoke all on function public.mcp_modulos(uuid)               from public, anon, authenticated;
+revoke all on function public.mcp_ferramentas_de(uuid, boolean) from public, anon, authenticated;
+revoke all on function public.mcp_tarefa(text)                from public, anon, authenticated;
+revoke all on function public.mcp_executar(text, jsonb)       from public, anon, authenticated;
+revoke all on function public.mcp_chamar(text, text, text, jsonb, text, text, text) from public, anon, authenticated;
+grant execute on function public.mcp_chamar(text, text, text, jsonb, text, text, text) to service_role;
+
+revoke all on function public.mcp_painel()                                   from public, anon;
+revoke all on function public.mcp_criar_conexao(text, int, boolean)          from public, anon;
+revoke all on function public.mcp_revogar_conexao(uuid)                      from public, anon;
+revoke all on function public.mcp_definir_liberacao(uuid, text, boolean, boolean) from public, anon;
+revoke all on function public.mcp_liberar_usuario(uuid, boolean)             from public, anon;
+
+grant execute on function public.mcp_painel()                                   to authenticated;
+grant execute on function public.mcp_criar_conexao(text, int, boolean)          to authenticated;
+grant execute on function public.mcp_revogar_conexao(uuid)                      to authenticated;
+grant execute on function public.mcp_definir_liberacao(uuid, text, boolean, boolean) to authenticated;
+grant execute on function public.mcp_liberar_usuario(uuid, boolean)             to authenticated;
+
+-- =====================================================================
+-- 12) PRIMEIRO USUÁRIO MASTER
 --    Depois de criar o usuário em Authentication > Users, troque o e-mail e o nome,
 --    tire os dois traços do início das linhas e rode:
 -- =====================================================================

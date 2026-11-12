@@ -32,6 +32,7 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | `config.js` | Endereço e chave pública do projeto Supabase do backoffice (já preenchidos) |
 | `supabase.sql` | Tabelas, regras de segurança e auditoria, para rodar no painel do Supabase |
 | `supabase/functions/criar-usuario/index.ts` | Função do servidor que cria o acesso de um novo usuário (para publicar no Supabase) |
+| `supabase/functions/mcp/index.ts` | Servidor MCP do backoffice (para publicar no Supabase, com "Verify JWT" desligado) |
 | `assets/` | Logo e favicon |
 
 ## Configuração (uma vez)
@@ -143,6 +144,51 @@ A função `consulta-cnpj` (em `supabase/functions/consulta-cnpj/index.ts`) cons
 Cada consulta oficial fica registrada na Auditoria. O token é obtido por credenciais de cliente (Basic + `grant_type=client_credentials`), que é o padrão do gateway do Serpro, mas esse detalhe não está escrito na especificação e precisa ser confirmado no primeiro uso real.
 
 Validação de CPF na Receita ainda não tem função: depende da mesma contratação.
+
+## Conexão MCP
+
+O backoffice tem um servidor MCP próprio: a função `mcp` (`supabase/functions/mcp/index.ts`), no endereço
+`https://<projeto>.supabase.co/functions/v1/mcp`. Assistentes de IA se ligam a ele e passam a consultar
+(e, se liberado, gravar) no sistema em nome de um usuário.
+
+Regras, todas aplicadas no banco (`supabase.sql`, seção 11):
+
+- Cada conexão pertence a um usuário e alcança só o que ele alcança na tela (perfil, organização, módulos e nível).
+- Nada funciona até o Master liberar, na tela **Conexão MCP**: por organização e módulo (leitura e, à parte, escrita)
+  e por usuário. O Master não precisa de liberação individual. O usuário também precisa ter o módulo Conexão MCP.
+- Somente leitura por padrão. Gravar exige as duas coisas: escrita liberada pelo Master no módulo e a opção
+  "Permitir gravação" marcada ao criar a conexão.
+- O token (`clro_…`) aparece uma única vez; o banco guarda só o resumo SHA-256. Validade de 30 dias a 1 ano,
+  no máximo 5 conexões ativas por usuário, 120 chamadas por minuto por conexão.
+- Revogar (o dono, o Master ou o Corporativo master da organização), bloquear o usuário, desativar o usuário
+  ou desligar o módulo corta o acesso na chamada seguinte.
+- Toda chamada entra na Auditoria com origem `mcp`, o IP de quem chamou e o nome da conexão. O token nunca é gravado.
+
+Ferramentas desta versão: quem sou eu; resumo do dashboard; listar, ver, criar, mover e comentar tarefas;
+buscar cadastros (documento mascarado), ver pessoa física e ver empresa; consultar auditoria.
+Cadastro e Auditoria não têm ferramentas de gravação.
+
+Para publicar:
+
+1. Rodar o `supabase.sql` atualizado no SQL Editor.
+2. Criar a função `mcp` em Edge Functions com o conteúdo de `supabase/functions/mcp/index.ts` e
+   **desligar "Verify JWT"** nela (quem chama apresenta o token da conexão, não uma sessão do Supabase).
+3. No sistema: Módulos e permissões → habilitar "Conexão MCP" para os perfis que vão usar; depois, em
+   Conexão MCP, liberar módulos e usuários e criar a conexão.
+
+Para conectar um assistente: servidor MCP do tipo HTTP, com o endereço acima e o cabeçalho
+`Authorization: Bearer <token>`. No Claude Code:
+`claude mcp add --transport http celeiro-office <endereço> --header "Authorization: Bearer <token>"`.
+
+No Hermes (`~/.hermes/config.yaml`): entrada em `mcp_servers` com `url` e `headers: Authorization: "Bearer <token>"`.
+No Codex (`~/.codex/config.toml`): `[mcp_servers.celeiro_office]` com `url` e `bearer_token_env_var`.
+A tela Conexão MCP mostra os três exemplos já com o endereço certo.
+
+Limites: o acesso é por token no cabeçalho. Assistentes que só aceitam login por OAuth (caso do conector
+personalizado do aplicativo Claude, a confirmar) precisam de uma segunda etapa: ligar o servidor OAuth 2.1 do
+Supabase e criar a tela de consentimento no backoffice. Os dados lidos pelo assistente passam a ser tratados
+pelo serviço de IA conectado (LGPD): liberar só o necessário. Testado em simulação (banco, função e tela);
+falta o teste com um assistente real depois de publicado.
 
 ## Dashboard
 

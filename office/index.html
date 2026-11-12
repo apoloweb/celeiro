@@ -176,6 +176,9 @@ tr.grupo-l th{background:var(--nevoa);font-size:13px;font-weight:600;padding:8px
 .cabeca>.acoes{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px;max-width:none;flex:0 1 auto}
 .botao.sutil{background:none;color:var(--texto2);font-weight:500;text-decoration:underline;padding:0 10px}
 .botao.sutil:hover{background:none;color:var(--verde)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:var(--nevoa);padding:1px 5px;border-radius:4px;word-break:break-all}
+.bloco{margin:0;padding:12px 14px;background:var(--nevoa);border:1px solid var(--linha);border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;overflow-x:auto;white-space:pre}
+#mcp-tk,#mcp-url{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
 .voltar{align-self:flex-start;background:none;border:0;padding:0;min-height:32px;font-size:14px;color:var(--texto2);cursor:pointer;margin-bottom:-10px}
 .voltar:hover{color:var(--verde);text-decoration:underline}
 .linha-socio{flex-direction:row!important;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px!important}
@@ -205,7 +208,7 @@ var app=document.getElementById('app');
 var elAviso=document.getElementById('aviso');
 
 var PERFIS={master:'Master',gerencial:'Gerencial',corp_master:'Corporativo master',corp_operador:'Corporativo operador'};
-var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true};
+var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true,mcp:true};
 var INATIVIDADE_MS=15*60*1000;
 var MAX_TENTATIVAS=5;
 var E={acesso:null,modulos:[],recuperando:/type=recovery/.test(hashInicial),novoLogin:false,tentativas:0,relogio:null,avisoRelogio:null};
@@ -533,6 +536,7 @@ var ROTAS={
   workflow:{titulo:'Workflow',modulo:'Workflow',fn:telaWorkflow,pode:function(){return temModulo('workflow');},semGrupo:true},
   dashboard:{titulo:'Dashboard',modulo:'Dashboard',fn:telaDashboard,pode:function(){return temModulo('dashboard');},semGrupo:true},
   cadastro:{titulo:'Cadastro',modulo:'Cadastro',fn:telaCadPessoas,pode:function(){return temModulo('cadastro');},semGrupo:true},
+  mcp:{titulo:'Conexão MCP',modulo:'Conexão MCP',fn:telaMcp,pode:function(){return temModulo('mcp');},semGrupo:true},
   app:{titulo:'Aplicativo',modulo:'Aplicativo',fn:telaApp,pode:function(){return temModulo('app');},semGrupo:true}
 };
 
@@ -1205,6 +1209,174 @@ async function abrirTarefa(t,ctx){
   };
   if(typeof d.showModal==='function'){d.showModal();}else{d.setAttribute('open','');}
   $('#t-titulo',d).focus();
+}
+
+/* ---------- Conexão MCP (assistentes de IA ligados ao sistema) ---------- */
+var MCP={org:'',token:null};
+function mcpEndereco(){return String(cfg.url||'').replace(/\/+$/,'')+'/functions/v1/mcp';}
+function mcpSituacao(c){
+  if(c.revogada_em)return ['Revogada',' off'];
+  if(new Date(c.expira_em)<=new Date())return ['Expirada',' off'];
+  return ['Ativa',''];
+}
+function mcpCopiar(texto,oque){
+  function ok(){aviso(oque+' copiado.');}
+  function falha(){aviso('Não foi possível copiar. Selecione o texto e copie manualmente.',true);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(texto).then(ok,falha);}else{falha();}
+}
+function mcpLinhaConexao(c,comDono){
+  var s=mcpSituacao(c),u=c.ultimo_uso?dataHora(c.ultimo_uso):null;
+  return '<tr><td>'+esc(c.nome)+'<span class="sub">'+esc(c.prefixo)+'…</span></td>'+
+    (comDono?'<td>'+esc(c.usuario)+'<span class="sub">'+esc(c.organizacao||'Equipe Celeiro')+'</span></td>':'')+
+    '<td>'+(c.escrita?'Leitura e gravação':'Somente leitura')+'</td>'+
+    '<td>'+esc(dataBr(c.expira_em))+'</td>'+
+    '<td>'+(u?esc(u.data)+'<span class="sub">'+esc(u.hora)+' · '+esc(c.chamadas)+' chamadas</span>':'Nunca usada')+'</td>'+
+    '<td><span class="situacao'+s[1]+'">'+s[0]+'</span></td>'+
+    '<td>'+(s[0]==='Ativa'?'<button class="botao claro pequeno" type="button" data-revogar="'+esc(c.id)+'" data-nome="'+esc(c.nome)+'">Revogar</button>':'')+'</td></tr>';
+}
+async function telaMcp(){
+  carregando('Conexão MCP');
+  var r=await sb.rpc('mcp_painel');
+  if(r.error){falhaTela('Conexão MCP',r.error);return;}
+  var p=r.data||{},master=ehMaster(),endereco=mcpEndereco(),token=MCP.token;
+  MCP.token=null;
+  var modEscrita=(p.modulos||[]).filter(function(m){return m.escrita;});
+
+  var novoToken=token?'<div class="painel" id="mcp-token" role="status"><h2>Token da conexão “'+esc(token.nome)+'”</h2>'+
+      '<p class="sucesso">Copie agora. Por segurança, este token não será mostrado de novo. Se perder, revogue a conexão e crie outra.</p>'+
+      '<div class="grade"><div class="campo" style="flex:1 1 420px"><label for="mcp-tk">Token</label><input id="mcp-tk" type="text" readonly value="'+esc(token.token)+'"></div>'+
+      '<button class="botao" type="button" id="mcp-tk-copiar">Copiar token</button></div>'+
+      '<p class="apoio">Trate como uma senha: quem tiver este token consulta o sistema em seu nome. Não envie por e-mail nem cole em conversas.</p></div>':'';
+
+  var conectar='<div class="painel"><h2>Como conectar um assistente</h2>'+
+      '<div class="grade"><div class="campo" style="flex:1 1 420px"><label for="mcp-url">Endereço do servidor</label><input id="mcp-url" type="text" readonly value="'+esc(endereco)+'"></div>'+
+      '<button class="botao claro" type="button" id="mcp-url-copiar">Copiar endereço</button></div>'+
+      '<p class="apoio">No assistente, adicione um servidor MCP do tipo HTTP com este endereço e informe o token no cabeçalho <code>Authorization: Bearer SEU_TOKEN</code>. '+
+      'Funciona com qualquer cliente MCP que aceite servidor HTTP com cabeçalho.</p>'+
+      '<p class="apoio"><strong>Hermes</strong> (arquivo <code>~/.hermes/config.yaml</code>):</p>'+
+      '<pre class="bloco">mcp_servers:\n  celeiro_office:\n    url: "'+esc(endereco)+'"\n    headers:\n      Authorization: "Bearer SEU_TOKEN"</pre>'+
+      '<p class="apoio"><strong>Codex</strong> (arquivo <code>~/.codex/config.toml</code>, com o token na variável de ambiente <code>CELEIRO_MCP_TOKEN</code>):</p>'+
+      '<pre class="bloco">[mcp_servers.celeiro_office]\nurl = "'+esc(endereco)+'"\nbearer_token_env_var = "CELEIRO_MCP_TOKEN"</pre>'+
+      '<p class="apoio"><strong>Claude Code</strong>: <code>claude mcp add --transport http celeiro-office '+esc(endereco)+' --header "Authorization: Bearer SEU_TOKEN"</code></p></div>';
+
+  var criar=p.liberado?'<form class="painel" id="f-mcp" novalidate><h2>Nova conexão</h2>'+
+      '<p class="apoio">Crie uma conexão para cada assistente. Ela enxerga só o que você enxerga na tela, dentro do que o Master liberou para o MCP.</p>'+
+      '<div class="grade"><div class="campo"><label for="mcp-nome">Nome da conexão</label><input id="mcp-nome" type="text" maxlength="80" placeholder="Ex.: Claude no meu computador" required></div>'+
+      '<div class="campo" style="flex:0 1 180px"><label for="mcp-dias">Validade</label><select id="mcp-dias"><option value="30">30 dias</option><option value="90" selected>90 dias</option><option value="180">180 dias</option><option value="365">1 ano</option></select></div>'+
+      '<div class="campo" style="flex:0 1 220px"><span class="rotulo" id="mcp-esc-r">Permitir gravação</span>'+chaveSw(false,'Permitir gravação','id="mcp-escrita"',!modEscrita.length)+'</div>'+
+      '<button class="botao" type="submit">Criar conexão</button></div>'+
+      '<p class="apoio">'+(modEscrita.length?'Com a gravação ligada, o assistente pode criar e alterar registros em: '+esc(modEscrita.map(function(m){return m.nome;}).join(', '))+'. Deixe desligada se só precisa consultar.':'Gravação indisponível: o Master ainda não liberou a escrita pelo MCP em nenhum módulo seu. As conexões serão somente leitura.')+'</p></form>'
+    :'<p class="erro" role="status">Seu usuário ainda não foi liberado para usar o MCP. Peça a liberação a um usuário Master.</p>';
+
+  var minhas='<h2>Minhas conexões</h2><div class="rolagem"><table><thead><tr><th scope="col">Conexão</th><th scope="col">Permissão</th><th scope="col">Expira em</th><th scope="col">Último uso</th><th scope="col">Situação</th><th scope="col">Ação</th></tr></thead><tbody>'+
+      ((p.conexoes||[]).map(function(c){return mcpLinhaConexao(c,false);}).join('')||'<tr><td colspan="6" class="vazio">Nenhuma conexão criada.</td></tr>')+'</tbody></table></div>';
+
+  var ferramentas='<h2>O que o assistente pode fazer</h2><div class="rolagem"><table><thead><tr><th scope="col">Ferramenta</th><th scope="col">Módulo</th><th scope="col">Tipo</th><th scope="col">Para você</th></tr></thead><tbody>'+
+      (p.ferramentas||[]).map(function(f){
+        return '<tr><td>'+esc(f.titulo)+'<span class="sub">'+esc(f.descricao)+'</span></td><td>'+esc(f.modulo_nome||'Geral')+'</td>'+
+          '<td>'+(f.escrita?'<span class="selo novo">Gravação</span>':'<span class="selo claro">Leitura</span>')+'</td>'+
+          '<td><span class="situacao'+(f.disponivel?'':' off')+'">'+(f.disponivel?'Liberada':'Não liberada')+'</span></td></tr>';
+      }).join('')+'</tbody></table></div>';
+
+  var adm='';
+  if(master){
+    var org=MCP.org;
+    if(org&&!(p.organizacoes||[]).some(function(o){return o.id===org;})){org=MCP.org='';}
+    var lib=function(modulo){
+      return (p.liberacoes||[]).filter(function(l){return l.modulo===modulo&&(org?l.organizacao_id===org:l.organizacao_id===null);})[0]||{leitura:false,escrita:false};
+    };
+    adm='<h2>Liberação do MCP (Master)</h2>'+
+      '<p class="apoio">Nada funciona pelo MCP até ser liberado aqui. A leitura mostra ao assistente o mesmo que a pessoa vê na tela; a escrita permite criar e alterar. Vale na hora, inclusive para conexões já criadas.</p>'+
+      '<div class="painel"><div class="grade"><div class="campo" style="max-width:420px"><label for="mcp-org">Para quem</label><select id="mcp-org">'+
+        '<option value="">Equipe Celeiro</option>'+
+        (p.organizacoes||[]).map(function(o){return '<option value="'+esc(o.id)+'"'+(o.id===org?' selected':'')+'>'+esc(o.nome)+'</option>';}).join('')+
+      '</select></div></div></div>'+
+      '<div class="rolagem"><table><thead><tr><th scope="col">Módulo</th><th scope="col">Leitura</th><th scope="col">Escrita</th></tr></thead><tbody>'+
+        (p.modulos_com_ferramentas||[]).map(function(m){
+          var l=lib(m.modulo);
+          return '<tr><th scope="row">'+esc(m.nome)+'</th>'+
+            '<td>'+chaveSw(l.leitura,'Leitura de '+m.nome+' pelo MCP','data-lib="leitura" data-modulo="'+esc(m.modulo)+'"')+'</td>'+
+            '<td>'+(m.tem_escrita?chaveSw(l.escrita,'Escrita em '+m.nome+' pelo MCP','data-lib="escrita" data-modulo="'+esc(m.modulo)+'"',!l.leitura):'<span class="sub">sem ferramentas de gravação</span>')+'</td></tr>';
+        }).join('')+'</tbody></table></div>'+
+      '<h2>Usuários liberados</h2><div class="rolagem"><table><thead><tr><th scope="col">Usuário</th><th scope="col">Perfil</th><th scope="col">Organização</th><th scope="col">Pode usar o MCP</th></tr></thead><tbody>'+
+        (p.usuarios||[]).map(function(u){
+          var ehM=u.perfil==='master';
+          return '<tr><td>'+esc(u.nome)+'<span class="sub">'+esc(u.email)+(u.ativo?'':' · inativo')+'</span></td><td>'+esc(PERFIS[u.perfil]||u.perfil)+'</td><td>'+esc(u.organizacao||'Equipe Celeiro')+'</td>'+
+            '<td>'+chaveSw(u.liberado,'MCP para '+u.nome,'data-usuario="'+esc(u.user_id)+'"',ehM)+
+              (ehM?'<span class="sub">sempre liberado</span>':(u.tem_modulo?'':'<span class="sub">falta o módulo Conexão MCP no perfil ou nível</span>'))+'</td></tr>';
+        }).join('')+'</tbody></table></div>'+
+      '<h2>Conexões dos outros usuários</h2><div class="rolagem"><table><thead><tr><th scope="col">Conexão</th><th scope="col">Usuário</th><th scope="col">Permissão</th><th scope="col">Expira em</th><th scope="col">Último uso</th><th scope="col">Situação</th><th scope="col">Ação</th></tr></thead><tbody>'+
+        ((p.todas_conexoes||[]).map(function(c){return mcpLinhaConexao(c,true);}).join('')||'<tr><td colspan="7" class="vazio">Nenhuma conexão de outros usuários.</td></tr>')+'</tbody></table></div>';
+  }
+
+  tela('<div class="cabeca"><div><h1>Conexão MCP</h1><p class="apoio">Ligue assistentes de IA ao Celeiro Office. Cada conexão atua em seu nome, com as suas permissões, e tudo o que ela faz fica na Auditoria com a origem “mcp”.</p></div></div>'+
+    novoToken+criar+minhas+conectar+ferramentas+adm+
+    '<p class="nota">Os dados alcançados pelo assistente saem do sistema e passam a ser tratados pelo serviço de IA que você conectou. Libere apenas os módulos necessários e revogue as conexões que não usa mais.</p>');
+
+  if(token){
+    $('#mcp-tk-copiar').onclick=function(){mcpCopiar(token.token,'Token');};
+    $('#mcp-tk').onfocus=function(){this.select();};
+  }
+  $('#mcp-url-copiar').onclick=function(){mcpCopiar(endereco,'Endereço');};
+  var chaveEsc=$('#mcp-escrita');
+  if(chaveEsc){chaveEsc.onclick=function(){chaveEsc.setAttribute('aria-checked',chaveEsc.getAttribute('aria-checked')==='true'?'false':'true');};}
+  var f=$('#f-mcp');
+  if(f){
+    f.onsubmit=async function(ev){
+      ev.preventDefault();
+      var nome=$('#mcp-nome').value.trim(),b=$('button[type=submit]',f);
+      if(!nome){aviso('Dê um nome à conexão.',true);$('#mcp-nome').focus();return;}
+      ocupar(b,true);
+      var c=await sb.rpc('mcp_criar_conexao',{p_nome:nome,p_dias:Number($('#mcp-dias').value),p_escrita:chaveEsc.getAttribute('aria-checked')==='true'});
+      if(c.error){ocupar(b,false);aviso(msgErro(c.error),true);return;}
+      MCP.token={nome:nome,token:c.data.token};
+      await telaMcp();
+      var caixa=$('#mcp-token');
+      if(caixa){caixa.scrollIntoView({block:'start'});}
+    };
+  }
+  $$('[data-revogar]').forEach(function(b){
+    b.onclick=async function(){
+      if(b.getAttribute('data-confirma')!=='1'){
+        b.setAttribute('data-confirma','1');b.textContent='Confirmar revogação';
+        setTimeout(function(){if(b.isConnected){b.removeAttribute('data-confirma');b.textContent='Revogar';}},5000);
+        return;
+      }
+      ocupar(b,true);
+      var x=await sb.rpc('mcp_revogar_conexao',{p_id:b.getAttribute('data-revogar')});
+      if(x.error){ocupar(b,false);aviso(msgErro(x.error),true);return;}
+      aviso('Conexão “'+b.getAttribute('data-nome')+'” revogada. O assistente perde o acesso na próxima chamada.');
+      telaMcp();
+    };
+  });
+  if(master){
+    $('#mcp-org').onchange=function(){MCP.org=this.value;telaMcp();};
+    $$('[data-lib]').forEach(function(b){
+      b.onclick=async function(){
+        var modulo=b.getAttribute('data-modulo'),tipo=b.getAttribute('data-lib'),novo=b.getAttribute('aria-checked')!=='true';
+        var linha=b.closest('tr'),bl=$('[data-lib=leitura]',linha),be=$('[data-lib=escrita]',linha);
+        var leitura=tipo==='leitura'?novo:bl.getAttribute('aria-checked')==='true';
+        var escrita=leitura&&(tipo==='escrita'?novo:(!!be&&be.getAttribute('aria-checked')==='true'));
+        ocupar(b,true);
+        var x=await sb.rpc('mcp_definir_liberacao',{p_org:MCP.org||null,p_modulo:modulo,p_leitura:leitura,p_escrita:escrita});
+        ocupar(b,false);
+        if(x.error){aviso(msgErro(x.error),true);return;}
+        aviso(tipo==='escrita'?(novo?'Escrita liberada pelo MCP.':'Escrita bloqueada pelo MCP.'):(novo?'Leitura liberada pelo MCP.':'Módulo bloqueado pelo MCP.'));
+        telaMcp();
+      };
+    });
+    $$('[data-usuario]').forEach(function(b){
+      b.onclick=async function(){
+        var novo=b.getAttribute('aria-checked')!=='true';
+        ocupar(b,true);
+        var x=await sb.rpc('mcp_liberar_usuario',{p_user:b.getAttribute('data-usuario'),p_liberado:novo});
+        ocupar(b,false);
+        if(x.error){aviso(msgErro(x.error),true);return;}
+        b.setAttribute('aria-checked',novo?'true':'false');
+        aviso(novo?'Usuário liberado para usar o MCP.':'Usuário bloqueado. As conexões dele param de funcionar.');
+      };
+    });
+  }
 }
 
 /* ---------- Dashboard ---------- */
