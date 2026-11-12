@@ -21,13 +21,13 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | Arquivo | Para que serve |
 |---|---|
 | `index.html` | O sistema inteiro (telas de acesso e área interna) |
-| `config.js` | Endereço e chave pública do projeto Supabase do backoffice (**preencher**) |
+| `config.js` | Endereço e chave pública do projeto Supabase do backoffice (já preenchidos) |
 | `supabase.sql` | Tabelas, regras de segurança e auditoria, para rodar no painel do Supabase |
 | `assets/` | Logo e favicon |
 
 ## Configuração (uma vez)
 
-1. **Criar o projeto Supabase do backoffice.** É um projeto novo, separado do projeto do site.
+1. **Projeto Supabase do backoffice.** Já criado (`wvvounloqtucagerizct`), separado do projeto do site.
 2. **Rodar o SQL.** Painel > SQL Editor > New query > cole o conteúdo de `supabase.sql` > Run.
 3. **Criar o primeiro usuário.** Painel > Authentication > Users > Add user > Create new user. Informe e-mail e senha e marque "Auto Confirm User".
 4. **Tornar esse usuário Master.** No SQL Editor, rode (trocando nome e e-mail):
@@ -38,7 +38,7 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
    ```
 5. **Fechar o cadastro público.** Painel > Authentication > Sign In / Providers > desligue "Allow new users to sign up".
 6. **Conferir o autenticador.** Painel > Authentication > Multi-Factor: a opção de aplicativo autenticador (TOTP) deve estar ligada.
-7. **Preencher `config.js`.** Painel > Project Settings > API: copie o endereço do projeto e a chave pública (publishable ou anon). Nunca use a chave secret / service_role.
+7. **Conferir `config.js`.** Já está com o endereço e a chave pública do projeto. Nunca use a chave secret / service_role.
 8. **Publicar.** Envie a pasta `office/` para uma hospedagem de arquivos estáticos (Vercel, Netlify, Cloudflare Pages ou o servidor do domínio) e aponte o subdomínio `office.celeiroadministradora.com.br` para ela. Precisa abrir em `https://`.
 9. **Informar o endereço ao Supabase.** Painel > Authentication > URL Configuration: coloque `https://office.celeiroadministradora.com.br` em "Site URL".
 
