@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Área do cliente · Celeiro Administradora</title>
+<link rel="icon" href="../assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Plano: área do cliente no site, mesma linguagem do app (Manual de Marca Celeiro ADM v1.0).
+   No celular: abas embaixo, como no app. No computador: as mesmas abas viram o menu do topo.
+   Verde é a cor institucional; âmbar só como destaque (barra da marca, botões, realces),
+   nunca em texto sobre fundo claro. Família única: Sora. */
+:root{
+  color-scheme: light;
+  --fundo:#F4F6F3;        /* Névoa: fundo das telas */
+  --superficie:#FFFFFF;   /* cartões e campos */
+  --tinta:#0F3D2E;        /* Verde Celeiro: texto, marca, fundos institucionais */
+  --apoio:#3F5F53;        /* Verde médio: texto secundário */
+  --destaque:#E3A72F;     /* Âmbar Energia: ação principal e realces */
+  --linha:#C9D2C8;        /* fios e bordas */
+  --palco:#DFE4DD;        /* área fora do celular */
+  --sobre-tinta:#F4F6F3;  /* texto sobre verde */
+  --fonte-titulo:"Sora", "Helvetica Neue", Arial, sans-serif;
+  --fonte-texto:"Sora", "Helvetica Neue", Arial, sans-serif;
+  --raio:14px;
+  --raio-p:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--palco);color:var(--tinta);font-family:var(--fonte-texto);font-size:14.5px;font-weight:400;line-height:1.5;display:flex;align-items:center;justify-content:center;-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0}
+:focus-visible{outline:2px solid var(--tinta);outline-offset:2px}
+
+#aparelho{width:100%;height:100%;max-width:400px;max-height:860px;background:var(--fundo);display:flex;flex-direction:column;position:relative;overflow:hidden}
+
+#topo{flex:none;display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid var(--linha);min-height:56px}
+#topo h1{font-family:var(--fonte-titulo);font-size:17px;font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
+
+.icone-btn{width:40px;height:40px;display:grid;place-items:center;border-radius:50%;flex:none}
+.icone-btn:hover{background:var(--superficie)}
+#tela{flex:1;overflow-y:auto;padding:16px 16px 28px;display:flex;flex-direction:column;gap:18px}
+#abas{flex:none;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--linha);padding:6px 6px 10px}
+#abas button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;font-size:11px;font-weight:500;color:var(--apoio);border-radius:var(--raio-p)}
+#abas button{position:relative}
+#abas button[aria-current="page"]{color:var(--tinta);font-weight:600}
+#abas button[aria-current="page"]::before{content:"";position:absolute;top:-7px;left:50%;width:28px;height:3px;margin-left:-14px;background:var(--destaque)}
+svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+h2{font-family:var(--fonte-titulo);font-size:22px;font-weight:600;line-height:1.15;text-wrap:balance}
+h3{font-family:var(--fonte-titulo);font-size:15px;font-weight:600;text-wrap:balance}
+.sec{display:flex;flex-direction:column;gap:10px}
+.sec-topo{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.link{font-weight:600;text-decoration:underline;text-decoration-color:var(--destaque);text-decoration-thickness:2px;text-underline-offset:3px;font-size:13px}
+.apoio{color:var(--apoio);font-size:13px}
+.rotulo{font-size:10.5px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--apoio)}
+.num{font-variant-numeric:tabular-nums}
+
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;padding:10px 16px;border-radius:var(--raio);font-weight:600;border:1.5px solid var(--tinta);text-align:center}
+.btn.cheio{background:var(--destaque);border-color:var(--destaque);color:var(--tinta)}
+.btn.claro{border-color:var(--linha)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.curto{width:auto;min-height:38px;padding:6px 14px;font-size:13px}
+.pilha{display:flex;flex-direction:column;gap:10px}
+.fila{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+.campo{display:flex;flex-direction:column;gap:5px}
+.campo label{font-size:13px;font-weight:600}
+.campo input,.campo textarea,.campo select{background:var(--superficie);border:1.5px solid var(--linha);border-radius:var(--raio-p);padding:12px;width:100%}
+.campo input:focus,.campo textarea:focus,.campo select:focus{outline:none;border-color:var(--tinta);background:var(--fundo)}
+.campo textarea{min-height:96px;resize:vertical}
+.erro{font-size:13px;font-weight:600;border-left:3px solid var(--destaque);padding:6px 10px;background:var(--superficie)}
+.divisor{display:flex;align-items:center;gap:10px;color:var(--apoio);font-size:12px}
+.divisor::before,.divisor::after{content:"";flex:1;height:1px;background:var(--linha)}
+
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.chips.quebra{flex-wrap:wrap;overflow:visible}
+.chip{flex:none;padding:7px 14px;border-radius:99px;border:1.5px solid var(--linha);font-size:13px;font-weight:600}
+.chip[aria-pressed="true"]{background:var(--tinta);color:var(--sobre-tinta);border-color:var(--tinta)}
+.selo{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border:1px solid var(--tinta);border-radius:99px;white-space:nowrap}
+.selo.cheio{background:var(--tinta);color:var(--sobre-tinta)}
+
+.capa{aspect-ratio:16/9;background:var(--tinta);color:var(--sobre-tinta);border-radius:var(--raio);display:grid;place-items:center;position:relative;overflow:hidden;width:100%}
+.capa .play{width:52px;height:52px;border-radius:50%;border:2px solid var(--sobre-tinta);display:grid;place-items:center}
+.capa .dur{position:absolute;right:8px;bottom:8px;font-size:11px;font-weight:600;background:var(--fundo);color:var(--tinta);padding:1px 6px;border-radius:4px}
+.capa .txt{position:absolute;left:12px;bottom:10px;right:60px;font-size:12px;opacity:.8}
+.capa video{width:100%;height:100%;background:#000}
+.barra-play{position:absolute;left:0;bottom:0;height:4px;background:var(--sobre-tinta);width:0}
+.capa.tocando .barra-play{animation:tocar 30s linear forwards}
+@keyframes tocar{to{width:100%}}
+@media (prefers-reduced-motion:reduce){.capa.tocando .barra-play{animation:none;width:35%}}
+
+.item-video{display:grid;grid-template-columns:128px 1fr;gap:12px;text-align:left;align-items:start;width:100%}
+.item-video .capa{border-radius:var(--raio-p)}
+.item-video .capa .play{width:30px;height:30px;border-width:1.5px}
+.item-video .capa .play svg{width:14px;height:14px}
+.cartao{background:var(--superficie);border:1px solid var(--linha);border-radius:var(--raio);padding:14px;display:flex;flex-direction:column;gap:10px;text-align:left;width:100%}
+.progresso{height:7px;background:var(--superficie);border-radius:99px;overflow:hidden;border:1px solid var(--linha)}
+.progresso i{display:block;height:100%;background:var(--destaque)}
+.lista{display:flex;flex-direction:column}
+.linha{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--linha);text-align:left;width:100%}
+.linha:last-child{border-bottom:0}
+.linha .cresce{flex:1;min-width:0;overflow-wrap:anywhere}
+.avatar{width:56px;height:56px;border-radius:50%;background:var(--tinta);color:var(--sobre-tinta);display:grid;place-items:center;font-weight:600;font-size:20px;flex:none}
+.texto-longo{white-space:pre-line;max-width:65ch}
+.aviso{background:var(--superficie);border-left:3px solid var(--destaque);border-radius:var(--raio-p);padding:12px;font-size:13px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--linha);background:var(--superficie);border-radius:var(--raio-p);padding:3px}
+.seg button{padding:9px 4px;border-radius:8px;font-size:12.5px;font-weight:600}
+.seg button[aria-pressed="true"]{background:var(--tinta);color:var(--sobre-tinta)}
+.centro{align-items:center;text-align:center}
+.servicos{background:var(--superficie);border:1px solid var(--linha);border-radius:var(--raio);padding:0 14px}
+.servicos .linha{padding:14px 0}
+.servico-ic{width:42px;height:42px;border-radius:var(--raio-p);background:var(--tinta);color:var(--sobre-tinta);display:grid;place-items:center;flex:none}
+.etapas{display:flex;flex-direction:column;gap:0}
+.etapas li{list-style:none;display:flex;gap:12px;align-items:flex-start;padding:8px 0;color:var(--apoio)}
+.etapas li::before{content:"";width:12px;height:12px;border-radius:50%;border:2px solid var(--linha);margin-top:4px;flex:none}
+.etapas li.feita{color:var(--tinta)}
+.etapas li.feita::before{background:var(--tinta);border-color:var(--tinta)}
+.etapas li.agora{color:var(--tinta);font-weight:600}
+.etapas li.agora::before{background:var(--destaque);border-color:var(--destaque)}
+.abertura{flex:1;display:flex;flex-direction:column;justify-content:space-between;gap:24px}
+b{font-weight:600}
+#topo,#abas{background:var(--superficie)}
+#aparelho.verde{background:var(--tinta);color:var(--sobre-tinta)}
+.verde .apoio{color:var(--linha)}
+.verde .btn{border-color:var(--sobre-tinta)}
+.verde .btn.cheio{border-color:var(--destaque)}
+.verde .btn.claro{border-color:rgba(244,246,243,.35)}
+.verde :focus-visible{outline-color:var(--sobre-tinta)}
+.mono{display:block;height:100%;width:auto;fill:currentColor}
+.mono .barra{fill:var(--destaque)}
+/* Assinatura horizontal: 40 px de altura (mínimo do manual), fio entre monograma e nome */
+.ass-h{display:flex;align-items:center;gap:12px;height:40px;color:var(--tinta)}
+.ass-h .m{height:30px}
+.ass-h .fio{width:1px;align-self:stretch;background:currentColor;opacity:.7}
+.ass-h .nome{display:flex;flex-direction:column;gap:5px}
+.ass-h .n1{font-size:15px;font-weight:500;letter-spacing:.34em;line-height:1}
+.ass-h .n2,.ass-v .n2{font-size:6.5px;font-weight:400;letter-spacing:.72em;line-height:1;text-transform:uppercase;color:var(--apoio)}
+/* Assinatura vertical: telas de abertura */
+.ass-v{display:flex;flex-direction:column;align-items:center;gap:16px}
+.ass-v .m{height:64px}
+.ass-v .n1{font-size:24px;font-weight:500;letter-spacing:.34em;margin-right:-.34em;line-height:1}
+.ass-v .n2{font-size:9px;margin-right:-.72em}
+.sobre-verde{background:var(--tinta);color:var(--sobre-tinta);border-radius:var(--raio);padding:36px 16px}
+.verde .n2,.sobre-verde .n2{color:var(--destaque)}
+.avatar.realce{background:var(--destaque);color:var(--tinta)}
+.interruptor{width:46px;height:26px;border-radius:99px;border:1.5px solid var(--tinta);position:relative;flex:none}
+.interruptor::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:var(--tinta);transition:transform .15s}
+.interruptor[aria-checked="true"]{background:var(--tinta)}
+.interruptor[aria-checked="true"]::after{background:var(--sobre-tinta);transform:translateX(20px)}
+#aviso-flutuante{position:absolute;left:16px;right:16px;bottom:84px;background:var(--tinta);color:var(--sobre-tinta);padding:12px 14px;border-radius:var(--raio-p);font-size:13px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s;text-align:center}
+#aviso-flutuante.ver{opacity:1}
+
+/* ---------- Web: ocupa a página inteira e centraliza o conteúdo ---------- */
+body{display:block;background:var(--fundo)}
+#aparelho{max-width:none;max-height:none;height:100%}
+#tela{align-items:center}
+#tela>*{width:100%;max-width:720px}
+#tela.estreita>*{max-width:440px}
+#aparelho.sem-abas #abas{display:none}
+#abas .marca-nav{display:none}
+a.btn{text-decoration:none;color:inherit}
+a.link{color:inherit}
+.capa iframe{width:100%;height:100%;border:0}
+.btn[aria-busy="true"]{opacity:.6}
+.grade2{display:grid;gap:16px;grid-template-columns:1fr}
+@media (max-width:799px){
+  #aparelho.interna #abas{display:none}
+}
+@media (min-width:800px){
+  #abas{order:-1;display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:12px 32px;border-top:0;border-bottom:1px solid var(--linha)}
+  #abas .marca-nav{display:flex;margin-right:auto}
+  #abas button{flex-direction:row;gap:8px;font-size:14px;padding:9px 14px}
+  #abas button[aria-current="page"]::before{top:auto;bottom:-13px}
+  #topo{padding:14px 32px 10px;justify-content:center}
+  #topo>*{max-width:720px}
+  #topo h1{font-size:19px}
+  #aparelho.so-marca #topo{display:none}
+  #tela{padding:28px 32px 48px}
+  .grade2{grid-template-columns:1fr 1fr}
+  #aviso-flutuante{left:50%;right:auto;transform:translateX(-50%);bottom:32px;max-width:420px}
+}
+</style>
+</head>
+<body>
+<div id="aparelho" class="sem-abas">
+  <header id="topo"></header>
+  <main id="tela"></main>
+  <nav id="abas" aria-label="Navegação principal"></nav>
+  <div id="aviso-flutuante" role="status"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.104.1"></script>
+<script src="../config.js"></script>
+<script src="config.js"></script>
+<script>
+/* =====================================================================
+   Área do cliente · Celeiro Administradora
+   Mesmas telas e módulos do app, com conta real no Supabase do site.
+   Mapa: Ícones > Estado > Serviços (Supabase, Office) > Peças > Telas (T)
+         > Desenho > Ações (A) > Formulários (F) > Início
+   ===================================================================== */
+
+/* ---------- Ícones e utilidades ---------- */
+const P={
+  inicio:'<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
+  video:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/>',
+  assinar:'<path d="M4 20h16"/><path d="M6 16l9-9 3 3-9 9H6z"/>',
+  perfil:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+  voltar:'<path d="M15 5l-7 7 7 7"/>',
+  seta:'<path d="M9 5l7 7-7 7"/>',
+  play:'<path d="M8 5l11 7-11 7z" fill="currentColor"/>',
+  mais:'<path d="M12 5v14M5 12h14"/>',
+  ok:'<path d="M5 12l5 5 9-10"/>',
+  lixo:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  carro:'<path d="M5 13l1.6-4.6A2 2 0 018.5 7h7a2 2 0 011.9 1.4L19 13"/><rect x="3" y="13" width="18" height="5" rx="1.5"/><path d="M6.5 18v2M17.5 18v2"/>',
+  raio:'<path d="M13 2L5 14h6l-1 8 9-12h-6z"/>',
+  conta:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/>'
+};
+const ic=n=>`<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+const mono=()=>`<svg class="mono" viewBox="0 0 388.57 148.31" role="img" aria-label="Monograma CE"><path d="M175.01 0H74.15a74.15 74.15 0 0 0 0 148.31h81.28l28.48-35.6H74.15a38.56 38.56 0 0 1 0-77.12h72.38z"/><path d="M207.63 0h180.94l-28.48 35.59H243.23v77.12h145.34l-28.48 35.6H165.81l28.48-35.6h13.34z"/><path class="barra" d="M289.5 56.36h84.24l-28.48 35.59h-84.23z"/></svg>`;
+const assH=()=>`<span class="ass-h" aria-label="Celeiro Administradora"><span class="m">${mono()}</span><span class="fio"></span><span class="nome"><span class="n1">CELEIRO</span><span class="n2">Administradora</span></span></span>`;
+const assV=()=>`<div class="ass-v" aria-label="Celeiro Administradora"><span class="m">${mono()}</span><span class="n1">CELEIRO</span><span class="n2">Administradora</span></div>`;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n=x=>Number(x).toLocaleString('pt-BR');
+const dia=iso=>{if(!iso)return '';const s=String(iso);if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s.split('-').reverse().join('/');return new Date(s).toLocaleDateString('pt-BR')};
+const emailOk=e=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+const soDigitos=s=>String(s||'').replace(/\D/g,'');
+const codigo=p=>p+'-'+Math.random().toString(36).slice(2,10).toUpperCase().padEnd(8,'0');
+function cpfOk(c){const d=soDigitos(c);if(d.length!==11||/^(\d)\1{10}$/.test(d))return false;
+  const dv=q=>{let s=0;for(let i=0;i<q;i++)s+=+d[i]*(q+1-i);const r=(s*10)%11;return r===10?0:r};
+  return dv(9)===+d[9]&&dv(10)===+d[10]}
+
+/* ---------- Estado ---------- */
+const CFG=window.CELEIRO_CONFIG||{},WEB=window.CELEIRO_CLIENTE||{};
+const sb=(window.supabase&&CFG.url&&CFG.anonKey)?window.supabase.createClient(CFG.url,CFG.anonKey):null;
+const MODS=['videos','assinaturas','veicular','energia','conta'];
+const MOD_DA_TELA={videos:'videos',video:'videos',peticoes:'assinaturas',peticao:'assinaturas',assinatura:'assinaturas',minhas:'assinaturas',veicular:'veicular',energia:'energia',conta:'conta'};
+const TIPOS={conta_digital:'Abertura de conta',cotacao_veicular:'Aquisição Veicular',migracao_energia:'Energia com Desconto'};
+const S={
+  conta:null,      // usuário do Supabase (id, email)
+  cliente:null,    // {nome, telefone}
+  admin:false, adminSemFator:false,
+  pilha:[{v:'abertura'}], erro:'', filtro:'Todos', busca:'',
+  videos:[], peticoes:[], pedidos:[],
+  modulos:{videos:true,assinaturas:true,veicular:true,energia:true,conta:true},
+  pendente:{},     // dados entre telas do acesso (e-mail aguardando código)
+  provedores:[]    // logins sociais ligados no Supabase (google, apple); lidos na abertura da página
+};
+const on=m=>!!S.modulos[m];
+const TERMOS_VERSAO='1.0'; // versão dos Termos de Uso e da Política de Privacidade (cliente/termos.html)
+const aceite=()=>({termos_versao:TERMOS_VERSAO,termos_aceitos_em:new Date().toISOString()});
+const LINK_TERMOS='<a class="link" href="termos.html#termos" target="_blank" rel="noopener">Termos de Uso</a>',LINK_PRIV='<a class="link" href="termos.html#privacidade" target="_blank" rel="noopener">Política de Privacidade</a>';
+
+/* ---------- Mensagens de erro em português ---------- */
+function traduz(e){
+  const m=String((e&&e.message)||e||'');
+  if(/Invalid login credentials/i.test(m))return 'E-mail ou senha incorretos.';
+  if(/Email not confirmed/i.test(m))return 'Confirme o seu e-mail antes de entrar.';
+  if(/already registered|already been registered/i.test(m))return 'Já existe uma conta com este e-mail. Entre ou recupere a senha.';
+  if(/rate limit|security purposes|too many/i.test(m))return 'Muitas tentativas em pouco tempo. Aguarde um minuto e tente de novo.';
+  if(/expired|invalid.*(token|otp)|otp.*invalid/i.test(m))return 'Código incorreto ou vencido. Confira ou peça um novo.';
+  if(/Password should|weak password|at least/i.test(m))return 'Senha fraca. Use pelo menos 8 caracteres, com letras e números.';
+  if(/same.*password|different from the old/i.test(m))return 'A nova senha precisa ser diferente da atual.';
+  if(/Signups not allowed|signup.*disabled/i.test(m))return 'O cadastro de novas contas está fechado no momento.';
+  if(/Failed to fetch|NetworkError|network/i.test(m))return 'Sem conexão. Confira a internet e tente de novo.';
+  if(/row-level security|permission denied/i.test(m))return 'Você não tem permissão para esta ação.';
+  if(/duplicate key/i.test(m))return 'Este registro já existe.';
+  return m&&/[áéíóúãõç]|^[A-ZÁÉÍÓÚ][a-záéíóúãõç]+ /.test(m)&&m.length<160?m:'Não foi possível concluir. Tente de novo em instantes.';
+}
+
+/* ---------- Envio ao Celeiro Office (leads e solicitações) ---------- */
+const Office={
+  async enviar(tipo,dados){
+    if(!WEB.officeUrl||!WEB.officeKey||!S.conta)return false;
+    try{
+      const r=await fetch(WEB.officeUrl+'/rest/v1/rpc/app_registrar',{method:'POST',
+        headers:{apikey:WEB.officeKey,Authorization:'Bearer '+WEB.officeKey,'Content-Type':'application/json'},
+        body:JSON.stringify({p_tipo:tipo,p_dispositivo:'web-'+S.conta.id.slice(0,18),p_dados:{...dados,canal:'web',teste:!!WEB.teste}})});
+      return r.ok;
+    }catch(_){return false}
+  },
+  async modulos(){
+    if(!WEB.officeUrl||!WEB.officeKey)return;
+    try{
+      const r=await fetch(WEB.officeUrl+'/rest/v1/rpc/app_config',{method:'POST',
+        headers:{apikey:WEB.officeKey,Authorization:'Bearer '+WEB.officeKey,'Content-Type':'application/json'},body:'{}'});
+      if(!r.ok)return;
+      const j=await r.json();
+      (j.modulos||[]).forEach(m=>{if(MODS.includes(m.codigo))S.modulos[m.codigo]=!!m.habilitado});
+    }catch(_){}
+  }
+};
+
+/* ---------- Dados ---------- */
+async function carregar(){
+  const [v,p,s,a,f]=await Promise.all([
+    sb.from('videos').select('*').order('criado_em',{ascending:false}),
+    sb.rpc('abaixo_listar'),
+    sb.from('solicitacoes').select('*').order('criado_em',{ascending:false}),
+    sb.from('administradores').select('user_id').maybeSingle(),
+    sb.auth.mfa.getAuthenticatorAssuranceLevel(),
+    Office.modulos()
+  ]);
+  S.videos=v.data||[]; S.peticoes=p.data||[]; S.pedidos=s.data||[];
+  const ehAdm=!!(a&&a.data), aal2=!!(f&&f.data&&f.data.currentLevel==='aal2');
+  S.admin=ehAdm&&aal2; S.adminSemFator=ehAdm&&!aal2;
+  S.falhaDados=!!(v.error||p.error||s.error);
+  // reenvia ao Office o que ficou pendente
+  for(const x of S.pedidos.filter(x=>!x.enviado_office).slice(0,5)){
+    const ex={};
+    if(x.dados&&x.dados.fatura_arquivo){const lk=await sb.storage.from('faturas').createSignedUrl(x.dados.fatura_arquivo,30*24*3600);if(lk.data&&lk.data.signedUrl)ex.fatura_link=lk.data.signedUrl}
+    if(await Office.enviar(x.tipo,{...x.dados,...ex,nome:S.cliente&&S.cliente.nome,email:S.conta.email,protocolo:x.protocolo})){
+      const u=await sb.from('solicitacoes').update({enviado_office:true}).eq('id',x.id);
+      if(!u.error)x.enviado_office=true;
+    }
+  }
+}
+async function recarregarPeticoes(){const p=await sb.rpc('abaixo_listar');if(!p.error)S.peticoes=p.data||[]}
+
+// Depois de entrar: garante o cadastro do cliente e abre a área
+async function entrarNaArea(novo){
+  const u=(await sb.auth.getUser()).data.user;
+  if(!u){S.pilha=[{v:'abertura'}];desenhar();return}
+  S.conta={id:u.id,email:u.email,provedor:(u.app_metadata&&u.app_metadata.provider)||'email'};
+  let c=await sb.from('clientes').select('nome,telefone').eq('user_id',u.id).maybeSingle();
+  if(!c.data){
+    const m=u.user_metadata||{},nomeMeta=String(m.nome||m.full_name||m.name||'').trim();
+    if(nomeMeta.length>=3){
+      const i=await sb.from('clientes').insert({user_id:u.id,nome:nomeMeta.slice(0,120),telefone:m.telefone||null,...aceite()}).select('nome,telefone').single();
+      if(!i.error){c=i;novo=true}
+    }
+  }
+  if(!c.data){S.cliente=null;S.pilha=[{v:'completar'}];desenhar();return}
+  S.cliente=c.data;
+  if(novo)Office.enviar('lead',{nome:S.cliente.nome,email:S.conta.email,telefone:S.cliente.telefone||'',metodo:S.conta.provedor==='email'?'e-mail e senha':NOME_PROVEDOR[S.conta.provedor]||S.conta.provedor});
+  await carregar();
+  S.pilha=[{v:'inicio'}];desenhar();
+  if(S.falhaDados)avisar('Parte do conteúdo não carregou. Atualize a página.');
+}
+
+/* ---------- Navegação ---------- */
+const RAIZ=['inicio','videos','peticoes','perfil'];
+const FORA=['abertura','login','cadastro','confirmar','recuperar','novaSenha','completar'];
+const atual=()=>S.pilha[S.pilha.length-1];
+function ir(v,p={}){S.erro='';S.pilha.push({v,...p});desenhar()}
+function aba(v){S.erro='';S.pilha=[{v}];desenhar()}
+function voltar(){S.erro='';if(S.pilha.length>1)S.pilha.pop();desenhar()}
+function trocar(v,p={}){S.erro='';S.pilha[S.pilha.length-1]={v,...p};desenhar()}
+let tAviso;
+function avisar(m){const a=document.getElementById('aviso-flutuante');a.textContent=m;a.classList.add('ver');clearTimeout(tAviso);tAviso=setTimeout(()=>a.classList.remove('ver'),3200)}
+
+/* ---------- Peças ---------- */
+const capa=()=>`<span class="capa"><span class="play">${ic('play')}</span></span>`;
+const itemVideo=v=>`<button class="item-video" data-a="abrir-video" data-id="${esc(v.id)}">${capa()}
+  <span class="pilha" style="gap:4px"><h3>${esc(v.titulo)}</h3><span class="apoio">${esc(v.categoria)} · ${dia(v.criado_em)}</span></span></button>`;
+const pct=p=>Math.min(100,Math.round(p.total/p.meta*100));
+const cartaoPeticao=p=>`<button class="cartao" data-a="abrir-peticao" data-id="${esc(p.id)}">
+  <span class="fila" style="justify-content:space-between"><span class="rotulo">${p.aberto?'Até '+dia(p.prazo):'Encerrado'}</span>${p.minha?'<span class="selo cheio">Você assinou</span>':''}</span>
+  <h3>${esc(p.titulo)}</h3><span class="apoio">${esc(p.resumo)}</span>
+  <span class="progresso"><i style="width:${pct(p)}%"></i></span>
+  <span class="apoio num"><b style="color:var(--tinta)">${n(p.total)}</b> de ${n(p.meta)} assinaturas · ${pct(p)}%</span></button>`;
+const campo=(id,rot,tipo='text',v='',extra='')=>`<div class="campo"><label for="${id}">${rot}</label><input id="${id}" type="${tipo}" value="${esc(v)}" ${extra}></div>`;
+const erro=()=>S.erro?`<p class="erro" role="alert">${esc(S.erro)}</p>`:'';
+const NOME_PROVEDOR={google:'Google',apple:'Apple'};
+const sociais=verbo=>S.provedores.length?`<div class="divisor">ou</div><div class="pilha">${S.provedores.map(p=>`<button class="btn" type="button" data-a="social" data-p="${p}">${verbo} com ${NOME_PROVEDOR[p]}</button>`).join('')}</div>
+  <p class="apoio" style="text-align:center">Ao continuar com ${S.provedores.map(p=>NOME_PROVEDOR[p]).join(' ou ')}, você aceita os ${LINK_TERMOS} e a ${LINK_PRIV}.</p>`:'';
+const linhaDado=(r,v)=>`<div class="linha" style="padding:4px 0"><span class="cresce apoio">${r}</span><b class="num" style="text-align:right;overflow-wrap:anywhere">${esc(v)}</b></div>`;
+function embutir(url){
+  let m=String(url).match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{6,})/);
+  if(m)return 'https://www.youtube-nocookie.com/embed/'+m[1];
+  m=String(url).match(/vimeo\.com\/(?:video\/)?(\d+)/);
+  if(m)return 'https://player.vimeo.com/video/'+m[1];
+  return null;
+}
+
+/* ---------- Telas ---------- */
+const T={
+abertura:()=>({semTopo:true,verde:true,estreita:true,html:`
+  <div class="abertura">
+    <div class="pilha centro" style="gap:18px;margin-top:56px">
+      ${assV()}
+      <h2 style="margin-top:36px">Os serviços da Celeiro em um só lugar.</h2>
+      <p class="apoio" style="font-size:14.5px">Área exclusiva para clientes cadastrados. Acompanhe os conteúdos e solicite os serviços da Celeiro.</p>
+    </div>
+    <div class="pilha">
+      ${sb?'':'<p class="erro">A área do cliente ainda não está ligada ao banco de dados. Confira o arquivo config.js.</p>'}
+      <button class="btn cheio" data-a="ir" data-v="login">Entrar</button>
+      <button class="btn" data-a="ir" data-v="cadastro">Criar conta</button>
+      <a class="btn claro" href="../">Voltar ao site</a>
+    </div>
+  </div>`}),
+
+login:()=>({titulo:'Entrar',estreita:true,html:`
+  <h2>Acesse sua conta</h2>
+  ${atual().motivo?`<p class="aviso">${esc(atual().motivo)}</p>`:''}
+  <form class="pilha" data-form="login" novalidate>
+    ${campo('l-email','E-mail','email',S.pendente.email||'','autocomplete="email" placeholder="voce@exemplo.com.br"')}
+    ${campo('l-senha','Senha','password','','autocomplete="current-password"')}
+    ${erro()}
+    <button class="btn cheio" type="submit">Entrar</button>
+    <button class="link" type="button" data-a="ir" data-v="recuperar" style="align-self:center">Esqueci minha senha</button>
+  </form>
+  ${sociais('Entrar')}
+  <p class="apoio" style="text-align:center">Ainda não tem conta? <button class="link" data-a="trocar" data-v="cadastro">Criar conta</button></p>`}),
+
+cadastro:()=>({titulo:'Criar conta',estreita:true,html:`
+  <h2>Cadastre-se</h2>
+  <form class="pilha" data-form="cadastro" novalidate>
+    ${campo('c-nome','Nome completo','text','','autocomplete="name"')}
+    ${campo('c-email','E-mail','email','','autocomplete="email"')}
+    ${campo('c-tel','Celular','tel','','autocomplete="tel" placeholder="(00) 00000-0000"')}
+    ${campo('c-senha','Senha (mínimo de 8 caracteres)','password','','autocomplete="new-password"')}
+    ${campo('c-senha2','Repita a senha','password','','autocomplete="new-password"')}
+    <label class="fila apoio" style="flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="c-termos" style="margin-top:3px"> <span>Li e aceito os ${LINK_TERMOS} e a ${LINK_PRIV}.</span></label>
+    ${erro()}
+    <button class="btn cheio" type="submit">Criar conta</button>
+  </form>
+  ${sociais('Cadastrar')}
+  <p class="apoio" style="text-align:center">Já tem conta? <button class="link" data-a="trocar" data-v="login">Entrar</button></p>`}),
+
+confirmar:()=>({titulo:'Confirmar e-mail',estreita:true,html:`
+  <h2>Digite o código que enviamos</h2>
+  <p class="apoio">Enviamos um código para <b style="color:var(--tinta);overflow-wrap:anywhere">${esc(S.pendente.email||'')}</b>. Ele confirma que o e-mail é seu e libera a entrada.</p>
+  <form class="pilha" data-form="confirmar" novalidate>
+    ${campo('k-cod','Código','text','','inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="000000"')}
+    ${erro()}
+    <button class="btn cheio" type="submit">Confirmar e entrar</button>
+    <button class="btn claro" type="button" data-a="reenviar-codigo">Reenviar o código</button>
+  </form>
+  <p class="apoio">Não chegou? Confira a caixa de spam. Se já tinha conta com este e-mail, use Entrar.</p>`}),
+
+recuperar:()=>({titulo:'Recuperar senha',estreita:true,html:`
+  <h2>Esqueceu a senha?</h2>
+  <p class="apoio">Informe o e-mail da sua conta. Enviaremos um código para você criar uma senha nova.</p>
+  <form class="pilha" data-form="recuperar" novalidate>
+    ${campo('r-email','E-mail','email',S.pendente.email||'','autocomplete="email"')}
+    ${erro()}<button class="btn cheio" type="submit">Enviar código</button></form>`}),
+
+novaSenha:()=>({titulo:'Nova senha',estreita:true,html:`
+  <h2>Crie uma senha nova</h2>
+  <p class="apoio">Digite o código enviado para <b style="color:var(--tinta);overflow-wrap:anywhere">${esc(S.pendente.email||'')}</b> e a senha nova.</p>
+  <form class="pilha" data-form="novaSenha" novalidate>
+    ${campo('n-cod','Código','text','','inputmode="numeric" autocomplete="one-time-code" maxlength="10"')}
+    ${campo('n-senha','Senha nova (mínimo de 8 caracteres)','password','','autocomplete="new-password"')}
+    ${campo('n-senha2','Repita a senha nova','password','','autocomplete="new-password"')}
+    ${erro()}<button class="btn cheio" type="submit">Salvar e entrar</button></form>`}),
+
+completar:()=>({titulo:'Complete seu cadastro',estreita:true,semVoltar:true,html:`
+  <h2>Falta pouco</h2>
+  <p class="apoio">Informe seus dados para usar a área do cliente.</p>
+  <form class="pilha" data-form="completar" novalidate>
+    ${campo('o-nome','Nome completo','text','','autocomplete="name"')}
+    ${campo('o-tel','Celular','tel','','autocomplete="tel" placeholder="(00) 00000-0000"')}
+    <p class="apoio">Ao continuar, você aceita os ${LINK_TERMOS} e a ${LINK_PRIV}.</p>
+    ${erro()}<button class="btn cheio" type="submit">Continuar</button>
+    <button class="btn claro" type="button" data-a="sair">Sair</button></form>`}),
+
+inicio:()=>{
+  const d=S.videos[0];
+  const temConta=S.pedidos.some(x=>x.tipo==='conta_digital');
+  const serv=[['veicular','carro','Aquisição Veicular','Solicite uma proposta para o seu veículo'],['energia','raio','Energia com Desconto','Peça uma análise da sua fatura de energia'],['conta','conta','Abra sua conta digital',temConta?'Acompanhe a sua solicitação':'Envie seus dados e acompanhe a abertura']].filter(x=>on(x[0]));
+  const abertas=S.peticoes.filter(p=>p.aberto).slice(0,2);
+  return {marca:true,html:`
+  <div class="pilha" style="gap:4px"><span class="apoio">Olá, ${esc(S.cliente.nome.split(' ')[0])}</span><h2>O que há de novo</h2></div>
+  ${serv.length?`<section class="sec"><span class="rotulo">Serviços</span><nav class="servicos lista" aria-label="Serviços">
+    ${serv.map(([v,i,t,de])=>`<button class="linha" data-a="ir" data-v="${v}"><span class="servico-ic">${ic(i)}</span><span class="cresce"><b>${t}</b><br><span class="apoio">${de}</span></span>${ic('seta')}</button>`).join('')}
+  </nav></section>`:''}
+  ${on('videos')&&d?`<section class="sec"><span class="rotulo">Vídeo em destaque</span>
+    <button class="pilha" style="text-align:left" data-a="abrir-video" data-id="${esc(d.id)}">${capa()}<h3>${esc(d.titulo)}</h3><span class="apoio">${esc(d.categoria)} · ${dia(d.criado_em)}</span></button></section>`:''}
+  ${on('assinaturas')&&abertas.length?`<section class="sec"><div class="sec-topo"><h3>Abaixo-assinados em andamento</h3><button class="link" data-a="aba" data-v="peticoes">Ver todos</button></div>
+    <div class="grade2">${abertas.map(cartaoPeticao).join('')}</div></section>`:''}
+  ${on('videos')&&S.videos.length>1?`<section class="sec"><div class="sec-topo"><h3>Vídeos recentes</h3><button class="link" data-a="aba" data-v="videos">Ver todos</button></div>
+    <div class="grade2">${S.videos.slice(1,5).map(itemVideo).join('')}</div></section>`:''}
+  <button class="cartao" data-a="ir" data-v="sobre"><span class="rotulo">Quem somos</span><span>A Celeiro Administradora promove a gestão e administração de grandes estruturas empresariais.</span><span class="link">Conhecer a Celeiro</span></button>`}},
+
+videos:()=>{
+  const cats=['Todos',...new Set(S.videos.map(v=>v.categoria))];
+  const b=S.busca.trim().toLowerCase();
+  const l=S.videos.filter(v=>(S.filtro==='Todos'||v.categoria===S.filtro)&&(!b||(v.titulo+' '+v.descricao).toLowerCase().includes(b)));
+  return {titulo:'Vídeos',html:`
+  <div class="campo"><label for="busca" class="apoio">Buscar vídeo</label><input id="busca" type="search" value="${esc(S.busca)}" placeholder="Título ou assunto"></div>
+  <div class="chips">${cats.map(c=>`<button class="chip" aria-pressed="${c===S.filtro}" data-a="filtro" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+  <div class="grade2">${l.length?l.map(itemVideo).join(''):`<p class="apoio">${S.videos.length?'Nenhum vídeo encontrado. Tente outro termo ou categoria.':'Ainda não há vídeos publicados.'}</p>`}</div>`}},
+
+video:()=>{
+  const v=S.videos.find(x=>x.id===atual().id); if(!v)return{titulo:'Vídeo',html:'<p>Este vídeo não está mais disponível.</p>'};
+  const emb=v.origem==='link'?embutir(v.url):null;
+  const tocador=emb?`<span class="capa"><iframe src="${esc(emb)}" title="${esc(v.titulo)}" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></span>`
+    :(v.src||v.origem==='link')?`<span class="capa"><video src="${esc(v.src||v.url)}" controls playsinline controlslist="nodownload"></video></span>`
+    :`<span class="capa"><span class="txt" style="position:static;opacity:1;padding:16px;text-align:center">Não foi possível abrir este vídeo. Tente de novo em instantes.</span></span>`;
+  const outros=S.videos.filter(x=>x.id!==v.id&&x.categoria===v.categoria).slice(0,3);
+  return {titulo:'Vídeo',html:`
+  ${tocador}
+  <div class="pilha" style="gap:6px"><span class="fila"><span class="selo">${esc(v.categoria)}</span><span class="apoio">${dia(v.criado_em)}</span></span><h2>${esc(v.titulo)}</h2></div>
+  <p class="texto-longo">${esc(v.descricao)}</p>
+  ${outros.length?`<section class="sec"><h3>Mais em ${esc(v.categoria)}</h3>${outros.map(itemVideo).join('')}</section>`:''}`}},
+
+peticoes:()=>({titulo:'Abaixo-assinados',html:`
+  <p class="apoio">Cada assinatura fica ligada à sua conta, ao seu CPF e à data e hora em que foi feita.</p>
+  ${S.peticoes.length?`<div class="grade2">${S.peticoes.map(cartaoPeticao).join('')}</div>`:'<p class="apoio">Nenhum abaixo-assinado aberto no momento.</p>'}`}),
+
+peticao:()=>{
+  const p=S.peticoes.find(x=>x.id===atual().id); if(!p)return{titulo:'Abaixo-assinado',html:'<p>Este abaixo-assinado não está mais disponível.</p>'};
+  return {titulo:'Abaixo-assinado',html:`
+  <div class="pilha" style="gap:6px"><span class="rotulo">${p.aberto?'Aberto até '+dia(p.prazo):'Encerrado'}</span><h2>${esc(p.titulo)}</h2></div>
+  <div class="cartao"><span class="num" style="font-size:28px;font-weight:600;line-height:1">${n(p.total)}</span>
+    <span class="apoio num">assinaturas de uma meta de ${n(p.meta)}</span>
+    <span class="progresso"><i style="width:${pct(p)}%"></i></span></div>
+  <p class="texto-longo">${esc(p.texto)}</p>
+  ${p.minha?`<div class="aviso pilha" style="gap:4px"><b>Você assinou em ${dia(p.minha.data)}</b><span class="num">Protocolo ${esc(p.minha.protocolo)}</span></div>`
+    :p.aberto?`<button class="btn cheio" data-a="ir" data-v="assinatura" data-id="${esc(p.id)}">${ic('assinar')} Assinar</button>`
+    :'<p class="aviso">Este abaixo-assinado foi encerrado e não recebe novas assinaturas.</p>'}
+  ${p.ultimas.length?`<section class="sec"><h3>Últimas assinaturas</h3><div class="lista">${p.ultimas.map(s=>`<div class="linha"><span class="cresce">${esc(s.nome)}</span><span class="apoio num">${dia(s.data)}</span></div>`).join('')}</div></section>`:''}`}},
+
+assinatura:()=>{
+  const p=S.peticoes.find(x=>x.id===atual().id);
+  if(!p)return{titulo:'Assinar',html:'<p>Este abaixo-assinado não está mais disponível.</p>'};
+  if(atual().etapa===3)return {titulo:'Assinatura registrada',semVoltar:true,html:`
+    <div class="pilha centro" style="gap:14px;margin-top:20px"><span class="avatar realce">${ic('ok')}</span><h2>Assinatura registrada</h2>
+    <p class="apoio">Sua assinatura em “${esc(p.titulo)}” foi registrada.</p></div>
+    <div class="cartao">${linhaDado('Protocolo',p.minha?p.minha.protocolo:'')}${linhaDado('Data',p.minha?dia(p.minha.data):'')}${linhaDado('Assinante',S.cliente.nome)}</div>
+    <button class="btn cheio" data-a="aba" data-v="peticoes">Ver abaixo-assinados</button>`};
+  return {titulo:'Assinar',html:`
+    <h2>Confira e assine</h2>
+    <div class="cartao"><span class="rotulo">Documento</span><h3>${esc(p.titulo)}</h3></div>
+    <div class="cartao"><span class="rotulo">Assinante</span><b>${esc(S.cliente.nome)}</b><span class="apoio" style="overflow-wrap:anywhere">${esc(S.conta.email)}</span></div>
+    <form class="pilha" data-form="assinar" novalidate>
+      ${campo('a-cpf','Seu CPF','text','','inputmode="numeric" autocomplete="off" placeholder="000.000.000-00"')}
+      ${S.conta.provedor==='email'?campo('a-senha','Sua senha, para confirmar que é você','password','','autocomplete="current-password"'):''}
+      <p class="apoio">A assinatura registra seu nome, CPF, data, hora e endereço de rede (IP). Na lista pública aparece só o primeiro nome e a inicial do sobrenome. Depois de assinar, não é possível retirar a assinatura por aqui.</p>
+      ${erro()}
+      <button class="btn cheio" type="submit">Assinar</button><button class="btn claro" type="button" data-a="voltar">Cancelar</button>
+    </form>`}},
+
+veicular:()=>({titulo:'Aquisição Veicular',html:`
+  <h2>Solicite uma proposta para o seu veículo</h2>
+  <p class="apoio">Conte o que você procura. A equipe da Celeiro analisa e retorna o contato.</p>
+  <form class="pilha" data-form="veicular" novalidate>
+    ${campo('s-tel','Celular para contato','tel',S.cliente.telefone||'','autocomplete="tel" placeholder="(00) 00000-0000"')}
+    <div class="campo"><label for="s-veic">Tipo de veículo</label><select id="s-veic">${['Carro','Moto','Caminhão','Utilitário','Outro'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div class="campo"><label for="s-cond">Condição</label><select id="s-cond"><option>Novo</option><option>Usado</option></select></div>
+    ${campo('s-valor','Valor aproximado do veículo (R$)','text','','inputmode="numeric" placeholder="80.000"')}
+    ${campo('s-cidade','Cidade e UF','text','','placeholder="São Miguel do Oeste, SC"')}
+    ${erro()}<button class="btn cheio" type="submit">Solicitar proposta</button></form>`}),
+
+energia:()=>({titulo:'Energia com Desconto',html:`
+  <h2>Peça uma análise da sua fatura de energia</h2>
+  <p class="apoio">Informe os dados da unidade consumidora. A equipe da Celeiro avalia e retorna com as condições.</p>
+  <form class="pilha" data-form="energia" novalidate>
+    ${campo('s-tel','Celular para contato','tel',S.cliente.telefone||'','autocomplete="tel" placeholder="(00) 00000-0000"')}
+    <div class="campo"><label for="s-unid">Tipo de unidade</label><select id="s-unid">${['Residência','Comércio','Indústria','Condomínio','Propriedade rural'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    ${campo('s-dist','Distribuidora de energia','text','','placeholder="Nome que aparece na fatura"')}
+    ${campo('s-valor','Valor médio da fatura (R$)','text','','inputmode="numeric" placeholder="450"')}
+    <div class="campo"><label for="s-fatura">Cópia da fatura de energia (opcional; PDF ou foto, até 10 MB)</label><input id="s-fatura" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic"></div>
+    ${erro()}<button class="btn cheio" type="submit">Pedir análise</button></form>`}),
+
+pedidoOk:()=>({titulo:'Solicitação enviada',semVoltar:true,html:`
+  <div class="pilha centro" style="gap:14px;margin-top:20px"><span class="avatar realce">${ic('ok')}</span><h2>Recebemos a sua solicitação</h2>
+  <p class="apoio">${esc(atual().servico)} · protocolo <span class="num">${esc(atual().protocolo)}</span><br>A equipe da Celeiro entra em contato pelo celular informado.</p></div>
+  <button class="btn cheio" data-a="aba" data-v="inicio">Voltar ao início</button>
+  <button class="btn" data-a="ir" data-v="pedidos">Ver minhas solicitações</button>`}),
+
+conta:()=>{
+  const c=S.pedidos.find(x=>x.tipo==='conta_digital');
+  if(c)return{titulo:'Conta digital',html:`
+    <div class="pilha" style="gap:6px"><span class="rotulo">Solicitação ${esc(c.protocolo)}</span><h2>Em análise</h2></div>
+    <div class="cartao">${linhaDado('Titular',c.dados.nome||S.cliente.nome)}${linhaDado(c.dados.tipo_pessoa==='PJ'?'CNPJ':'CPF',c.dados.documento||'')}${linhaDado('Enviada em',dia(c.criado_em))}</div>
+    <ol class="etapas"><li class="feita">Dados enviados</li><li class="agora">Análise do pedido</li><li>Envio de documentos</li><li>Conta aberta</li></ol>
+    <p class="aviso">Seu pedido foi recebido pela Celeiro. A equipe entra em contato pelo celular ou e-mail informado para os próximos passos.</p>`};
+  const t=atual().tipo||'PF';
+  return{titulo:'Conta digital',html:`
+  <h2>Abra sua conta digital</h2>
+  <p class="apoio">Envie seus dados para análise. A conta é aberta por uma instituição financeira parceira da Celeiro.</p>
+  <form class="pilha" data-form="conta" novalidate>
+    <div class="campo"><label>Tipo de conta</label><div class="seg"><button type="button" aria-pressed="${t==='PF'}" data-a="tipo-conta" data-t="PF">Pessoa física</button><button type="button" aria-pressed="${t==='PJ'}" data-a="tipo-conta" data-t="PJ">Pessoa jurídica</button></div></div>
+    ${campo('k-doc',t==='PF'?'CPF':'CNPJ','text','','inputmode="numeric" placeholder="'+(t==='PF'?'000.000.000-00':'00.000.000/0000-00')+'"')}
+    ${campo('k-nome',t==='PF'?'Nome completo':'Razão social','text',t==='PF'?S.cliente.nome:'')}
+    ${t==='PF'?campo('k-nasc','Data de nascimento','date'):campo('k-resp','Nome do responsável legal','text',S.cliente.nome)}
+    ${campo('k-tel','Celular','tel',S.cliente.telefone||'','placeholder="(00) 00000-0000"')}
+    <label class="fila apoio" style="flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="k-ok" style="margin-top:3px"> <span>Autorizo a Celeiro a compartilhar estes dados com a instituição financeira parceira para a abertura da conta.</span></label>
+    ${erro()}<button class="btn cheio" type="submit">Enviar para análise</button></form>`}},
+
+perfil:()=>{
+  const u=S.cliente,qt=S.peticoes.filter(p=>p.minha).length;
+  return {titulo:'Perfil',html:`
+  <div class="fila" style="flex-wrap:nowrap"><span class="avatar">${esc(u.nome[0].toUpperCase())}</span>
+    <div class="pilha" style="gap:2px;min-width:0"><h2 style="font-size:19px;overflow-wrap:anywhere">${esc(u.nome)}</h2><span class="apoio" style="overflow-wrap:anywhere">${esc(S.conta.email)}</span><span><span class="selo">${S.conta.provedor==='email'?'E-mail confirmado':'Acesso por '+esc(NOME_PROVEDOR[S.conta.provedor]||S.conta.provedor)}</span></span></div></div>
+  <div class="lista">
+    <button class="linha" data-a="ir" data-v="dados"><span class="cresce">Meus dados</span>${ic('seta')}</button>
+    <button class="linha" data-a="ir" data-v="pedidos"><span class="cresce">Minhas solicitações</span><span class="apoio num">${S.pedidos.length}</span>${ic('seta')}</button>
+    ${on('assinaturas')?`<button class="linha" data-a="ir" data-v="minhas"><span class="cresce">Minhas assinaturas</span><span class="apoio num">${qt}</span>${ic('seta')}</button>`:''}
+    ${S.conta.provedor==='email'?`<button class="linha" data-a="ir" data-v="senha"><span class="cresce">Trocar senha</span>${ic('seta')}</button>`:''}
+    <button class="linha" data-a="ir" data-v="sobre"><span class="cresce">Quem somos</span>${ic('seta')}</button>
+    ${S.admin?`<button class="linha" data-a="ir" data-v="admin"><span class="cresce"><b>Administrar conteúdo</b></span>${ic('seta')}</button>`:''}
+  </div>
+  ${S.adminSemFator?'<p class="aviso">Você é administrador do site. Para administrar o conteúdo desta área, entre pelo login do site, com o autenticador, e volte a esta página.</p>':''}
+  <button class="btn" data-a="sair">Sair da conta</button>
+  <p class="apoio" style="text-align:center">${LINK_TERMOS} · ${LINK_PRIV} · <a class="link" href="../">Voltar ao site</a></p>`}},
+
+dados:()=>({titulo:'Meus dados',estreita:true,html:`
+  <form class="pilha" data-form="dados" novalidate>
+    ${campo('d-nome','Nome completo','text',S.cliente.nome,'autocomplete="name"')}
+    ${campo('d-tel','Celular','tel',S.cliente.telefone||'','autocomplete="tel"')}
+    <div class="campo"><label for="d-email">E-mail (usado para entrar)</label><input id="d-email" type="email" value="${esc(S.conta.email)}" disabled></div>
+    ${erro()}<button class="btn cheio" type="submit">Salvar alterações</button></form>`}),
+
+senha:()=>({titulo:'Trocar senha',estreita:true,html:`
+  <form class="pilha" data-form="senha" novalidate>
+    ${campo('t-atual','Senha atual','password','','autocomplete="current-password"')}
+    ${campo('t-nova','Senha nova (mínimo de 8 caracteres)','password','','autocomplete="new-password"')}
+    ${campo('t-nova2','Repita a senha nova','password','','autocomplete="new-password"')}
+    ${erro()}<button class="btn cheio" type="submit">Trocar senha</button></form>`}),
+
+minhas:()=>{
+  const l=S.peticoes.filter(p=>p.minha);
+  return {titulo:'Minhas assinaturas',html:l.length?`<div class="lista">${l.map(p=>
+    `<button class="linha" data-a="abrir-peticao" data-id="${esc(p.id)}"><span class="cresce"><b>${esc(p.titulo)}</b><br><span class="apoio num">${dia(p.minha.data)} · ${esc(p.minha.protocolo)}</span></span>${ic('seta')}</button>`).join('')}</div>`
+    :`<p class="apoio">Você ainda não assinou nenhum abaixo-assinado.</p><button class="btn cheio" data-a="aba" data-v="peticoes">Ver abaixo-assinados</button>`}},
+
+pedidos:()=>({titulo:'Minhas solicitações',html:S.pedidos.length?`<div class="lista">${S.pedidos.map(x=>
+  `<div class="linha"><span class="cresce"><b>${esc(TIPOS[x.tipo]||x.tipo)}</b><br><span class="apoio num">${dia(x.criado_em)} · ${esc(x.protocolo)}${x.dados&&x.dados.fatura_arquivo?' · fatura anexada':''}</span></span><span class="selo">Recebida</span></div>`).join('')}</div>`
+  :'<p class="apoio">Você ainda não fez nenhuma solicitação. Os serviços ficam na tela de início.</p>'}),
+
+sobre:()=>({titulo:'Quem somos',html:`
+  <div class="sobre-verde">${assV()}</div>
+  <p class="texto-longo">A Celeiro Administradora tem como missão promover a gestão e administração de grandes estruturas empresariais, atuando nas áreas de comercialização de energia, construção de unidades geradoras, incorporação, construção e gestão imobiliária, estruturação financeira, cobranças e divulgação de produtos e serviços.</p>
+  <section class="sec"><h3>Áreas de atuação</h3><div class="lista">
+    ${['Comercialização de energia elétrica','Construção de unidades geradoras','Incorporação, construção e gestão imobiliária','Estruturação de operações financeiras','Cobranças','Divulgação de produtos e serviços'].map(a=>`<div class="linha"><span class="cresce">${a}</span></div>`).join('')}</div></section>`}),
+
+/* ----- Administração do conteúdo (administrador do site, com autenticador) ----- */
+admin:()=>{
+  const seg=atual().seg||'videos';
+  return {titulo:'Administrar conteúdo',html:`
+  <div class="chips quebra">${[['videos','Vídeos'],['peticoes','Abaixo-assinados']].map(([c,r])=>`<button class="chip" aria-pressed="${seg===c}" data-a="seg" data-s="${c}">${r}</button>`).join('')}</div>
+  ${seg==='videos'?`
+    <button class="btn cheio" data-a="ir" data-v="novoVideo">${ic('mais')} Publicar vídeo</button>
+    ${S.videos.length?`<div class="lista">${S.videos.map(v=>`<div class="linha"><span class="cresce"><b>${esc(v.titulo)}</b><br><span class="apoio">${esc(v.categoria)} · ${v.origem==='link'?'Link externo':'Arquivo enviado'} · ${dia(v.criado_em)}</span></span>
+      <button class="icone-btn" aria-label="Excluir ${esc(v.titulo)}" data-a="excluir-video" data-id="${esc(v.id)}">${ic('lixo')}</button></div>`).join('')}</div>`:'<p class="apoio">Nenhum vídeo publicado.</p>'}`
+  :`<button class="btn cheio" data-a="ir" data-v="novaPeticao">${ic('mais')} Criar abaixo-assinado</button>
+    ${S.peticoes.length?`<div class="lista">${S.peticoes.map(p=>`<button class="linha" data-a="abrir-assinantes" data-id="${esc(p.id)}"><span class="cresce"><b>${esc(p.titulo)}</b><br><span class="apoio num">${n(p.total)} de ${n(p.meta)} · ${p.aberto?'até '+dia(p.prazo):'encerrado'}</span></span>${ic('seta')}</button>`).join('')}</div>`:'<p class="apoio">Nenhum abaixo-assinado criado.</p>'}`}
+  <p class="aviso">Solicitações de serviço, leads e a chave que liga ou desliga cada módulo ficam no Celeiro Office, na tela Aplicativo.</p>`}},
+
+novoVideo:()=>{
+  const o=atual().origem||'link';
+  return {titulo:'Publicar vídeo',estreita:true,html:`
+  <form class="pilha" data-form="video" novalidate>
+    <div class="campo"><label>Origem do vídeo</label><div class="seg"><button type="button" aria-pressed="${o==='link'}" data-a="origem" data-o="link">Link externo</button><button type="button" aria-pressed="${o==='arquivo'}" data-a="origem" data-o="arquivo">Enviar arquivo</button></div></div>
+    ${o==='arquivo'?`<div class="campo"><label for="v-arq">Arquivo de vídeo (até 50 MB)</label><input id="v-arq" type="file" accept="video/mp4,video/webm,video/quicktime"></div>`
+      :campo('v-url','Link do YouTube, do Vimeo ou do arquivo de vídeo','url','','placeholder="https://"')}
+    ${campo('v-titulo','Título')}
+    <div class="campo"><label for="v-desc">Descrição</label><textarea id="v-desc"></textarea></div>
+    <div class="campo"><label for="v-cat">Categoria</label><select id="v-cat">${['Institucional','Energia','Financeiro','Imobiliário','Veículos'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    ${erro()}<button class="btn cheio" type="submit">Publicar</button></form>`}},
+
+novaPeticao:()=>({titulo:'Criar abaixo-assinado',estreita:true,html:`
+  <form class="pilha" data-form="peticao" novalidate>
+    ${campo('p-titulo','Título')}
+    ${campo('p-resumo','Resumo em uma frase')}
+    <div class="campo"><label for="p-texto">Texto do abaixo-assinado</label><textarea id="p-texto" style="min-height:140px"></textarea></div>
+    ${campo('p-meta','Meta de assinaturas','number','','min="1" inputmode="numeric"')}
+    ${campo('p-prazo','Aberto até','date')}
+    ${erro()}<button class="btn cheio" type="submit">Abrir para assinaturas</button></form>`}),
+
+assinantes:()=>{
+  const p=S.peticoes.find(x=>x.id===atual().id),l=atual().lista||[];
+  if(!p)return{titulo:'Assinantes',html:'<p>Abaixo-assinado não encontrado.</p>'};
+  return {titulo:'Assinantes',html:`
+  <h2>${esc(p.titulo)}</h2>
+  <div class="cartao"><span class="num" style="font-size:28px;font-weight:600;line-height:1">${n(p.total)}</span><span class="apoio num">de ${n(p.meta)} · ${p.aberto?'aberto até '+dia(p.prazo):'encerrado'}</span></div>
+  <div class="fila">${l.length?'<button class="btn curto" data-a="exportar-assinantes">Baixar lista (CSV)</button>':''}${p.aberto?`<button class="btn curto" data-a="encerrar" data-id="${esc(p.id)}">Encerrar abaixo-assinado</button>`:''}</div>
+  <section class="sec"><h3>Assinaturas</h3>${l.length?`<div class="lista">${l.map(s=>`<div class="linha"><span class="cresce">${esc(s.nome)}<br><span class="apoio num">CPF ${esc(s.cpf)} · ${esc(s.protocolo)}</span></span><span class="apoio num">${dia(s.criado_em)}</span></div>`).join('')}</div>`:'<p class="apoio">Ainda sem assinaturas.</p>'}</section>`}}
+};
+
+/* ---------- Desenho ---------- */
+function desenhar(){
+  if(MOD_DA_TELA[atual().v]&&!on(MOD_DA_TELA[atual().v]))S.pilha=[{v:'inicio'}];
+  if(!FORA.includes(atual().v)&&!S.cliente)S.pilha=[{v:'abertura'}];
+  const a=atual(),t=T[a.v](),raiz=RAIZ.includes(a.v),fora=FORA.includes(a.v);
+  const ap=document.getElementById('aparelho'),topo=document.getElementById('topo'),abas=document.getElementById('abas'),tela=document.getElementById('tela');
+  ap.classList.toggle('verde',!!t.verde);ap.classList.toggle('sem-abas',fora);ap.classList.toggle('interna',!raiz);ap.classList.toggle('so-marca',!!t.marca);
+  tela.classList.toggle('estreita',!!t.estreita);
+  topo.style.display=t.semTopo?'none':'';
+  topo.innerHTML=t.marca?assH():`${raiz||t.semVoltar?'':`<button class="icone-btn" data-a="voltar" aria-label="Voltar">${ic('voltar')}</button>`}<h1>${esc(t.titulo||'')}</h1>`;
+  tela.innerHTML=t.html;tela.scrollTop=0;
+  const itens=[['inicio','Início','inicio'],['videos','Vídeos','video','videos'],['peticoes','Assinaturas','assinar','assinaturas'],['perfil','Perfil','perfil']].filter(x=>!x[3]||on(x[3]));
+  abas.style.gridTemplateColumns='repeat('+itens.length+',1fr)';
+  const raizAtual=S.pilha[0].v;
+  abas.innerHTML=`<span class="marca-nav">${assH()}</span>`+itens.map(([v,r,i])=>`<button data-a="aba" data-v="${v}" ${raizAtual===v?'aria-current="page"':''}>${ic(i)}${r}</button>`).join('');
+}
+const val=id=>(document.getElementById(id)?.value||'').trim();
+function guardar(){const f={};document.querySelectorAll('#tela input,#tela textarea,#tela select').forEach(e=>{if(!e.id||e.type==='file'||e.type==='password')return;f[e.id]=e.type==='checkbox'?e.checked:e.value});return f}
+function falhar(m){S.erro=m;const f=guardar();desenhar();for(const k in f){const e=document.getElementById(k);if(!e)continue;if(e.type==='checkbox')e.checked=f[k];else e.value=f[k]}document.querySelector('.erro')?.scrollIntoView({block:'center'})}
+function ocupar(sim){document.querySelectorAll('#tela button[type=submit]').forEach(b=>{b.disabled=sim;b.setAttribute('aria-busy',sim?'true':'false')})}
+
+/* ---------- Ações ---------- */
+const A={
+  ir:d=>ir(d.v,d.id?{id:d.id}:{}), aba:d=>aba(d.v), voltar, trocar:d=>trocar(d.v),
+  filtro:d=>{S.filtro=d.c;desenhar()},
+  'abrir-peticao':d=>ir('peticao',{id:d.id}),
+  'abrir-video':async d=>{
+    const v=S.videos.find(x=>x.id===d.id);
+    if(v&&v.origem==='arquivo'&&!v.src){
+      const r=await sb.storage.from('videos').createSignedUrl(v.arquivo,3600);
+      if(r.data&&r.data.signedUrl)v.src=r.data.signedUrl;
+    }
+    ir('video',{id:d.id});
+  },
+  'tipo-conta':d=>trocar('conta',{tipo:d.t}),
+  seg:d=>trocar('admin',{seg:d.s}),
+  origem:d=>trocar('novoVideo',{origem:d.o}),
+  social:async d=>{
+    const r=await sb.auth.signInWithOAuth({provider:d.p,options:{redirectTo:location.origin+location.pathname}});
+    if(r.error)avisar(traduz(r.error));
+  },
+  'reenviar-codigo':async()=>{
+    const r=await sb.auth.resend({type:'signup',email:S.pendente.email});
+    avisar(r.error?traduz(r.error):'Enviamos um novo código para o seu e-mail.');
+  },
+  sair:async()=>{try{await sb.auth.signOut()}catch(_){}limpar();S.pilha=[{v:'abertura'}];desenhar()},
+  'excluir-video':async d=>{
+    const v=S.videos.find(x=>x.id===d.id);if(!v)return;
+    const r=await sb.from('videos').delete().eq('id',v.id).select('id');
+    if(r.error||!r.data||!r.data.length){avisar(r.error?traduz(r.error):'Você não tem permissão para excluir.');return}
+    if(v.origem==='arquivo')await sb.storage.from('videos').remove([v.arquivo]);
+    S.videos=S.videos.filter(x=>x.id!==v.id);desenhar();avisar('Vídeo excluído');
+  },
+  'abrir-assinantes':async d=>{
+    const r=await sb.from('assinaturas').select('nome,cpf,protocolo,criado_em').eq('abaixo_id',d.id).order('criado_em',{ascending:false}).limit(1000);
+    if(r.error){avisar(traduz(r.error));return}
+    ir('assinantes',{id:d.id,lista:r.data||[]});
+  },
+  'exportar-assinantes':()=>{
+    const p=S.peticoes.find(x=>x.id===atual().id),l=atual().lista||[];
+    const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
+    const csv='﻿'+['Nome;CPF;Protocolo;Data e hora'].concat(l.map(s=>[q(s.nome),q(s.cpf),q(s.protocolo),q(new Date(s.criado_em).toLocaleString('pt-BR'))].join(';'))).join('\r\n');
+    const u=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+    const a=document.createElement('a');a.href=u;a.download='assinantes-'+(p?p.titulo:'lista').toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000);
+  },
+  encerrar:async d=>{
+    const r=await sb.from('abaixo_assinados').update({aberto:false}).eq('id',d.id).select('id');
+    if(r.error||!r.data||!r.data.length){avisar(r.error?traduz(r.error):'Você não tem permissão para encerrar.');return}
+    await recarregarPeticoes();S.pilha=[{v:'perfil'},{v:'admin',seg:'peticoes'}];desenhar();avisar('Abaixo-assinado encerrado');
+  }
+};
+function limpar(){S.conta=null;S.cliente=null;S.admin=false;S.adminSemFator=false;S.videos=[];S.peticoes=[];S.pedidos=[];S.pendente={}}
+document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&A[el.dataset.a]){ativo();A[el.dataset.a](el.dataset,el)}});
+document.addEventListener('input',e=>{if(e.target.id==='busca'){S.busca=e.target.value;const p=e.target.selectionStart;desenhar();const b=document.getElementById('busca');b.focus();b.setSelectionRange(p,p)}});
+
+/* ---------- Formulários ---------- */
+async function solicitar(tipo,pref,dados,servico,soOffice){
+  const protocolo=codigo(pref);
+  const r=await sb.from('solicitacoes').insert({tipo,dados,protocolo}).select().single();
+  if(r.error)return falhar(traduz(r.error));
+  S.pedidos.unshift(r.data);
+  const ok=await Office.enviar(tipo,{...dados,...(soOffice||{}),nome:dados.nome||S.cliente.nome,email:S.conta.email,protocolo});
+  if(ok){const u=await sb.from('solicitacoes').update({enviado_office:true}).eq('id',r.data.id);if(!u.error)r.data.enviado_office=true}
+  if(servico)trocar('pedidoOk',{servico,protocolo});
+  return r.data;
+}
+const F={
+  async login(){const em=val('l-email').toLowerCase(),s=document.getElementById('l-senha').value;
+    if(!emailOk(em))return falhar('Digite um e-mail válido, como voce@exemplo.com.br.');
+    if(!s)return falhar('Digite a sua senha.');
+    ocupar(true);
+    const r=await sb.auth.signInWithPassword({email:em,password:s});
+    if(r.error){
+      if(/Email not confirmed/i.test(r.error.message)){S.pendente={email:em};await sb.auth.resend({type:'signup',email:em});S.erro='';S.pilha=[{v:'abertura'},{v:'confirmar'}];desenhar();avisar('Enviamos um código para confirmar o seu e-mail.');return}
+      S.pendente={email:em};return falhar(traduz(r.error));
+    }
+    await entrarNaArea(false)},
+  async cadastro(){const nm=val('c-nome'),em=val('c-email').toLowerCase(),tel=val('c-tel'),s=document.getElementById('c-senha').value;
+    if(nm.length<3)return falhar('Digite o seu nome completo.');
+    if(!emailOk(em))return falhar('Digite um e-mail válido, como voce@exemplo.com.br.');
+    if(soDigitos(tel).length<10)return falhar('Digite o celular com DDD.');
+    if(s.length<8)return falhar('A senha precisa ter pelo menos 8 caracteres.');
+    if(s!==document.getElementById('c-senha2').value)return falhar('As duas senhas não são iguais. Digite novamente.');
+    if(!document.getElementById('c-termos').checked)return falhar('Aceite os Termos de Uso para criar a conta.');
+    ocupar(true);
+    const r=await sb.auth.signUp({email:em,password:s,options:{data:{nome:nm,telefone:tel}}});
+    if(r.error)return falhar(traduz(r.error));
+    S.pendente={email:em};
+    if(r.data&&r.data.session){await entrarNaArea(true);return} // confirmação de e-mail desligada no painel
+    S.erro='';S.pilha=[{v:'abertura'},{v:'confirmar'}];desenhar()},
+  async confirmar(){const c=soDigitos(val('k-cod'));
+    if(c.length<6)return falhar('Digite o código que chegou no seu e-mail.');
+    ocupar(true);
+    let r=await sb.auth.verifyOtp({email:S.pendente.email,token:c,type:'signup'});
+    if(r.error)r=await sb.auth.verifyOtp({email:S.pendente.email,token:c,type:'email'});
+    if(r.error)return falhar(traduz(r.error));
+    await entrarNaArea(true)},
+  async recuperar(){const em=val('r-email').toLowerCase();
+    if(!emailOk(em))return falhar('Digite um e-mail válido.');
+    ocupar(true);
+    const r=await sb.auth.resetPasswordForEmail(em);
+    if(r.error)return falhar(traduz(r.error));
+    S.pendente={email:em};trocar('novaSenha');avisar('Se houver conta com este e-mail, o código chega em instantes.')},
+  async novaSenha(){const c=soDigitos(val('n-cod')),s=document.getElementById('n-senha').value;
+    if(c.length<6)return falhar('Digite o código que chegou no seu e-mail.');
+    if(s.length<8)return falhar('A senha precisa ter pelo menos 8 caracteres.');
+    if(s!==document.getElementById('n-senha2').value)return falhar('As duas senhas não são iguais. Digite novamente.');
+    ocupar(true);
+    const r=await sb.auth.verifyOtp({email:S.pendente.email,token:c,type:'recovery'});
+    if(r.error)return falhar(traduz(r.error));
+    const u=await sb.auth.updateUser({password:s});
+    if(u.error)return falhar(traduz(u.error));
+    await entrarNaArea(false);avisar('Senha alterada')},
+  async completar(){const nm=val('o-nome'),tel=val('o-tel');
+    if(nm.length<3)return falhar('Digite o seu nome completo.');
+    if(soDigitos(tel).length<10)return falhar('Digite o celular com DDD.');
+    ocupar(true);
+    const r=await sb.from('clientes').insert({user_id:S.conta.id,nome:nm,telefone:tel,...aceite()});
+    if(r.error)return falhar(traduz(r.error));
+    await entrarNaArea(true)},
+  async dados(){const nm=val('d-nome'),tel=val('d-tel');
+    if(nm.length<3)return falhar('Digite o seu nome completo.');
+    ocupar(true);
+    const r=await sb.from('clientes').update({nome:nm,telefone:tel||null,atualizado_em:new Date().toISOString()}).eq('user_id',S.conta.id).select('nome,telefone').single();
+    if(r.error)return falhar(traduz(r.error));
+    S.cliente=r.data;voltar();avisar('Dados salvos')},
+  async senha(){const at=document.getElementById('t-atual').value,s=document.getElementById('t-nova').value;
+    if(!at)return falhar('Digite a senha atual.');
+    if(s.length<8)return falhar('A senha nova precisa ter pelo menos 8 caracteres.');
+    if(s!==document.getElementById('t-nova2').value)return falhar('As duas senhas não são iguais. Digite novamente.');
+    ocupar(true);
+    const c=await sb.auth.signInWithPassword({email:S.conta.email,password:at});
+    if(c.error)return falhar('Senha atual incorreta.');
+    const u=await sb.auth.updateUser({password:s});
+    if(u.error)return falhar(traduz(u.error));
+    voltar();avisar('Senha alterada')},
+  async assinar(){const id=atual().id,cpf=val('a-cpf'),comSenha=S.conta.provedor==='email',s=comSenha?document.getElementById('a-senha').value:'';
+    if(!cpfOk(cpf))return falhar('CPF inválido. Confira os números.');
+    if(comSenha&&!s)return falhar('Digite a sua senha para confirmar.');
+    ocupar(true);
+    if(comSenha){
+      const c=await sb.auth.signInWithPassword({email:S.conta.email,password:s});
+      if(c.error)return falhar(/Invalid login/i.test(c.error.message)?'Senha incorreta.':traduz(c.error));
+    }
+    const r=await sb.rpc('assinar',{p_id:id,p_cpf:cpf});
+    if(r.error)return falhar(traduz(r.error));
+    await recarregarPeticoes();trocar('assinatura',{id,etapa:3})},
+  async veicular(){const tel=val('s-tel');
+    if(soDigitos(tel).length<10)return falhar('Digite o celular com DDD.');
+    if(!val('s-valor'))return falhar('Informe o valor aproximado do veículo.');
+    if(!val('s-cidade'))return falhar('Informe a cidade e a UF.');
+    ocupar(true);
+    await solicitar('cotacao_veicular','CV',{telefone:tel,veiculo:val('s-veic'),condicao:val('s-cond'),valor:val('s-valor'),cidade:val('s-cidade')},'Aquisição Veicular')},
+  async energia(){const tel=val('s-tel');
+    if(soDigitos(tel).length<10)return falhar('Digite o celular com DDD.');
+    if(!val('s-dist'))return falhar('Informe a distribuidora que aparece na fatura.');
+    if(!val('s-valor'))return falhar('Informe o valor médio da fatura.');
+    const arq=document.getElementById('s-fatura')?.files?.[0];
+    if(arq&&arq.size>10*1024*1024)return falhar('A fatura tem mais de 10 MB. Envie um arquivo menor ou uma foto.');
+    ocupar(true);
+    const dados={telefone:tel,unidade:val('s-unid'),distribuidora:val('s-dist'),valor_fatura:val('s-valor'),fatura_anexada:!!arq},extra={};
+    if(arq){
+      const caminho=S.conta.id+'/'+Date.now()+'-'+arq.name.toLowerCase().replace(/[^a-z0-9.]+/g,'-').slice(-60);
+      const up=await sb.storage.from('faturas').upload(caminho,arq,{contentType:arq.type||'application/pdf'});
+      if(up.error)return falhar('Não foi possível enviar a fatura: '+traduz(up.error)+' Tente de novo ou envie o pedido sem o arquivo.');
+      dados.fatura_arquivo=caminho;
+      // link temporário (30 dias) para a equipe abrir a fatura pelo Office
+      const lk=await sb.storage.from('faturas').createSignedUrl(caminho,30*24*3600);
+      if(lk.data&&lk.data.signedUrl)extra.fatura_link=lk.data.signedUrl;
+    }
+    await solicitar('migracao_energia','EN',dados,'Energia com Desconto',extra)},
+  async conta(){const t=atual().tipo||'PF',doc=val('k-doc'),dg=soDigitos(doc),nm=val('k-nome');
+    if(t==='PF'?!cpfOk(doc):dg.length!==14)return falhar(t==='PF'?'CPF inválido. Confira os números.':'Digite o CNPJ com 14 números.');
+    if(nm.length<3)return falhar(t==='PF'?'Digite o seu nome completo.':'Digite a razão social.');
+    if(t==='PF'&&!val('k-nasc'))return falhar('Informe a data de nascimento.');
+    if(t==='PJ'&&val('k-resp').length<3)return falhar('Informe o nome do responsável legal.');
+    if(soDigitos(val('k-tel')).length<10)return falhar('Digite o celular com DDD.');
+    if(!document.getElementById('k-ok').checked)return falhar('Marque a autorização para enviar os dados à instituição parceira.');
+    ocupar(true);
+    const d=await solicitar('conta_digital','CD',{nome:nm,telefone:val('k-tel'),documento:doc,tipo_pessoa:t,nascimento:val('k-nasc'),responsavel:val('k-resp')});
+    if(d){trocar('conta');avisar('Solicitação enviada para análise')}},
+  async video(){const o=atual().origem||'link',ti=val('v-titulo'),arq=document.getElementById('v-arq')?.files?.[0],url=val('v-url');
+    if(o==='arquivo'&&!arq)return falhar('Escolha o arquivo de vídeo.');
+    if(o==='arquivo'&&arq.size>50*1024*1024)return falhar('O arquivo tem mais de 50 MB. Reduza o vídeo ou publique por link.');
+    if(o==='link'&&!/^https:\/\/.+\..+/.test(url))return falhar('Cole o link completo, começando com https://');
+    if(!ti)return falhar('Dê um título ao vídeo.');
+    if(!val('v-desc'))return falhar('Escreva a descrição do vídeo.');
+    ocupar(true);
+    let arquivo=null;
+    if(o==='arquivo'){
+      arquivo='v/'+Date.now()+'-'+arq.name.toLowerCase().replace(/[^a-z0-9.]+/g,'-').slice(-60);
+      const up=await sb.storage.from('videos').upload(arquivo,arq,{contentType:arq.type||'video/mp4'});
+      if(up.error)return falhar('Não foi possível enviar o arquivo: '+traduz(up.error));
+    }
+    const r=await sb.from('videos').insert({titulo:ti,descricao:val('v-desc'),categoria:val('v-cat'),origem:o,url:o==='link'?url:null,arquivo}).select().single();
+    if(r.error){if(arquivo)await sb.storage.from('videos').remove([arquivo]);return falhar(traduz(r.error))}
+    S.videos.unshift(r.data);S.pilha=[{v:'perfil'},{v:'admin',seg:'videos'}];desenhar();avisar('Vídeo publicado')},
+  async peticao(){const ti=val('p-titulo'),meta=+val('p-meta'),pr=val('p-prazo');
+    if(!ti)return falhar('Dê um título ao abaixo-assinado.');
+    if(!val('p-texto'))return falhar('Escreva o texto que as pessoas vão assinar.');
+    if(!(meta>0))return falhar('Informe a meta de assinaturas.');
+    if(!pr)return falhar('Escolha a data de encerramento.');
+    ocupar(true);
+    const r=await sb.from('abaixo_assinados').insert({titulo:ti,resumo:val('p-resumo')||ti.slice(0,300),texto:val('p-texto'),meta:Math.round(meta),prazo:pr}).select('id').single();
+    if(r.error)return falhar(traduz(r.error));
+    await recarregarPeticoes();S.pilha=[{v:'perfil'},{v:'admin',seg:'peticoes'}];desenhar();avisar('Abaixo-assinado aberto')}
+};
+document.addEventListener('submit',e=>{e.preventDefault();ativo();const f=e.target.dataset.form;if(F[f])Promise.resolve(F[f]()).catch(x=>falhar(traduz(x)))});
+
+/* ---------- Saída automática por inatividade (30 minutos) ---------- */
+let tInativo;
+function ativo(){clearTimeout(tInativo);if(S.conta)tInativo=setTimeout(async()=>{await A.sair();avisar('Você saiu por inatividade. Entre de novo para continuar.')},30*60*1000)}
+
+/* ---------- Início ---------- */
+(async function(){
+  desenhar();
+  if(!sb)return;
+  // volta do Google ou da Apple com erro: mostra na tela de entrada e limpa o endereço
+  const volta=new URLSearchParams(location.search+'&'+location.hash.replace(/^#/,''));
+  if(volta.get('error')){
+    S.pilha=[{v:'abertura'},{v:'login',motivo:'Não foi possível entrar com a conta escolhida. Tente de novo ou use e-mail e senha.'}];desenhar();
+    try{history.replaceState(null,'',location.pathname)}catch(_){}
+  }
+  // mostra os botões só dos logins sociais que estão ligados no Supabase
+  fetch(CFG.url+'/auth/v1/settings',{headers:{apikey:CFG.anonKey}}).then(r=>r.ok?r.json():null).then(j=>{
+    const e=(j&&j.external)||{};
+    S.provedores=['google','apple'].filter(p=>e[p]===true);
+    if(S.provedores.length&&['login','cadastro'].includes(atual().v)&&!document.querySelector('#tela input:focus'))desenhar();
+  }).catch(()=>{});
+  try{
+    const r=await sb.auth.getSession();
+    if(r.data&&r.data.session){await entrarNaArea(false);ativo()}
+  }catch(_){}
+  sb.auth.onAuthStateChange(ev=>{if(ev==='SIGNED_OUT'&&S.conta){limpar();S.pilha=[{v:'abertura'}];desenhar()}});
+})();
+
+</script>
+</body>
+</html>

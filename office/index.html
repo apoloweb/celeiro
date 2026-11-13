@@ -2719,10 +2719,11 @@ async function telaDashboard(){
 var APP={filtros:{tipo:'',status:'',teste:false}};
 var APP_TIPOS={lead:'Lead',conta_digital:'Abertura de conta',cotacao_veicular:'Cotação veicular',migracao_energia:'Migração de energia'};
 var APP_STATUS={novo:'Novo',em_atendimento:'Em atendimento',concluido:'Concluído',descartado:'Descartado'};
-var APP_CAMPOS={metodo:'Acesso',tipo_pessoa:'Pessoa',nascimento:'Nascimento',responsavel:'Responsável',protocolo:'Protocolo',veiculo:'Veículo',condicao:'Condição',valor:'Valor (R$)',cidade:'Cidade',unidade:'Unidade',distribuidora:'Distribuidora',valor_fatura:'Fatura média (R$)',fatura_anexada:'Fatura anexada'};
+var APP_CAMPOS={metodo:'Acesso',tipo_pessoa:'Pessoa',nascimento:'Nascimento',responsavel:'Responsável',protocolo:'Protocolo',veiculo:'Veículo',condicao:'Condição',valor:'Valor (R$)',cidade:'Cidade',unidade:'Unidade',distribuidora:'Distribuidora',valor_fatura:'Fatura média (R$)',fatura_anexada:'Fatura anexada',canal:'Canal'};
 function appDetalhes(d){
-  return Object.keys(d||{}).filter(function(k){return d[k]!==''&&d[k]!==null;}).map(function(k){
+  return Object.keys(d||{}).filter(function(k){return d[k]!==''&&d[k]!==null&&k!=='fatura_arquivo';}).map(function(k){
     var v=d[k];if(v===true)v='sim';if(v===false)v='não';
+    if(k==='fatura_link'&&/^https:\/\//.test(String(v)))return '<a href="'+esc(v)+'" target="_blank" rel="noopener">Abrir a fatura</a>';
     return esc(APP_CAMPOS[k]||k)+': '+esc(v);
   }).join(' · ');
 }
