@@ -7,7 +7,8 @@ Protótipo do aplicativo da Celeiro Administradora, versão 1 do planejamento ("
 Um único arquivo, `index.html`, com as telas, o estilo e o comportamento. Abre em qualquer navegador, sem instalação e sem servidor.
 
 - **É um protótipo, não o app das lojas.** Os dados ficam só na sessão e somem ao recarregar.
-- **Logins e gov.br são simulados.** Qualquer e-mail e senha entram.
+- **Os logins são simulados.** Qualquer e-mail e senha entram; Google e Apple usam uma conta de exemplo.
+- **Sem gov.br.** O gov.br não aceita integração do setor privado, então o login e a assinatura por gov.br saíram do app.
 - **O conteúdo é de exemplo** (vídeos, abaixo-assinados, nomes).
 
 Prévia publicada: https://claude.ai/artifact/6d8m9JTGmcEo5pqNesaf9p (a prévia não é atualizada sozinha quando este arquivo muda).
@@ -17,7 +18,7 @@ Prévia publicada: https://claude.ai/artifact/6d8m9JTGmcEo5pqNesaf9p (a prévia 
 | Código | Tela | Envia ao Office |
 |---|---|---|
 | `videos` | Vídeos | nada |
-| `assinaturas` | Abaixo-assinados (assinatura com gov.br) | nada |
+| `assinaturas` | Abaixo-assinados (assinatura com CPF e senha) | nada |
 | `veicular` | Aquisição Veicular | `cotacao_veicular` |
 | `energia` | Energia com Desconto | `migracao_energia` |
 | `conta` | Conta digital | `conta_digital` |
@@ -36,6 +37,12 @@ Na área administrativa do app (Perfil > ligar "Demonstração: perfil administr
 | Conta digital (ponto de integração com a instituição financeira) | `const ContaDigital={` |
 | Uma tela | `const T={` e o nome da tela (`inicio`, `videos`, `peticao`, `veicular`, `energia`, `conta`, `admin`...) |
 | O que um botão faz | `const A={` (ações) e `const F={` (formulários) |
+
+## Assinatura de abaixo-assinados
+
+Igual à área do cliente do site: a pessoa informa o CPF e confirma a senha (quem entrou com Google ou Apple informa só o CPF). Fica registrado nome, CPF, data, hora e protocolo; na lista pública aparece só o primeiro nome e a inicial do sobrenome; vale uma assinatura por CPF.
+
+No protótipo o registro fica só na sessão. O lado do servidor já existe: é a função `assinar` do banco do site (`supabase-cliente.sql`, na raiz), a mesma que a área do cliente usa, e que grava também o IP. Quando o app tiver conta de verdade, ele chama essa função.
 
 ## Integração com o Office
 
