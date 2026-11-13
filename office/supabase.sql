@@ -4811,6 +4811,12 @@ create table if not exists public.inv_indicadores (
   criado_em      timestamptz not null default now()
 );
 create index if not exists inv_indicadores_org on public.inv_indicadores (organizacao_id);
+-- O indicador é uma pessoa do Cadastro (física ou jurídica) da mesma organização
+alter table public.inv_indicadores add column if not exists pessoa_tipo text check (pessoa_tipo in ('pf','pj'));
+alter table public.inv_indicadores add column if not exists pessoa_id   uuid;
+create unique index if not exists inv_indicadores_pessoa
+  on public.inv_indicadores (coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid), pessoa_tipo, pessoa_id)
+  where pessoa_id is not null;
 
 create table if not exists public.inv_links (
   id             uuid primary key default gen_random_uuid(),
@@ -4992,10 +4998,12 @@ begin
   perform public.inv_exige(p_org);
   return coalesce((
     select jsonb_agg(x order by x ->> 'nome') from (
-      select jsonb_build_object('tipo', 'pf', 'id', f.id, 'nome', f.nome_completo, 'documento', f.cpf) as x
+      select jsonb_build_object('tipo', 'pf', 'id', f.id, 'nome', f.nome_completo, 'documento', f.cpf,
+               'email', f.email, 'telefone', f.telefone_celular) as x
       from public.cadastro_pf f where f.organizacao_id is not distinct from p_org and f.situacao = 'ativo'
       union all
-      select jsonb_build_object('tipo', 'pj', 'id', j.id, 'nome', j.razao_social, 'documento', j.cnpj)
+      select jsonb_build_object('tipo', 'pj', 'id', j.id, 'nome', j.razao_social, 'documento', j.cnpj,
+               'email', j.email, 'telefone', j.telefone_celular)
       from public.cadastro_pj j where j.organizacao_id is not distinct from p_org and j.situacao = 'ativo'
       limit 2000
     ) s), '[]'::jsonb);
@@ -5479,6 +5487,7 @@ begin
   return coalesce((
     select jsonb_agg(jsonb_build_object(
       'id', i.id, 'nome', i.nome, 'documento', i.documento, 'email', i.email, 'telefone', i.telefone,
+      'pessoa_tipo', i.pessoa_tipo, 'pessoa_id', i.pessoa_id,
       'percentual', i.percentual, 'chave_pix', i.chave_pix, 'observacoes', i.observacoes, 'ativo', i.ativo,
       'base', coalesce((select sum(a.valor) from public.inv_aportes a where a.indicador_id = i.id and a.status = 'ativo'), 0),
       'comissao', coalesce((select sum(a.comissao_valor) from public.inv_aportes a where a.indicador_id = i.id and a.status = 'ativo'), 0),
@@ -5510,10 +5519,46 @@ declare
   v_mail text := left(trim(lower(coalesce(v_d ->> 'email', ''))), 254);
   v_pct  numeric := coalesce(public.inv_numero(v_d, 'percentual'), 0);
   v_id   uuid;
+  v_pt   text := nullif(v_d ->> 'pessoa_tipo', '');
+  v_pi   uuid;
+  v_doc  text := left(trim(coalesce(v_d ->> 'documento', '')), 20);
+  v_tel  text := left(trim(coalesce(v_d ->> 'telefone', '')), 30);
+  v_cm   text;
+  v_ct   text;
 begin
   perform public.inv_exige(p_org);
   if p_id is not null and not exists (select 1 from public.inv_indicadores where id = p_id and organizacao_id is not distinct from p_org) then
     raise exception 'Indicador não encontrado';
+  end if;
+  begin
+    v_pi := nullif(v_d ->> 'pessoa_id', '')::uuid;
+  exception when others then
+    raise exception 'Pessoa do Cadastro inválida';
+  end;
+  -- Indicador novo sempre nasce de uma pessoa do Cadastro. Os antigos, sem vínculo, continuam editáveis.
+  if v_pi is null and (p_id is null or exists (select 1 from public.inv_indicadores where id = p_id and pessoa_id is not null)) then
+    raise exception 'Escolha a pessoa do Cadastro que será o indicador';
+  end if;
+  if v_pi is not null then
+    if v_pt = 'pf' then
+      select f.nome_completo, f.cpf, f.email, f.telefone_celular into v_nome, v_doc, v_cm, v_ct
+        from public.cadastro_pf f where f.id = v_pi and f.organizacao_id is not distinct from p_org;
+    elsif v_pt = 'pj' then
+      select j.razao_social, j.cnpj, j.email, j.telefone_celular into v_nome, v_doc, v_cm, v_ct
+        from public.cadastro_pj j where j.id = v_pi and j.organizacao_id is not distinct from p_org;
+    else
+      raise exception 'Pessoa do Cadastro inválida';
+    end if;
+    if not found then
+      raise exception 'Pessoa não encontrada no Cadastro desta organização';
+    end if;
+    if exists (select 1 from public.inv_indicadores i where i.organizacao_id is not distinct from p_org
+               and i.pessoa_tipo = v_pt and i.pessoa_id = v_pi and i.id is distinct from p_id) then
+      raise exception 'Esta pessoa já é um indicador';
+    end if;
+    v_nome := left(v_nome, 160); v_doc := left(coalesce(v_doc, ''), 20);
+    if v_mail = '' then v_mail := left(lower(coalesce(v_cm, '')), 254); end if;
+    if v_tel = '' then v_tel := left(coalesce(v_ct, ''), 30); end if;
   end if;
   if char_length(v_nome) = 0 then
     raise exception 'Informe o nome do indicador';
@@ -5525,16 +5570,15 @@ begin
     raise exception 'O percentual de comissão fica entre 0 e 100';
   end if;
   if p_id is null then
-    insert into public.inv_indicadores (organizacao_id, nome, documento, email, telefone, percentual, chave_pix, observacoes)
-    values (p_org, v_nome, left(trim(coalesce(v_d ->> 'documento', '')), 20), v_mail,
-      left(trim(coalesce(v_d ->> 'telefone', '')), 30), v_pct, left(trim(coalesce(v_d ->> 'chave_pix', '')), 120),
-      left(coalesce(v_d ->> 'observacoes', ''), 1000))
+    insert into public.inv_indicadores (organizacao_id, nome, documento, email, telefone, percentual, chave_pix, observacoes, pessoa_tipo, pessoa_id)
+    values (p_org, v_nome, v_doc, v_mail, v_tel, v_pct, left(trim(coalesce(v_d ->> 'chave_pix', '')), 120),
+      left(coalesce(v_d ->> 'observacoes', ''), 1000), case when v_pi is null then null else v_pt end, v_pi)
     returning id into v_id;
     return v_id;
   end if;
   update public.inv_indicadores
-     set nome = v_nome, documento = left(trim(coalesce(v_d ->> 'documento', '')), 20), email = v_mail,
-         telefone = left(trim(coalesce(v_d ->> 'telefone', '')), 30), percentual = v_pct,
+     set nome = v_nome, documento = v_doc, email = v_mail, telefone = v_tel, percentual = v_pct,
+         pessoa_tipo = case when v_pi is null then null else v_pt end, pessoa_id = v_pi,
          chave_pix = left(trim(coalesce(v_d ->> 'chave_pix', '')), 120),
          observacoes = left(coalesce(v_d ->> 'observacoes', ''), 1000),
          ativo = coalesce((v_d ->> 'ativo')::boolean, true)

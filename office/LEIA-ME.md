@@ -286,7 +286,7 @@ Menus internos: Dashboard, Projetos, Investidores, Retorno esperado × real, Ind
 - **Retorno esperado × real**: o esperado aplica a taxa anual de cada aporte em juros simples, da data do aporte
   até a data escolhida. O real soma os retornos lançados no projeto ("Lançar retorno"). As taxas ao ano dividem
   o retorno pelo capital investido e pelo tempo, e a tela mostra a diferença em pontos percentuais.
-- **Indicadores**: cadastro com contato, comissão padrão e chave Pix.
+- **Indicadores**: o indicador é escolhido entre as pessoas físicas e jurídicas ativas do Cadastro (nome e CPF ou CNPJ vêm de lá; e-mail e telefone são sugeridos e podem ser trocados), com comissão padrão e chave Pix. Se a pessoa ainda não tem cadastro, o botão **Novo cadastro** abre o formulário do Cadastro. Uma pessoa só pode ser indicador uma vez por organização.
 - **Link de indicação**: criado em Indicadores → "Criar link", geral ou de um projeto, com o percentual de
   comissão do link. O link abre a página pública `indicacao/` (sem login), que mostra só o primeiro nome de quem
   indicou, o projeto e o nome da empresa, e recolhe nome, e-mail, telefone, valor pretendido e a autorização de

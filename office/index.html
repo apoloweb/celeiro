@@ -2458,31 +2458,51 @@ async function invIndicadores(c){
   $$('[data-ind]',c).forEach(function(b){b.onclick=function(){invDlgIndicador(achar(b.getAttribute('data-ind')));};});
   $$('[data-link-novo]',c).forEach(function(b){b.onclick=function(){invDlgLink(achar(b.getAttribute('data-link-novo')));};});
 }
-function invDlgIndicador(i){
+async function invDlgIndicador(i){
   var novo=!i;i=i||{ativo:true};
+  var org=invOrg();
+  if(!INV.pessoas||INV.pessoasDe!==org){var rp=await sb.rpc('inv_pessoas',{p_org:org});INV.pessoas=rp.error?[]:(rp.data||[]);INV.pessoasDe=org;}
+  var ps=INV.pessoas,temCad=temModulo('cadastro');
+  function rotulo(x){return x.nome+' · '+(x.tipo==='pf'?'CPF ':'CNPJ ')+(x.tipo==='pj'?formataCnpj(x.documento):x.documento);}
+  var atual=i.pessoa_id?ps.filter(function(x){return x.id===i.pessoa_id&&x.tipo===i.pessoa_tipo;})[0]:null;
   var d=finDlg(novo?'Novo indicador':'Editar indicador',
-    '<div class="grade"><div class="campo" style="flex:2 1 260px"><label for="ii-nome">Nome</label><input id="ii-nome" type="text" maxlength="160" value="'+esc(i.nome||'')+'" required></div>'+
-      '<div class="campo"><label for="ii-doc">CPF ou CNPJ</label><input id="ii-doc" type="text" maxlength="20" value="'+esc(i.documento||'')+'"></div></div>'+
+    '<div class="campo"><label for="ii-pessoa">Pessoa do Cadastro</label>'+
+      '<div class="junto"><input id="ii-pessoa" type="text" list="ii-pessoas" autocomplete="off" placeholder="Digite o nome, CPF ou CNPJ" value="'+esc(atual?rotulo(atual):'')+'"'+(novo||i.pessoa_id?' required':'')+'><datalist id="ii-pessoas">'+ps.map(function(x){return '<option value="'+esc(rotulo(x))+'">';}).join('')+'</datalist>'+
+        (temCad?'<button class="botao claro pequeno" type="button" id="ii-novo-cad">Novo cadastro</button>':'')+'</div>'+
+      '<p class="meta" id="ii-pessoa-meta">'+(!novo&&!i.pessoa_id?'Este indicador ('+esc(i.nome)+') foi criado antes do vínculo com o Cadastro. Escolha a pessoa para vincular.':ps.length?'Escolha entre as pessoas físicas e jurídicas ativas do Cadastro. Se a pessoa ainda não tem cadastro, use Novo cadastro.':'Não há pessoas ativas no Cadastro'+(temCad?'. Use Novo cadastro.':'. Peça o cadastro a quem tem o módulo Cadastro.'))+'</p></div>'+
     '<div class="grade"><div class="campo"><label for="ii-email">E-mail</label><input id="ii-email" type="email" maxlength="254" value="'+esc(i.email||'')+'"></div>'+
       '<div class="campo"><label for="ii-tel">Telefone</label><input id="ii-tel" type="text" maxlength="30" value="'+esc(i.telefone||'')+'"></div></div>'+
     '<div class="grade"><div class="campo"><label for="ii-pct">Comissão padrão (%)</label><input id="ii-pct" type="text" inputmode="decimal" value="'+esc(i.percentual==null?'':Number(i.percentual).toLocaleString('pt-BR',{maximumFractionDigits:3}))+'" placeholder="Ex.: 2,5"></div>'+
       '<div class="campo"><label for="ii-pix">Chave Pix para pagamento</label><input id="ii-pix" type="text" maxlength="120" value="'+esc(i.chave_pix||'')+'"></div>'+
       (novo?'':'<div class="campo" style="flex:0 1 120px"><span class="rotulo">Ativo</span>'+chaveSw(i.ativo,'Indicador ativo','id="ii-ativo"')+'</div>')+'</div>'+
     '<div class="campo"><label for="ii-obs">Observações</label><textarea id="ii-obs" rows="2" maxlength="1000">'+esc(i.observacoes||'')+'</textarea></div>'+
-    '<p class="meta">A comissão padrão é sugerida ao criar links e ao vincular investidores; pode ser alterada em cada caso.</p>',
+    '<p class="meta">Nome e CPF ou CNPJ vêm do Cadastro. E-mail e telefone são sugeridos pelo Cadastro e podem ser trocados aqui. A comissão padrão é sugerida ao criar links e ao vincular investidores.</p>',
     '<button class="botao" type="submit">Salvar indicador</button>');
+  function escolhida(){var v=$('#ii-pessoa',d).value.trim();return ps.filter(function(x){return rotulo(x)===v;})[0]||ps.filter(function(x){return x.nome.toLowerCase()===v.toLowerCase();})[0]||null;}
+  $('#ii-pessoa',d).onchange=function(){
+    var p=escolhida();if(!p)return;
+    $('#ii-pessoa',d).value=rotulo(p);
+    if(!$('#ii-email',d).value.trim())$('#ii-email',d).value=p.email||'';
+    if(!$('#ii-tel',d).value.trim())$('#ii-tel',d).value=fmtTel(p.telefone)||'';
+  };
+  var bn=$('#ii-novo-cad',d);
+  if(bn){bn.onclick=function(){
+    d.fechar();CAD.aba='pf';CAD.abrirNovo=true;INV.pessoas=null;
+    aviso('Cadastre a pessoa e volte a Investimentos → Indicadores para vinculá-la.');
+    location.hash='#cadastro';
+  };}
   var sw=$('#ii-ativo',d);if(sw){sw.onclick=function(){sw.setAttribute('aria-checked',sw.getAttribute('aria-checked')==='true'?'false':'true');};}
   $('form',d).onsubmit=async function(ev){
     ev.preventDefault();
-    var b=$('button[type=submit]',d),pc=$('#ii-pct',d).value.trim()===''?0:valorDe($('#ii-pct',d).value);
-    if(!$('#ii-nome',d).value.trim()){aviso('Informe o nome do indicador.',true);return;}
+    var b=$('button[type=submit]',d),pc=$('#ii-pct',d).value.trim()===''?0:valorDe($('#ii-pct',d).value),p=escolhida();
+    if(!p&&(novo||i.pessoa_id||$('#ii-pessoa',d).value.trim())){aviso('Escolha na lista a pessoa do Cadastro que será o indicador.',true);$('#ii-pessoa',d).focus();return;}
     if(isNaN(pc)||pc<0||pc>100){aviso('A comissão fica entre 0 e 100%.',true);return;}
     ocupar(b,true);
-    var r=await sb.rpc('inv_indicador_salvar',{p_id:novo?null:i.id,p_org:invOrg(),p_dados:{nome:$('#ii-nome',d).value,documento:$('#ii-doc',d).value,email:$('#ii-email',d).value,telefone:$('#ii-tel',d).value,percentual:pc,chave_pix:$('#ii-pix',d).value,observacoes:$('#ii-obs',d).value,ativo:sw?sw.getAttribute('aria-checked')==='true':true}});
+    var r=await sb.rpc('inv_indicador_salvar',{p_id:novo?null:i.id,p_org:org,p_dados:{pessoa_tipo:p?p.tipo:'',pessoa_id:p?p.id:'',nome:p?p.nome:i.nome,documento:p?p.documento:(i.documento||''),email:$('#ii-email',d).value,telefone:$('#ii-tel',d).value,percentual:pc,chave_pix:$('#ii-pix',d).value,observacoes:$('#ii-obs',d).value,ativo:sw?sw.getAttribute('aria-checked')==='true':true}});
     if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
     d.fechar();aviso('Indicador salvo.');invDesenha();
   };
-  $('#ii-nome',d).focus();
+  $('#ii-pessoa',d).focus();
 }
 async function invDlgLink(i){
   var prjs=[];
@@ -2901,6 +2921,7 @@ function desenhaCadastro(){
     '<div class="campo"><label class="oculto-visual" for="cad-busca">Buscar</label><input id="cad-busca" type="text" placeholder="'+(pf?'Buscar por nome ou CPF':'Buscar por razão social, nome fantasia ou CNPJ')+'" value="'+esc(CAD.busca)+'"></div>'+
     '<div id="cad-resultado"></div>');
   $$('[data-cad]').forEach(function(b){b.onclick=function(){CAD.aba=b.getAttribute('data-cad');CAD.busca='';desenhaCadastro();};});
+  if(CAD.abrirNovo){CAD.abrirNovo=false;setTimeout(function(){var bn=$('#cad-novo');if(bn)bn.click();},0);}
   $('#cad-busca').oninput=function(){CAD.busca=this.value;desenhaCadResultado();};
   $('#cad-novo').onclick=function(){if(pf)editarPf(null);else editarPj(null);};
   desenhaCadResultado();
