@@ -160,6 +160,11 @@ tr.grupo-l th{background:var(--nevoa);font-size:13px;font-weight:600;padding:8px
 .anexos li .apoio{flex:1 1 auto}
 button.link{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--verde);text-decoration:underline;cursor:pointer;text-align:left;word-break:break-word}
 #t-arquivo{flex:1 1 200px;min-width:0;font-size:14px}
+.dlg-anexo{width:min(960px,96vw);max-width:96vw}
+.dlg-anexo .dlg-topo h2{word-break:break-word;font-size:18px}
+.va-imagem{display:block;max-width:100%;max-height:74vh;margin:0 auto;border-radius:8px}
+.va-pdf{display:block;width:100%;height:74vh;border:1px solid var(--linha);border-radius:8px;background:#fff}
+.va-texto{margin:0;padding:14px;background:var(--nevoa);border-radius:8px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:74vh;overflow:auto}
 .grade-d{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
 .cartao-d{background:var(--branco);border:1px solid var(--linha);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:6px;min-height:150px}
 .cartao-d.baixo{min-height:110px}
@@ -1161,6 +1166,43 @@ async function recarregaTelaDeTarefas(){
 }
 
 /* ----- janela da tarefa (criar, editar, comentar) ----- */
+/* Mostra um anexo dentro do sistema, sem baixar: imagem, PDF e texto. Os demais tipos só podem ser baixados. */
+function tipoAnexo(nome){
+  var e=(/\.([A-Za-z0-9]+)$/.exec(nome||'')||[])[1];e=(e||'').toLowerCase();
+  if(['png','jpg','jpeg','webp','gif'].indexOf(e)>=0)return {modo:'imagem',mime:e==='jpg'?'image/jpeg':'image/'+e};
+  if(e==='pdf')return {modo:'pdf',mime:'application/pdf'};
+  if(e==='txt'||e==='csv')return {modo:'texto',mime:'text/plain'};
+  return {modo:'',mime:''};
+}
+async function verAnexo(x,codigo,baixar){
+  var tp=tipoAnexo(x.nome),d=document.createElement('dialog'),url='';
+  d.className='dlg dlg-anexo';d.id='dlg-anexo';d.setAttribute('aria-labelledby','dlg-anexo-titulo');
+  d.innerHTML='<div class="dlg-topo"><h2 id="dlg-anexo-titulo">'+esc(x.nome)+'</h2><div class="fin-acoes"><button type="button" class="botao claro pequeno" id="va-baixar">Baixar</button><button type="button" class="botao claro pequeno" id="va-fechar">Fechar</button></div></div>'+
+    '<div class="dlg-corpo" id="va-corpo"><p class="apoio">'+(tp.modo?'Carregando…':'Este tipo de arquivo não abre no navegador. Use Baixar para abrir no programa do seu computador.')+'</p></div>';
+  document.body.appendChild(d);
+  function fechar(){if(url)URL.revokeObjectURL(url);try{d.close();}catch(err){}d.remove();}
+  $('#va-fechar',d).onclick=fechar;$('#va-baixar',d).onclick=function(){baixar(x);};
+  d.addEventListener('cancel',function(ev){ev.preventDefault();ev.stopPropagation();fechar();});
+  if(typeof d.showModal==='function'){d.showModal();}else{d.setAttribute('open','');}
+  $('#va-fechar',d).focus();
+  if(!tp.modo)return;
+  var r=await sb.storage.from('workflow-anexos').download(x.caminho),corpo=$('#va-corpo',d);
+  if(!d.isConnected)return;
+  if(r.error||!r.data){corpo.innerHTML='<p class="erro">Não foi possível abrir o arquivo: '+esc((r.error&&r.error.message)||'tente de novo')+'</p>';return;}
+  evento('Visualizou o anexo '+x.nome+' da tarefa '+codigo,'Workflow');
+  if(tp.modo==='texto'){
+    var txt=await r.data.text(),pre=document.createElement('pre');
+    pre.className='va-texto';pre.textContent=txt.length>200000?txt.slice(0,200000)+'\n\n[…] O arquivo é maior do que o trecho mostrado. Baixe para ver tudo.':txt;
+    corpo.innerHTML='';corpo.appendChild(pre);return;
+  }
+  url=URL.createObjectURL(new Blob([r.data],{type:tp.mime}));
+  if(tp.modo==='imagem'){
+    var img=document.createElement('img');img.className='va-imagem';img.alt=x.nome;img.src=url;
+    corpo.innerHTML='';corpo.appendChild(img);
+  }else{
+    corpo.innerHTML='<iframe class="va-pdf" title="'+esc(x.nome)+'" src="'+url+'"></iframe><p class="meta">Se o PDF não aparecer aqui, <a href="'+url+'" target="_blank" rel="noopener">abra em outra aba</a>.</p>';
+  }
+}
 async function abrirTarefa(t,ctx){
   ctx=ctx||{};
   var novo=!t,a=E.acesso,equipe=ehEquipe();
@@ -1209,7 +1251,7 @@ async function abrirTarefa(t,ctx){
         '<ul class="mencao-lista oculto" id="t-sug" role="listbox" aria-label="Pessoas para marcar"></ul></div></div>'+
       '<div class="campo"><span class="rotulo">Anexos</span><div id="t-anexos"><p class="apoio">Carregando…</p></div>'+
         '<div class="junto"><label class="oculto-visual" for="t-arquivo">Escolher arquivos</label><input id="t-arquivo" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.odt,.ods"><button type="button" class="botao claro pequeno" id="t-anexar">Anexar</button></div>'+
-        '<p class="meta">PDF, imagem, Word, Excel, PowerPoint, CSV ou TXT, até 10 MB cada. Quem vê a tarefa vê os anexos.</p></div>')+
+        '<p class="meta">PDF, imagem, Word, Excel, PowerPoint, CSV ou TXT, até 10 MB cada. Quem vê a tarefa vê os anexos. Imagem, PDF e texto abrem aqui mesmo, em Ver.</p></div>')+
       (novo?'<div class="campo"><label for="t-arquivo">Anexos (opcional)</label><input id="t-arquivo" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.odt,.ods">'+
         '<p class="meta">PDF, imagem, Word, Excel, PowerPoint, CSV ou TXT, até 10 MB cada. Os arquivos são enviados ao criar a tarefa.</p></div>':'')+
     '</div>'+
@@ -1270,16 +1312,18 @@ async function abrirTarefa(t,ctx){
     anexosTarefa=as;
     alvo.innerHTML=cs.length?cs.map(function(c){var dh=dataHora(c.criado_em);return '<div class="coment"><strong>'+esc(c.nome)+'</strong> <span class="apoio">'+esc(dh.data)+' '+esc(dh.hora.slice(0,5))+'</span><p>'+comMencoes(c)+'</p></div>';}).join(''):'<p class="apoio">Nenhum comentário ainda.</p>';
     alvoA.innerHTML=as.length?'<ul class="anexos">'+as.map(function(x){var dh=dataHora(x.criado_em);
-      return '<li><button type="button" class="link" data-baixar-anexo="'+esc(x.id)+'">'+esc(x.nome)+'</button><span class="apoio">'+esc(tamanhoTxt(x.tamanho))+' · '+esc(x.por)+' · '+esc(dh.data)+'</span>'+
+      return '<li><button type="button" class="link" data-ver-anexo="'+esc(x.id)+'">'+esc(x.nome)+'</button><span class="apoio">'+esc(tamanhoTxt(x.tamanho))+' · '+esc(x.por)+' · '+esc(dh.data)+'</span>'+
+        '<button type="button" class="botao claro pequeno" data-ver-anexo="'+esc(x.id)+'">Ver</button><button type="button" class="botao sutil pequeno" data-baixar-anexo="'+esc(x.id)+'">Baixar</button>'+
         (x.pode_excluir?'<button type="button" class="botao sutil pequeno" data-excluir-anexo="'+esc(x.id)+'">Excluir</button>':'')+'</li>';}).join('')+'</ul>':'<p class="apoio">Nenhum anexo ainda.</p>';
     function achar(id){return as.filter(function(x){return x.id===id;})[0];}
-    $$('[data-baixar-anexo]',alvoA).forEach(function(b){b.onclick=async function(){
-      var x=achar(b.getAttribute('data-baixar-anexo'));
+    async function baixarAnexo(x){
       var u=await sb.storage.from('workflow-anexos').createSignedUrl(x.caminho,60,{download:x.nome});
-      if(u.error||!u.data||!u.data.signedUrl){aviso('Não foi possível abrir o arquivo: '+((u.error&&u.error.message)||'tente de novo'),true);return;}
+      if(u.error||!u.data||!u.data.signedUrl){aviso('Não foi possível baixar o arquivo: '+((u.error&&u.error.message)||'tente de novo'),true);return;}
       evento('Baixou o anexo '+x.nome+' da tarefa '+t.codigo,'Workflow');
       var l=document.createElement('a');l.href=u.data.signedUrl;l.download=x.nome;l.rel='noopener';document.body.appendChild(l);l.click();l.remove();
-    };});
+    }
+    $$('[data-baixar-anexo]',alvoA).forEach(function(b){b.onclick=function(){baixarAnexo(achar(b.getAttribute('data-baixar-anexo')));};});
+    $$('[data-ver-anexo]',alvoA).forEach(function(b){b.onclick=function(){verAnexo(achar(b.getAttribute('data-ver-anexo')),t.codigo,baixarAnexo);};});
     $$('[data-excluir-anexo]',alvoA).forEach(function(b){b.onclick=async function(){
       if(b.getAttribute('data-certeza')!=='1'){b.setAttribute('data-certeza','1');b.textContent='Confirmar exclusão';return;}
       var x=achar(b.getAttribute('data-excluir-anexo'));ocupar(b,true);
