@@ -188,6 +188,10 @@ const assV=()=>`<div class="ass-v" aria-label="Celeiro Administradora"><span cla
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const n=x=>Number(x).toLocaleString('pt-BR');
 const hoje=()=>new Date().toLocaleDateString('pt-BR');
+const nomeCurto=nm=>{const p=String(nm||'').trim().split(/\s+/);return p.length<2?(p[0]||'Assinante'):p[0]+' '+p[p.length-1][0].toUpperCase()+'.'};
+function cpfOk(c){const d=String(c||'').replace(/\D/g,'');if(d.length!==11||/^(\d)\1{10}$/.test(d))return false;
+  const dv=q=>{let s=0;for(let i=0;i<q;i++)s+=+d[i]*(q+1-i);const r=(s*10)%11;return r===10?0:r};
+  return dv(9)===+d[9]&&dv(10)===+d[10]}
 
 /* ---------- Dados de exemplo (substituir pela API do backoffice) ---------- */
 const S={
@@ -214,7 +218,7 @@ const total=p=>p.base+p.sig.length-S.peticoesBase[p.id];
    No app publicado, a lista vem do Office (função app_config) e vale para todos os aparelhos. */
 const MODS=[
   {c:'videos',nome:'Vídeos',desc:'Área de vídeos e streaming'},
-  {c:'assinaturas',nome:'Abaixo-assinados',desc:'Coleta de assinaturas com gov.br'},
+  {c:'assinaturas',nome:'Abaixo-assinados',desc:'Coleta de assinaturas com CPF e senha'},
   {c:'veicular',nome:'Aquisição Veicular',desc:'Pedidos de cotação veicular'},
   {c:'energia',nome:'Energia com Desconto',desc:'Pedidos de migração de energia'},
   {c:'conta',nome:'Conta digital',desc:'Solicitações de abertura de conta'}
@@ -336,7 +340,6 @@ login:()=>({titulo:'Entrar',html:`
   </form>
   <div class="divisor">ou continue com</div>
   <div class="pilha">
-    <button class="btn" data-a="social" data-m="gov.br">Entrar com gov.br</button>
     <button class="btn" data-a="social" data-m="Google">Entrar com Google</button>
     <button class="btn" data-a="social" data-m="Apple">Entrar com Apple</button>
   </div>
@@ -356,7 +359,6 @@ cadastro:()=>({titulo:'Criar conta',html:`
   </form>
   <div class="divisor">ou cadastre-se com</div>
   <div class="pilha">
-    <button class="btn" data-a="social" data-m="gov.br">Continuar com gov.br</button>
     <button class="btn" data-a="social" data-m="Google">Continuar com Google</button>
   </div>`}),
 
@@ -403,7 +405,7 @@ video:()=>{
   ${outros.length?`<section class="sec"><h3>Mais em ${esc(v.cat)}</h3>${outros.map(itemVideo).join('')}</section>`:''}`}},
 
 peticoes:()=>({titulo:'Abaixo-assinados',html:`
-  <p class="apoio">Cada assinatura é reconhecida pela conta gov.br de quem assina.</p>
+  <p class="apoio">Cada assinatura fica ligada à sua conta, ao seu CPF e à data e hora em que foi feita.</p>
   ${S.peticoes.length?S.peticoes.map(cartaoPeticao).join(''):'<p class="apoio">Nenhum abaixo-assinado aberto no momento.</p>'}`}),
 
 peticao:()=>{
@@ -416,29 +418,29 @@ peticao:()=>{
     <span class="progresso"><i style="width:${pc}%"></i></span></div>
   <p class="texto-longo">${esc(p.texto)}</p>
   ${m?`<div class="aviso pilha" style="gap:4px"><b>Você assinou em ${esc(m.data)}</b><span class="num">Protocolo ${esc(m.protocolo)}</span></div>`
-     :`<button class="btn cheio" data-a="assinar" data-id="${p.id}">${ic('assinar')} Assinar com gov.br</button>`}
-  <section class="sec"><h3>Últimas assinaturas</h3><div class="lista">${p.sig.slice(0,5).map(s=>`<div class="linha"><span class="cresce">${esc(s.nome)}</span><span class="apoio num">${esc(s.data)}</span></div>`).join('')}</div></section>`}},
+     :`<button class="btn cheio" data-a="assinar" data-id="${p.id}">${ic('assinar')} Assinar</button>`}
+  <section class="sec"><h3>Últimas assinaturas</h3><div class="lista">${p.sig.slice(0,5).map(s=>`<div class="linha"><span class="cresce">${esc(nomeCurto(s.nome))}</span><span class="apoio num">${esc(s.data)}</span></div>`).join('')}</div></section>`}},
 
 assinatura:()=>{
-  const p=S.peticoes.find(x=>x.id==atual().id),e=atual().etapa||1;
+  const p=S.peticoes.find(x=>x.id==atual().id),e=atual().etapa||1,comSenha=S.usuario.metodo==='e-mail e senha';
   if(e===1)return{titulo:'Assinar',html:`
-    <span class="rotulo">Etapa 1 de 2 · Conferência</span><h2>Confira antes de assinar</h2>
+    <h2>Confira e assine</h2>
     <div class="cartao"><span class="rotulo">Documento</span><h3>${esc(p.titulo)}</h3></div>
     <div class="cartao"><span class="rotulo">Assinante</span><b>${esc(S.usuario.nome)}</b><span class="apoio">${esc(S.usuario.email)}</span></div>
-    <p class="apoio">Ao continuar, você será levado ao gov.br para confirmar a sua identidade. Seu nome aparecerá na lista de assinantes.</p>
-    <button class="btn cheio" data-a="etapa" data-e="2">Continuar para o gov.br</button><button class="btn claro" data-a="voltar">Cancelar</button>`};
-  if(e===2)return{titulo:'gov.br',html:`
-    <span class="rotulo">Etapa 2 de 2 · Reconhecimento da assinatura</span><h2>Autorizar assinatura</h2>
-    <p class="aviso"><b>Simulação.</b> Nesta versão a tela do gov.br é representada aqui. No app final, a autenticação acontece no ambiente oficial.</p>
-    <div class="cartao"><span>O aplicativo <b>Celeiro</b> solicita o uso da sua identidade gov.br para assinar:</span><h3>${esc(p.titulo)}</h3></div>
-    <button class="btn cheio" data-a="confirmar-assinatura" data-id="${p.id}">Autorizar e assinar</button><button class="btn claro" data-a="voltar">Não autorizar</button>`};
+    <form class="pilha" data-form="assinar" novalidate>
+      ${campo('a-cpf','Seu CPF','text','','inputmode="numeric" autocomplete="off" placeholder="000.000.000-00"')}
+      ${comSenha?campo('a-senha','Sua senha, para confirmar que é você','password','','autocomplete="current-password"'):''}
+      <p class="apoio">A assinatura registra seu nome, CPF, data, hora e endereço de rede (IP). Na lista pública aparece só o primeiro nome e a inicial do sobrenome. Depois de assinar, não é possível retirar a assinatura por aqui.</p>
+      ${erro()}
+      <button class="btn cheio" type="submit">Assinar</button><button class="btn claro" type="button" data-a="voltar">Cancelar</button>
+    </form>`};
   const m=S.minhas[p.id];
   return {titulo:'Assinatura registrada',semVoltar:true,html:`
     <div class="pilha centro" style="gap:14px;margin-top:20px"><span class="avatar realce">${ic('ok')}</span><h2>Assinatura registrada</h2>
-    <p class="apoio">Sua assinatura em “${esc(p.titulo)}” foi reconhecida.</p></div>
+    <p class="apoio">Sua assinatura em “${esc(p.titulo)}” foi registrada.</p></div>
     <div class="cartao"><div class="linha" style="padding:4px 0"><span class="cresce apoio">Protocolo</span><b class="num">${esc(m.protocolo)}</b></div>
       <div class="linha" style="padding:4px 0"><span class="cresce apoio">Data</span><b class="num">${esc(m.data)}</b></div>
-      <div class="linha" style="padding:4px 0"><span class="cresce apoio">Validação</span><b>gov.br</b></div></div>
+      <div class="linha" style="padding:4px 0"><span class="cresce apoio">Assinante</span><b>${esc(S.usuario.nome)}</b></div></div>
     <button class="btn cheio" data-a="aba" data-v="peticoes">Ver abaixo-assinados</button>`}},
 
 veicular:()=>{const u=S.usuario||{};return{titulo:'Aquisição Veicular',html:`
@@ -571,7 +573,7 @@ assinantes:()=>{
   return {titulo:'Assinantes',html:`
   <h2>${esc(p.titulo)}</h2>
   <div class="cartao"><span class="num" style="font-size:28px;font-weight:600;line-height:1">${n(total(p))}</span><span class="apoio num">de ${n(p.meta)} · aberto até ${esc(p.prazo)}</span></div>
-  <section class="sec"><h3>Assinaturas mais recentes</h3><div class="lista">${p.sig.map(s=>`<div class="linha"><span class="cresce">${esc(s.nome)}<br><span class="apoio">Validada por gov.br</span></span><span class="apoio num">${esc(s.data)}</span></div>`).join('')||'<p class="apoio">Ainda sem assinaturas.</p>'}</div></section>
+  <section class="sec"><h3>Assinaturas mais recentes</h3><div class="lista">${p.sig.map(s=>`<div class="linha"><span class="cresce">${esc(s.nome)}<br><span class="apoio num">${s.cpf?'CPF '+esc(s.cpf)+' · ':''}${esc(s.protocolo||'assinatura de exemplo')}</span></span><span class="apoio num">${esc(s.data)}</span></div>`).join('')||'<p class="apoio">Ainda sem assinaturas.</p>'}</div></section>
   <button class="btn" data-a="encerrar" data-id="${p.id}">Encerrar abaixo-assinado</button>`}}
 };
 
@@ -634,10 +636,6 @@ const A={
   'abrir-peticao':d=>ir('peticao',{id:+d.id}),
   tocar:(d,el)=>{el.classList.toggle('tocando');el.querySelector('.txt').textContent=el.classList.contains('tocando')?'Reproduzindo (simulação)':'Pausado'},
   assinar:d=>{if(!S.usuario){S.depois=+d.id;ir('login',{motivo:'Entre na sua conta para assinar este abaixo-assinado.'})}else ir('assinatura',{id:+d.id,etapa:1})},
-  etapa:d=>trocar('assinatura',{id:atual().id,etapa:+d.e}),
-  'confirmar-assinatura':d=>{const p=S.peticoes.find(x=>x.id==d.id);
-    S.minhas[p.id]={protocolo:'CEL-'+new Date().getFullYear()+'-'+String(Math.floor(Math.random()*900000)+100000),data:hoje()};
-    p.sig.unshift({nome:S.usuario.nome,data:hoje()});trocar('assinatura',{id:p.id,etapa:3})},
   'alternar-admin':()=>{S.admin=!S.admin;desenhar();avisar(S.admin?'Perfil administrador ativado':'Perfil administrador desativado')},
   sair:()=>{S.usuario=null;S.admin=false;S.minhas={};S.conta=null;S.pilha=[{v:'abertura'}];desenhar()},
   'abrir-conta':()=>{if(!S.usuario){S.depois={v:'conta'};ir('login',{motivo:'Entre na sua conta para abrir a conta digital.'})}else ir('conta')},
@@ -695,6 +693,15 @@ const F={
     const r=await ContaDigital.abrirProposta(dados);
     Office.registrar('conta_digital',{nome:nm,telefone:dados.celular,email:dados.email,documento:doc,tipo_pessoa:t,nascimento:dados.nascimento,responsavel:dados.responsavel,protocolo:r.protocolo});
     S.conta={...dados,...r};trocar('conta');avisar('Proposta enviada para análise')},
+  assinar(){const p=S.peticoes.find(x=>x.id==atual().id),cpf=val('a-cpf'),dg=cpf.replace(/\D/g,''),comSenha=S.usuario.metodo==='e-mail e senha';
+    if(!cpfOk(cpf))return falhar('CPF inválido. Confira os números.');
+    if(comSenha&&!document.getElementById('a-senha').value)return falhar('Digite a sua senha para confirmar.');
+    if(p.sig.some(x=>x.cpf===dg))return falhar('Este CPF já assinou este abaixo-assinado.');
+    // No app publicado, este registro é feito pela função "assinar" do banco (supabase-cliente.sql), que grava também o IP.
+    const protocolo='CEL-'+new Date().getFullYear()+'-'+Math.random().toString(36).slice(2,10).toUpperCase().padEnd(8,'0');
+    S.minhas[p.id]={protocolo,data:hoje()};
+    p.sig.unshift({nome:S.usuario.nome,cpf:dg,protocolo,data:hoje()});
+    trocar('assinatura',{id:p.id,etapa:3})},
   dados(){const nm=val('d-nome'),em=val('d-email');
     if(nm.length<3)return falhar('Digite o seu nome completo.');
     if(!emailOk(em))return falhar('Digite um e-mail válido.');
