@@ -3820,7 +3820,1017 @@ grant execute on function public.fin_fluxo(uuid, date, date)        to authentic
 grant execute on function public.fin_dashboard(uuid, date, date)    to authenticated;
 
 -- =====================================================================
--- 13) PRIMEIRO USUÁRIO MASTER
+-- 13) INVESTIMENTOS
+--    Projetos de captação, investidores (aportes), retorno esperado x real,
+--    indicadores, links de indicação com comissão e relatório de comissões.
+--    - Cada organização tem os próprios projetos; organizacao_id nulo =
+--      projetos da própria Celeiro (só a equipe Celeiro alcança).
+--    - Investidor é sempre uma pessoa do Cadastro da mesma origem.
+--    - O link de indicação abre uma página pública que só registra o
+--      interesse de quem recebeu o link. Essas duas operações são as únicas
+--      do sistema que funcionam sem login; elas não devolvem dados internos.
+--    - As tabelas não são lidas direto pelo navegador.
+-- =====================================================================
+
+create table if not exists public.inv_projetos (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  numero         bigint generated always as identity,
+  nome           text not null check (char_length(nome) between 1 and 160),
+  produto        text not null default '' check (char_length(produto) <= 60),
+  descricao      text not null default '' check (char_length(descricao) <= 4000),
+  meta           numeric(14,2) not null check (meta > 0),
+  taxa_esperada  numeric(7,3) not null default 0 check (taxa_esperada >= 0 and taxa_esperada <= 1000),
+  prazo_meses    int check (prazo_meses is null or prazo_meses between 1 and 600),
+  inicio         date,
+  fim_captacao   date,
+  status         text not null default 'captando' check (status in ('rascunho','captando','encerrado','cancelado')),
+  envolvidos     jsonb not null default '[]'::jsonb,
+  criado_por     uuid,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+create index if not exists inv_projetos_org on public.inv_projetos (organizacao_id);
+
+create table if not exists public.inv_indicadores (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  nome           text not null check (char_length(nome) between 1 and 160),
+  documento      text not null default '' check (char_length(documento) <= 20),
+  email          text not null default '' check (char_length(email) <= 254),
+  telefone       text not null default '' check (char_length(telefone) <= 30),
+  percentual     numeric(6,3) not null default 0 check (percentual >= 0 and percentual <= 100),
+  chave_pix      text not null default '' check (char_length(chave_pix) <= 120),
+  observacoes    text not null default '' check (char_length(observacoes) <= 1000),
+  ativo          boolean not null default true,
+  criado_em      timestamptz not null default now()
+);
+create index if not exists inv_indicadores_org on public.inv_indicadores (organizacao_id);
+
+create table if not exists public.inv_links (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  codigo         text not null unique check (codigo ~ '^[a-f0-9]{12}$'),
+  indicador_id   uuid not null references public.inv_indicadores(id) on delete cascade,
+  projeto_id     uuid references public.inv_projetos(id) on delete cascade,
+  percentual     numeric(6,3) not null check (percentual >= 0 and percentual <= 100),
+  ativo          boolean not null default true,
+  criado_em      timestamptz not null default now()
+);
+create index if not exists inv_links_indicador on public.inv_links (indicador_id);
+
+create table if not exists public.inv_aportes (
+  id                  uuid primary key default gen_random_uuid(),
+  organizacao_id      uuid references public.organizacoes(id) on delete cascade,
+  projeto_id          uuid not null references public.inv_projetos(id),
+  investidor_tipo     text not null check (investidor_tipo in ('pf','pj')),
+  investidor_id       uuid not null,
+  investidor_nome     text not null,
+  investidor_documento text not null default '',
+  data                date not null,
+  valor               numeric(14,2) not null check (valor > 0),
+  taxa_esperada       numeric(7,3) not null check (taxa_esperada >= 0 and taxa_esperada <= 1000),
+  indicador_id        uuid references public.inv_indicadores(id),
+  comissao_percentual numeric(6,3) not null default 0 check (comissao_percentual >= 0 and comissao_percentual <= 100),
+  comissao_valor      numeric(14,2) not null default 0,
+  comissao_paga_em    date,
+  status              text not null default 'ativo' check (status in ('ativo','cancelado')),
+  observacoes         text not null default '' check (char_length(observacoes) <= 1000),
+  criado_por          uuid,
+  criado_em           timestamptz not null default now()
+);
+create index if not exists inv_aportes_projeto on public.inv_aportes (projeto_id);
+create index if not exists inv_aportes_indicador on public.inv_aportes (indicador_id);
+
+create table if not exists public.inv_retornos (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  projeto_id     uuid not null references public.inv_projetos(id),
+  data           date not null,
+  valor          numeric(14,2) not null check (valor > 0),
+  descricao      text not null default '' check (char_length(descricao) <= 200),
+  criado_por     uuid,
+  criado_em      timestamptz not null default now()
+);
+create index if not exists inv_retornos_projeto on public.inv_retornos (projeto_id);
+
+create table if not exists public.inv_interesses (
+  id               uuid primary key default gen_random_uuid(),
+  organizacao_id   uuid references public.organizacoes(id) on delete cascade,
+  link_id          uuid references public.inv_links(id) on delete set null,
+  indicador_id     uuid references public.inv_indicadores(id) on delete set null,
+  projeto_id       uuid references public.inv_projetos(id) on delete set null,
+  nome             text not null,
+  email            text not null default '',
+  telefone         text not null default '',
+  valor_pretendido numeric(14,2),
+  mensagem         text not null default '',
+  status           text not null default 'novo' check (status in ('novo','em_contato','convertido','descartado')),
+  ip               text,
+  criado_em        timestamptz not null default now()
+);
+create index if not exists inv_interesses_org on public.inv_interesses (organizacao_id, criado_em desc);
+create index if not exists inv_interesses_link on public.inv_interesses (link_id, criado_em);
+
+alter table public.inv_projetos    enable row level security;
+alter table public.inv_indicadores enable row level security;
+alter table public.inv_links       enable row level security;
+alter table public.inv_aportes     enable row level security;
+alter table public.inv_retornos    enable row level security;
+alter table public.inv_interesses  enable row level security;
+
+drop trigger if exists auditar_inv_projetos on public.inv_projetos;
+create trigger auditar_inv_projetos after insert or update or delete on public.inv_projetos
+  for each row execute function public.auditar('Investimentos');
+drop trigger if exists auditar_inv_indicadores on public.inv_indicadores;
+create trigger auditar_inv_indicadores after insert or update or delete on public.inv_indicadores
+  for each row execute function public.auditar('Investimentos');
+drop trigger if exists auditar_inv_links on public.inv_links;
+create trigger auditar_inv_links after insert or update or delete on public.inv_links
+  for each row execute function public.auditar('Investimentos');
+drop trigger if exists auditar_inv_aportes on public.inv_aportes;
+create trigger auditar_inv_aportes after insert or update or delete on public.inv_aportes
+  for each row execute function public.auditar('Investimentos');
+drop trigger if exists auditar_inv_retornos on public.inv_retornos;
+create trigger auditar_inv_retornos after insert or update or delete on public.inv_retornos
+  for each row execute function public.auditar('Investimentos');
+drop trigger if exists auditar_inv_interesses on public.inv_interesses;
+create trigger auditar_inv_interesses after update or delete on public.inv_interesses
+  for each row execute function public.auditar('Investimentos');
+
+-- O usuário atual alcança os projetos desta organização? (nulo = Celeiro)
+create or replace function public.inv_escopo_ok(p_org uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select public.pode_modulo('investimentos')
+     and coalesce(
+       (public.eh_equipe() and (p_org is null or exists (select 1 from public.organizacoes o where o.id = p_org)))
+       or (p_org is not null and p_org = public.minha_org()), false);
+$$;
+
+create or replace function public.inv_exige(p_org uuid)
+returns void
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.inv_escopo_ok(p_org) then
+    raise exception 'Investimentos não disponível para você nesta organização';
+  end if;
+end;
+$$;
+
+-- Lê número de um campo; devolve nulo se vazio e erro claro se não for número
+create or replace function public.inv_numero(p_dados jsonb, p_chave text)
+returns numeric
+language plpgsql
+immutable
+set search_path = ''
+as $$
+begin
+  if coalesce(p_dados ->> p_chave, '') = '' then
+    return null;
+  end if;
+  return (p_dados ->> p_chave)::numeric;
+exception when others then
+  raise exception 'Confira os números informados';
+end;
+$$;
+
+create or replace function public.inv_data(p_dados jsonb, p_chave text)
+returns date
+language plpgsql
+immutable
+set search_path = ''
+as $$
+begin
+  if coalesce(p_dados ->> p_chave, '') = '' then
+    return null;
+  end if;
+  return (p_dados ->> p_chave)::date;
+exception when others then
+  raise exception 'Confira as datas informadas';
+end;
+$$;
+
+create or replace function public.inv_codigo(p_numero bigint)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select 'PRJ-' || lpad(p_numero::text, 4, '0');
+$$;
+
+-- Pessoas do Cadastro que podem ser investidoras
+create or replace function public.inv_pessoas(p_org uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.inv_exige(p_org);
+  return coalesce((
+    select jsonb_agg(x order by x ->> 'nome') from (
+      select jsonb_build_object('tipo', 'pf', 'id', f.id, 'nome', f.nome_completo, 'documento', f.cpf) as x
+      from public.cadastro_pf f where f.organizacao_id is not distinct from p_org and f.situacao = 'ativo'
+      union all
+      select jsonb_build_object('tipo', 'pj', 'id', j.id, 'nome', j.razao_social, 'documento', j.cnpj)
+      from public.cadastro_pj j where j.organizacao_id is not distinct from p_org and j.situacao = 'ativo'
+      limit 2000
+    ) s), '[]'::jsonb);
+end;
+$$;
+
+-- Resumo de um projeto (uso interno)
+create or replace function public.inv_projeto_json(p public.inv_projetos)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'id', p.id, 'codigo', public.inv_codigo(p.numero), 'nome', p.nome, 'produto', p.produto, 'descricao', p.descricao,
+    'meta', p.meta, 'taxa_esperada', p.taxa_esperada, 'prazo_meses', p.prazo_meses,
+    'inicio', p.inicio, 'fim_captacao', p.fim_captacao, 'status', p.status, 'envolvidos', p.envolvidos,
+    'captado', coalesce((select sum(a.valor) from public.inv_aportes a where a.projeto_id = p.id and a.status = 'ativo'), 0),
+    'investidores', (select count(distinct a.investidor_id) from public.inv_aportes a where a.projeto_id = p.id and a.status = 'ativo'),
+    'retornos', coalesce((select sum(r.valor) from public.inv_retornos r where r.projeto_id = p.id), 0));
+$$;
+
+create or replace function public.inv_projetos_listar(p_org uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.inv_exige(p_org);
+  return coalesce((
+    select jsonb_agg(public.inv_projeto_json(p) order by p.numero desc)
+    from public.inv_projetos p where p.organizacao_id is not distinct from p_org), '[]'::jsonb);
+end;
+$$;
+
+-- Cria ou altera um projeto de captação
+create or replace function public.inv_projeto_salvar(p_id uuid, p_org uuid, p_dados jsonb)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d      jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_nome   text := left(trim(coalesce(v_d ->> 'nome', '')), 160);
+  v_meta   numeric := public.inv_numero(v_d, 'meta');
+  v_taxa   numeric := coalesce(public.inv_numero(v_d, 'taxa_esperada'), 0);
+  v_prazo  numeric := public.inv_numero(v_d, 'prazo_meses');
+  v_ini    date := public.inv_data(v_d, 'inicio');
+  v_fim    date := public.inv_data(v_d, 'fim_captacao');
+  v_status text := coalesce(nullif(v_d ->> 'status', ''), 'captando');
+  v_env    jsonb := '[]'::jsonb;
+  v_e      jsonb;
+  v_id     uuid;
+begin
+  perform public.inv_exige(p_org);
+  if p_id is not null and not exists (select 1 from public.inv_projetos where id = p_id and organizacao_id is not distinct from p_org) then
+    raise exception 'Projeto não encontrado';
+  end if;
+  if char_length(v_nome) = 0 then
+    raise exception 'Informe o nome do projeto';
+  end if;
+  if v_meta is null or round(v_meta, 2) <= 0 or v_meta > 999999999999.99 then
+    raise exception 'Informe o valor a ser arrecadado';
+  end if;
+  if v_taxa < 0 or v_taxa > 1000 then
+    raise exception 'Taxa de retorno esperada inválida';
+  end if;
+  if v_prazo is not null and (v_prazo < 1 or v_prazo > 600 or v_prazo <> trunc(v_prazo)) then
+    raise exception 'Prazo inválido';
+  end if;
+  if v_ini is not null and v_fim is not null and v_fim < v_ini then
+    raise exception 'O fim da captação não pode ser anterior ao início';
+  end if;
+  if v_status not in ('rascunho','captando','encerrado','cancelado') then
+    raise exception 'Situação inválida';
+  end if;
+  if jsonb_typeof(v_d -> 'envolvidos') = 'array' then
+    if jsonb_array_length(v_d -> 'envolvidos') > 40 then
+      raise exception 'Máximo de 40 envolvidos por projeto';
+    end if;
+    for v_e in select * from jsonb_array_elements(v_d -> 'envolvidos') loop
+      if char_length(trim(coalesce(v_e ->> 'nome', ''))) > 0 then
+        v_env := v_env || jsonb_build_object(
+          'nome', left(trim(v_e ->> 'nome'), 160),
+          'papel', left(trim(coalesce(v_e ->> 'papel', '')), 80),
+          'contato', left(trim(coalesce(v_e ->> 'contato', '')), 160));
+      end if;
+    end loop;
+  end if;
+  if v_status = 'cancelado' and p_id is not null
+     and exists (select 1 from public.inv_aportes where projeto_id = p_id and status = 'ativo') then
+    raise exception 'Este projeto tem investidores. Cancele os aportes antes de cancelar o projeto';
+  end if;
+
+  if p_id is null then
+    insert into public.inv_projetos (organizacao_id, nome, produto, descricao, meta, taxa_esperada, prazo_meses,
+      inicio, fim_captacao, status, envolvidos, criado_por)
+    values (p_org, v_nome, left(trim(coalesce(v_d ->> 'produto', '')), 60), left(coalesce(v_d ->> 'descricao', ''), 4000),
+      round(v_meta, 2), v_taxa, v_prazo::int, v_ini, v_fim, v_status, v_env, (select auth.uid()))
+    returning id into v_id;
+    return v_id;
+  end if;
+  update public.inv_projetos
+     set nome = v_nome, produto = left(trim(coalesce(v_d ->> 'produto', '')), 60),
+         descricao = left(coalesce(v_d ->> 'descricao', ''), 4000), meta = round(v_meta, 2),
+         taxa_esperada = v_taxa, prazo_meses = v_prazo::int, inicio = v_ini, fim_captacao = v_fim,
+         status = v_status, envolvidos = v_env, atualizado_em = now()
+   where id = p_id;
+  return p_id;
+end;
+$$;
+
+-- Página de um projeto: dados, investidores (aportes), retornos e links de indicação
+create or replace function public.inv_projeto_ver(p_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_p public.inv_projetos%rowtype;
+begin
+  select * into v_p from public.inv_projetos where id = p_id;
+  if v_p.id is null or not public.inv_escopo_ok(v_p.organizacao_id) then
+    raise exception 'Projeto não encontrado';
+  end if;
+  return public.inv_projeto_json(v_p) || jsonb_build_object(
+    'aportes', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', a.id, 'investidor_tipo', a.investidor_tipo, 'investidor_id', a.investidor_id,
+        'investidor_nome', a.investidor_nome, 'investidor_documento', a.investidor_documento,
+        'data', a.data, 'valor', a.valor, 'taxa_esperada', a.taxa_esperada, 'status', a.status,
+        'indicador_id', a.indicador_id,
+        'indicador', (select i.nome from public.inv_indicadores i where i.id = a.indicador_id),
+        'comissao_percentual', a.comissao_percentual, 'comissao_valor', a.comissao_valor,
+        'observacoes', a.observacoes) order by a.data desc, a.criado_em desc)
+      from public.inv_aportes a where a.projeto_id = p_id), '[]'::jsonb),
+    'lista_retornos', coalesce((
+      select jsonb_agg(jsonb_build_object('id', r.id, 'data', r.data, 'valor', r.valor, 'descricao', r.descricao)
+               order by r.data desc, r.criado_em desc)
+      from public.inv_retornos r where r.projeto_id = p_id), '[]'::jsonb));
+end;
+$$;
+
+-- Vincula um investidor ao projeto (aporte)
+create or replace function public.inv_aporte_salvar(p_projeto uuid, p_dados jsonb)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d     jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_p     public.inv_projetos%rowtype;
+  v_tipo  text := v_d ->> 'investidor_tipo';
+  v_pid   uuid := nullif(v_d ->> 'investidor_id', '')::uuid;
+  v_nome  text;
+  v_doc   text;
+  v_data  date := coalesce(public.inv_data(v_d, 'data'), current_date);
+  v_valor numeric := public.inv_numero(v_d, 'valor');
+  v_taxa  numeric := public.inv_numero(v_d, 'taxa_esperada');
+  v_ind   uuid := nullif(v_d ->> 'indicador_id', '')::uuid;
+  v_pct   numeric := coalesce(public.inv_numero(v_d, 'comissao_percentual'), 0);
+  v_id    uuid;
+begin
+  select * into v_p from public.inv_projetos where id = p_projeto;
+  if v_p.id is null or not public.inv_escopo_ok(v_p.organizacao_id) then
+    raise exception 'Projeto não encontrado';
+  end if;
+  if v_p.status <> 'captando' then
+    raise exception 'Só projetos em captação recebem novos investidores';
+  end if;
+  if v_tipo = 'pf' then
+    select f.nome_completo, f.cpf into v_nome, v_doc from public.cadastro_pf f
+     where f.id = v_pid and f.organizacao_id is not distinct from v_p.organizacao_id;
+  elsif v_tipo = 'pj' then
+    select j.razao_social, j.cnpj into v_nome, v_doc from public.cadastro_pj j
+     where j.id = v_pid and j.organizacao_id is not distinct from v_p.organizacao_id;
+  end if;
+  if v_nome is null then
+    raise exception 'Escolha o investidor entre as pessoas do Cadastro';
+  end if;
+  if v_data > current_date then
+    raise exception 'A data do aporte não pode ser futura';
+  end if;
+  if v_valor is null or round(v_valor, 2) <= 0 or v_valor > 999999999999.99 then
+    raise exception 'Informe o valor do aporte';
+  end if;
+  v_taxa := coalesce(v_taxa, v_p.taxa_esperada);
+  if v_taxa < 0 or v_taxa > 1000 then
+    raise exception 'Taxa de retorno esperada inválida';
+  end if;
+  if v_ind is not null then
+    if not exists (select 1 from public.inv_indicadores i
+                   where i.id = v_ind and i.organizacao_id is not distinct from v_p.organizacao_id and i.ativo) then
+      raise exception 'Indicador não encontrado ou inativo';
+    end if;
+    if v_pct < 0 or v_pct > 100 then
+      raise exception 'Percentual de comissão inválido';
+    end if;
+  else
+    v_pct := 0;
+  end if;
+  insert into public.inv_aportes (organizacao_id, projeto_id, investidor_tipo, investidor_id, investidor_nome,
+    investidor_documento, data, valor, taxa_esperada, indicador_id, comissao_percentual, comissao_valor,
+    observacoes, criado_por)
+  values (v_p.organizacao_id, v_p.id, v_tipo, v_pid, v_nome, coalesce(v_doc, ''), v_data, round(v_valor, 2), v_taxa,
+    v_ind, v_pct, round(round(v_valor, 2) * v_pct / 100, 2), left(coalesce(v_d ->> 'observacoes', ''), 1000),
+    (select auth.uid()))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function public.inv_aporte_cancelar(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_a public.inv_aportes%rowtype;
+begin
+  select * into v_a from public.inv_aportes where id = p_id;
+  if v_a.id is null or not public.inv_escopo_ok(v_a.organizacao_id) then
+    raise exception 'Aporte não encontrado';
+  end if;
+  if v_a.status = 'cancelado' then
+    return;
+  end if;
+  if v_a.comissao_paga_em is not null then
+    raise exception 'A comissão deste aporte já foi paga. Desfaça o pagamento antes de cancelar';
+  end if;
+  update public.inv_aportes set status = 'cancelado' where id = p_id;
+end;
+$$;
+
+-- Retorno real distribuído pelo projeto
+create or replace function public.inv_retorno_salvar(p_projeto uuid, p_data date, p_valor numeric, p_descricao text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid;
+  v_id  uuid;
+begin
+  if not exists (select 1 from public.inv_projetos where id = p_projeto) then
+    raise exception 'Projeto não encontrado';
+  end if;
+  select organizacao_id into v_org from public.inv_projetos where id = p_projeto;
+  if not public.inv_escopo_ok(v_org) then
+    raise exception 'Projeto não encontrado';
+  end if;
+  if p_data is null or p_data > current_date then
+    raise exception 'Informe a data do retorno, que não pode ser futura';
+  end if;
+  if p_valor is null or round(p_valor, 2) <= 0 or p_valor > 999999999999.99 then
+    raise exception 'Informe o valor do retorno';
+  end if;
+  insert into public.inv_retornos (organizacao_id, projeto_id, data, valor, descricao, criado_por)
+  values (v_org, p_projeto, p_data, round(p_valor, 2), left(trim(coalesce(p_descricao, '')), 200), (select auth.uid()))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function public.inv_retorno_excluir(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid;
+begin
+  if not exists (select 1 from public.inv_retornos where id = p_id) then
+    raise exception 'Retorno não encontrado';
+  end if;
+  select organizacao_id into v_org from public.inv_retornos where id = p_id;
+  if not public.inv_escopo_ok(v_org) then
+    raise exception 'Retorno não encontrado';
+  end if;
+  delete from public.inv_retornos where id = p_id;
+end;
+$$;
+
+-- Investidores, somando todos os projetos
+create or replace function public.inv_investidores(p_org uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.inv_exige(p_org);
+  return coalesce((
+    select jsonb_agg(x order by (x ->> 'total')::numeric desc) from (
+      select jsonb_build_object(
+        'tipo', a.investidor_tipo, 'id', a.investidor_id, 'nome', max(a.investidor_nome),
+        'documento', max(a.investidor_documento), 'total', sum(a.valor), 'aportes', count(*),
+        'projetos', (select jsonb_agg(distinct p.nome) from public.inv_aportes b
+                     join public.inv_projetos p on p.id = b.projeto_id
+                     where b.investidor_id = a.investidor_id and b.status = 'ativo'
+                       and b.organizacao_id is not distinct from p_org),
+        'primeiro', min(a.data), 'ultimo', max(a.data)) as x
+      from public.inv_aportes a
+      where a.organizacao_id is not distinct from p_org and a.status = 'ativo'
+      group by a.investidor_tipo, a.investidor_id) s), '[]'::jsonb);
+end;
+$$;
+
+-- Comparativo entre retorno esperado e retorno real, por projeto, até uma data.
+-- Esperado: juros simples de cada aporte, pela taxa anual dele, da data do aporte até p_ate.
+-- Real: retornos lançados até p_ate. As taxas ao ano dividem o retorno pelo capital x tempo.
+create or replace function public.inv_comparativo(p_org uuid, p_ate date)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.inv_exige(p_org);
+  if p_ate is null then
+    raise exception 'Informe a data';
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', p.id, 'codigo', public.inv_codigo(p.numero), 'nome', p.nome, 'status', p.status,
+      'taxa_projeto', p.taxa_esperada, 'aportado', coalesce(a.aportado, 0),
+      'esperado', round(coalesce(a.esperado, 0), 2), 'real', coalesce(r.real, 0),
+      'taxa_esperada_aa', case when coalesce(a.capital_dias, 0) > 0 then round(a.esperado / a.capital_dias * 365 * 100, 2) end,
+      'taxa_real_aa',     case when coalesce(a.capital_dias, 0) > 0 then round(coalesce(r.real, 0) / a.capital_dias * 365 * 100, 2) end
+    ) order by p.numero desc)
+    from public.inv_projetos p
+    left join lateral (
+      select sum(x.valor) as aportado,
+             sum(x.valor * x.taxa_esperada / 100 * (p_ate - x.data) / 365.0) as esperado,
+             sum(x.valor * (p_ate - x.data)) as capital_dias
+      from public.inv_aportes x where x.projeto_id = p.id and x.status = 'ativo' and x.data <= p_ate
+    ) a on true
+    left join lateral (
+      select sum(y.valor) as real from public.inv_retornos y where y.projeto_id = p.id and y.data <= p_ate
+    ) r on true
+    where p.organizacao_id is not distinct from p_org and p.status <> 'cancelado'), '[]'::jsonb);
+end;
+$$;
+
+-- Indicadores com totais e links
+create or replace function public.inv_indicadores_listar(p_org uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.inv_exige(p_org);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', i.id, 'nome', i.nome, 'documento', i.documento, 'email', i.email, 'telefone', i.telefone,
+      'percentual', i.percentual, 'chave_pix', i.chave_pix, 'observacoes', i.observacoes, 'ativo', i.ativo,
+      'base', coalesce((select sum(a.valor) from public.inv_aportes a where a.indicador_id = i.id and a.status = 'ativo'), 0),
+      'comissao', coalesce((select sum(a.comissao_valor) from public.inv_aportes a where a.indicador_id = i.id and a.status = 'ativo'), 0),
+      'a_pagar', coalesce((select sum(a.comissao_valor) from public.inv_aportes a
+                           where a.indicador_id = i.id and a.status = 'ativo' and a.comissao_paga_em is null), 0),
+      'indicados', (select count(distinct a.investidor_id) from public.inv_aportes a where a.indicador_id = i.id and a.status = 'ativo'),
+      'interesses', (select count(*) from public.inv_interesses n where n.indicador_id = i.id),
+      'links', coalesce((
+        select jsonb_agg(jsonb_build_object('id', l.id, 'codigo', l.codigo, 'percentual', l.percentual, 'ativo', l.ativo,
+                 'projeto_id', l.projeto_id,
+                 'projeto', (select p.nome from public.inv_projetos p where p.id = l.projeto_id),
+                 'interesses', (select count(*) from public.inv_interesses n where n.link_id = l.id))
+                 order by l.criado_em desc)
+        from public.inv_links l where l.indicador_id = i.id), '[]'::jsonb)
+    ) order by i.nome)
+    from public.inv_indicadores i where i.organizacao_id is not distinct from p_org), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.inv_indicador_salvar(p_id uuid, p_org uuid, p_dados jsonb)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d    jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_nome text := left(trim(coalesce(v_d ->> 'nome', '')), 160);
+  v_mail text := left(trim(lower(coalesce(v_d ->> 'email', ''))), 254);
+  v_pct  numeric := coalesce(public.inv_numero(v_d, 'percentual'), 0);
+  v_id   uuid;
+begin
+  perform public.inv_exige(p_org);
+  if p_id is not null and not exists (select 1 from public.inv_indicadores where id = p_id and organizacao_id is not distinct from p_org) then
+    raise exception 'Indicador não encontrado';
+  end if;
+  if char_length(v_nome) = 0 then
+    raise exception 'Informe o nome do indicador';
+  end if;
+  if v_mail <> '' and v_mail !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
+    raise exception 'E-mail inválido';
+  end if;
+  if v_pct < 0 or v_pct > 100 then
+    raise exception 'O percentual de comissão fica entre 0 e 100';
+  end if;
+  if p_id is null then
+    insert into public.inv_indicadores (organizacao_id, nome, documento, email, telefone, percentual, chave_pix, observacoes)
+    values (p_org, v_nome, left(trim(coalesce(v_d ->> 'documento', '')), 20), v_mail,
+      left(trim(coalesce(v_d ->> 'telefone', '')), 30), v_pct, left(trim(coalesce(v_d ->> 'chave_pix', '')), 120),
+      left(coalesce(v_d ->> 'observacoes', ''), 1000))
+    returning id into v_id;
+    return v_id;
+  end if;
+  update public.inv_indicadores
+     set nome = v_nome, documento = left(trim(coalesce(v_d ->> 'documento', '')), 20), email = v_mail,
+         telefone = left(trim(coalesce(v_d ->> 'telefone', '')), 30), percentual = v_pct,
+         chave_pix = left(trim(coalesce(v_d ->> 'chave_pix', '')), 120),
+         observacoes = left(coalesce(v_d ->> 'observacoes', ''), 1000),
+         ativo = coalesce((v_d ->> 'ativo')::boolean, true)
+   where id = p_id;
+  return p_id;
+end;
+$$;
+
+-- Cria um link de indicação (geral ou de um projeto), com o percentual de comissão
+create or replace function public.inv_link_criar(p_indicador uuid, p_projeto uuid, p_percentual numeric)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_i   public.inv_indicadores%rowtype;
+  v_pct numeric;
+  v_cod text;
+  v_id  uuid;
+begin
+  select * into v_i from public.inv_indicadores where id = p_indicador;
+  if v_i.id is null or not public.inv_escopo_ok(v_i.organizacao_id) then
+    raise exception 'Indicador não encontrado';
+  end if;
+  if not v_i.ativo then
+    raise exception 'Indicador inativo';
+  end if;
+  if p_projeto is not null and not exists (
+       select 1 from public.inv_projetos p
+       where p.id = p_projeto and p.organizacao_id is not distinct from v_i.organizacao_id and p.status = 'captando') then
+    raise exception 'Escolha um projeto em captação';
+  end if;
+  v_pct := coalesce(p_percentual, v_i.percentual);
+  if v_pct < 0 or v_pct > 100 then
+    raise exception 'O percentual de comissão fica entre 0 e 100';
+  end if;
+  if (select count(*) from public.inv_links where indicador_id = p_indicador and ativo) >= 30 then
+    raise exception 'Limite de 30 links ativos por indicador';
+  end if;
+  v_cod := substr(replace(gen_random_uuid()::text, '-', ''), 1, 12);
+  insert into public.inv_links (organizacao_id, codigo, indicador_id, projeto_id, percentual)
+  values (v_i.organizacao_id, v_cod, p_indicador, p_projeto, v_pct)
+  returning id into v_id;
+  return jsonb_build_object('id', v_id, 'codigo', v_cod, 'percentual', v_pct);
+end;
+$$;
+
+create or replace function public.inv_link_ativar(p_id uuid, p_ativo boolean)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid;
+begin
+  if not exists (select 1 from public.inv_links where id = p_id) then
+    raise exception 'Link não encontrado';
+  end if;
+  select organizacao_id into v_org from public.inv_links where id = p_id;
+  if not public.inv_escopo_ok(v_org) then
+    raise exception 'Link não encontrado';
+  end if;
+  update public.inv_links set ativo = coalesce(p_ativo, false) where id = p_id and ativo is distinct from coalesce(p_ativo, false);
+end;
+$$;
+
+-- Interesses recebidos pelos links de indicação
+create or replace function public.inv_interesses_listar(p_org uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.inv_exige(p_org);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', n.id, 'nome', n.nome, 'email', n.email, 'telefone', n.telefone,
+      'valor_pretendido', n.valor_pretendido, 'mensagem', n.mensagem, 'status', n.status, 'criado_em', n.criado_em,
+      'indicador_id', n.indicador_id,
+      'indicador', (select i.nome from public.inv_indicadores i where i.id = n.indicador_id),
+      'projeto', (select p.nome from public.inv_projetos p where p.id = n.projeto_id),
+      'percentual', (select l.percentual from public.inv_links l where l.id = n.link_id)
+    ) order by n.criado_em desc)
+    from (select * from public.inv_interesses where organizacao_id is not distinct from p_org
+          order by criado_em desc limit 500) n), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.inv_interesse_status(p_id uuid, p_status text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid;
+begin
+  if not exists (select 1 from public.inv_interesses where id = p_id) then
+    raise exception 'Registro não encontrado';
+  end if;
+  select organizacao_id into v_org from public.inv_interesses where id = p_id;
+  if not public.inv_escopo_ok(v_org) then
+    raise exception 'Registro não encontrado';
+  end if;
+  if p_status is null or p_status not in ('novo','em_contato','convertido','descartado') then
+    raise exception 'Situação inválida';
+  end if;
+  update public.inv_interesses set status = p_status where id = p_id and status <> p_status;
+end;
+$$;
+
+-- Relatório de comissões por período (data do aporte)
+create or replace function public.inv_comissoes(p_org uuid, p_ini date, p_fim date)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.inv_exige(p_org);
+  if p_ini is null or p_fim is null or p_fim < p_ini then
+    raise exception 'Período inválido';
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'aporte_id', a.id, 'data', a.data, 'indicador_id', a.indicador_id, 'indicador', i.nome,
+      'chave_pix', i.chave_pix, 'projeto', p.nome, 'investidor', a.investidor_nome,
+      'base', a.valor, 'percentual', a.comissao_percentual, 'comissao', a.comissao_valor,
+      'paga_em', a.comissao_paga_em) order by i.nome, a.data, a.criado_em)
+    from public.inv_aportes a
+    join public.inv_indicadores i on i.id = a.indicador_id
+    join public.inv_projetos p on p.id = a.projeto_id
+    where a.organizacao_id is not distinct from p_org and a.status = 'ativo'
+      and a.data between p_ini and p_fim), '[]'::jsonb);
+end;
+$$;
+
+-- Marca (ou desmarca, com data nula) o pagamento da comissão de um aporte
+create or replace function public.inv_comissao_pagar(p_aporte uuid, p_data date)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_a public.inv_aportes%rowtype;
+begin
+  select * into v_a from public.inv_aportes where id = p_aporte;
+  if v_a.id is null or not public.inv_escopo_ok(v_a.organizacao_id) then
+    raise exception 'Aporte não encontrado';
+  end if;
+  if v_a.indicador_id is null or v_a.status <> 'ativo' then
+    raise exception 'Este aporte não tem comissão';
+  end if;
+  if p_data is not null and p_data > current_date then
+    raise exception 'A data do pagamento não pode ser futura';
+  end if;
+  update public.inv_aportes set comissao_paga_em = p_data where id = p_aporte and comissao_paga_em is distinct from p_data;
+end;
+$$;
+
+-- Dashboard de investimentos
+create or replace function public.inv_dashboard(p_org uuid, p_ini date, p_fim date)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.inv_exige(p_org);
+  if p_ini is null or p_fim is null or p_fim < p_ini then
+    raise exception 'Período inválido';
+  end if;
+  return (
+    with a as (
+      select * from public.inv_aportes where organizacao_id is not distinct from p_org and status = 'ativo'
+    ), pj as (
+      select * from public.inv_projetos where organizacao_id is not distinct from p_org and status <> 'cancelado'
+    ), meses as (
+      select date_trunc('month', p_fim)::date - (n || ' months')::interval as mes from generate_series(5, 0, -1) n
+    )
+    select jsonb_build_object(
+      'captado_total',   coalesce((select sum(valor) from a), 0),
+      'captado_periodo', coalesce((select sum(valor) from a where data between p_ini and p_fim), 0),
+      'investidores',    (select count(distinct investidor_id) from a),
+      'investidores_periodo', (select count(distinct investidor_id) from a where data between p_ini and p_fim),
+      'projetos_captando', (select count(*) from pj where status = 'captando'),
+      'meta_total',      coalesce((select sum(meta) from pj where status in ('captando','encerrado')), 0),
+      'retornos',        coalesce((select sum(r.valor) from public.inv_retornos r join pj on pj.id = r.projeto_id), 0),
+      'comissao_total',  coalesce((select sum(comissao_valor) from a where indicador_id is not null), 0),
+      'comissao_paga',   coalesce((select sum(comissao_valor) from a where indicador_id is not null and comissao_paga_em is not null), 0),
+      'comissao_periodo', coalesce((select sum(comissao_valor) from a where indicador_id is not null and data between p_ini and p_fim), 0),
+      'interesses_novos', (select count(*) from public.inv_interesses n where n.organizacao_id is not distinct from p_org and n.status = 'novo'),
+      'meses', (select jsonb_agg(jsonb_build_object(
+                  'mes', to_char(m.mes, 'YYYY-MM'),
+                  'captado', coalesce((select sum(valor) from a where date_trunc('month', data) = m.mes), 0),
+                  'acumulado', coalesce((select sum(valor) from a where data < (m.mes + interval '1 month')), 0)
+                ) order by m.mes) from meses m),
+      'por_projeto', coalesce((
+        select jsonb_agg(jsonb_build_object(
+                 'id', pj.id, 'codigo', public.inv_codigo(pj.numero), 'nome', pj.nome, 'status', pj.status, 'meta', pj.meta,
+                 'captado', coalesce((select sum(valor) from a where projeto_id = pj.id), 0),
+                 'investidores', (select count(distinct investidor_id) from a where projeto_id = pj.id)) order by pj.numero desc)
+        from pj), '[]'::jsonb),
+      'por_indicador', coalesce((
+        select jsonb_agg(x order by (x ->> 'comissao')::numeric desc) from (
+          select jsonb_build_object('nome', i.nome, 'base', sum(a.valor), 'comissao', sum(a.comissao_valor),
+                   'a_pagar', coalesce(sum(a.comissao_valor) filter (where a.comissao_paga_em is null), 0),
+                   'indicados', count(distinct a.investidor_id)) as x
+          from a join public.inv_indicadores i on i.id = a.indicador_id
+          group by i.id, i.nome order by sum(a.comissao_valor) desc limit 8) s), '[]'::jsonb))
+  );
+end;
+$$;
+
+-- ---------- Operações públicas do link de indicação (funcionam sem login) ----------
+
+-- O que a página pública mostra: quem indicou (primeiro nome) e o projeto, se houver
+create or replace function public.inv_link_publico(p_codigo text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select jsonb_build_object('ok', true,
+      'indicador', split_part(i.nome, ' ', 1),
+      'projeto', (select p.nome from public.inv_projetos p where p.id = l.projeto_id),
+      'empresa', coalesce((select o.nome from public.organizacoes o where o.id = l.organizacao_id), 'Celeiro Administradora'))
+    from public.inv_links l
+    join public.inv_indicadores i on i.id = l.indicador_id and i.ativo
+    where l.codigo = lower(trim(coalesce(p_codigo, ''))) and l.ativo
+      and (l.organizacao_id is null or exists (select 1 from public.organizacoes o where o.id = l.organizacao_id and o.ativo))
+      and (l.projeto_id is null or exists (select 1 from public.inv_projetos p where p.id = l.projeto_id and p.status = 'captando'))
+  ), jsonb_build_object('ok', false));
+$$;
+
+-- Registra o interesse de quem recebeu o link
+create or replace function public.inv_interesse_registrar(p_codigo text, p_dados jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d     jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_l     public.inv_links%rowtype;
+  v_nome  text := left(trim(coalesce(v_d ->> 'nome', '')), 120);
+  v_mail  text := left(trim(lower(coalesce(v_d ->> 'email', ''))), 254);
+  v_tel   text := left(trim(coalesce(v_d ->> 'telefone', '')), 30);
+  v_valor numeric;
+  v_ip    text := nullif(trim(split_part(coalesce(public.cabecalho('x-forwarded-for'), ''), ',', 1)), '');
+begin
+  if pg_column_size(v_d) > 4000 then
+    raise exception 'Dados inválidos';
+  end if;
+  if (public.inv_link_publico(p_codigo) ->> 'ok')::boolean is not true then
+    raise exception 'Este link não está mais disponível';
+  end if;
+  select * into v_l from public.inv_links where codigo = lower(trim(p_codigo));
+  if char_length(v_nome) < 2 then
+    raise exception 'Informe seu nome';
+  end if;
+  if v_mail !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
+    raise exception 'Informe um e-mail válido';
+  end if;
+  if (v_d ->> 'aceite') is distinct from 'true' then
+    raise exception 'É preciso autorizar o contato para enviar';
+  end if;
+  begin
+    v_valor := round(nullif(v_d ->> 'valor_pretendido', '')::numeric, 2);
+  exception when others then
+    v_valor := null;
+  end;
+  if v_valor is not null and (v_valor < 0 or v_valor > 999999999999.99) then
+    v_valor := null;
+  end if;
+  -- Freios contra abuso: por link, por endereço e no total
+  if (select count(*) from public.inv_interesses where link_id = v_l.id and criado_em > now() - interval '1 hour') >= 20
+     or (v_ip is not null and (select count(*) from public.inv_interesses where ip = v_ip and criado_em > now() - interval '1 hour') >= 5)
+     or (select count(*) from public.inv_interesses where criado_em > now() - interval '1 day') >= 500 then
+    raise exception 'Muitos envios em pouco tempo. Tente de novo mais tarde';
+  end if;
+  insert into public.inv_interesses (organizacao_id, link_id, indicador_id, projeto_id, nome, email, telefone,
+    valor_pretendido, mensagem, ip)
+  values (v_l.organizacao_id, v_l.id, v_l.indicador_id, v_l.projeto_id, v_nome, v_mail, v_tel,
+    v_valor, left(trim(coalesce(v_d ->> 'mensagem', '')), 500), v_ip);
+  perform public.grava_auditoria('Interesse recebido por link de indicação', 'Investimentos', 'inv_interesses', null,
+    jsonb_build_object('link', v_l.codigo, 'indicador_id', v_l.indicador_id, 'projeto_id', v_l.projeto_id), 'link');
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+revoke all on public.inv_projetos, public.inv_indicadores, public.inv_links, public.inv_aportes,
+  public.inv_retornos, public.inv_interesses from anon, authenticated;
+
+revoke all on function public.inv_projeto_json(public.inv_projetos) from public, anon, authenticated;
+
+revoke all on function public.inv_escopo_ok(uuid)                 from public, anon;
+revoke all on function public.inv_exige(uuid)                     from public, anon;
+revoke all on function public.inv_numero(jsonb, text)             from public, anon;
+revoke all on function public.inv_data(jsonb, text)               from public, anon;
+revoke all on function public.inv_codigo(bigint)                  from public, anon;
+revoke all on function public.inv_pessoas(uuid)                   from public, anon;
+revoke all on function public.inv_projetos_listar(uuid)           from public, anon;
+revoke all on function public.inv_projeto_salvar(uuid, uuid, jsonb) from public, anon;
+revoke all on function public.inv_projeto_ver(uuid)               from public, anon;
+revoke all on function public.inv_aporte_salvar(uuid, jsonb)      from public, anon;
+revoke all on function public.inv_aporte_cancelar(uuid)           from public, anon;
+revoke all on function public.inv_retorno_salvar(uuid, date, numeric, text) from public, anon;
+revoke all on function public.inv_retorno_excluir(uuid)           from public, anon;
+revoke all on function public.inv_investidores(uuid)              from public, anon;
+revoke all on function public.inv_comparativo(uuid, date)         from public, anon;
+revoke all on function public.inv_indicadores_listar(uuid)        from public, anon;
+revoke all on function public.inv_indicador_salvar(uuid, uuid, jsonb) from public, anon;
+revoke all on function public.inv_link_criar(uuid, uuid, numeric) from public, anon;
+revoke all on function public.inv_link_ativar(uuid, boolean)      from public, anon;
+revoke all on function public.inv_interesses_listar(uuid)         from public, anon;
+revoke all on function public.inv_interesse_status(uuid, text)    from public, anon;
+revoke all on function public.inv_comissoes(uuid, date, date)     from public, anon;
+revoke all on function public.inv_comissao_pagar(uuid, date)      from public, anon;
+revoke all on function public.inv_dashboard(uuid, date, date)     from public, anon;
+revoke all on function public.inv_link_publico(text)              from public;
+revoke all on function public.inv_interesse_registrar(text, jsonb) from public;
+
+grant execute on function public.inv_escopo_ok(uuid)                 to authenticated;
+grant execute on function public.inv_exige(uuid)                     to authenticated;
+grant execute on function public.inv_numero(jsonb, text)             to authenticated;
+grant execute on function public.inv_data(jsonb, text)               to authenticated;
+grant execute on function public.inv_codigo(bigint)                  to authenticated;
+grant execute on function public.inv_pessoas(uuid)                   to authenticated;
+grant execute on function public.inv_projetos_listar(uuid)           to authenticated;
+grant execute on function public.inv_projeto_salvar(uuid, uuid, jsonb) to authenticated;
+grant execute on function public.inv_projeto_ver(uuid)               to authenticated;
+grant execute on function public.inv_aporte_salvar(uuid, jsonb)      to authenticated;
+grant execute on function public.inv_aporte_cancelar(uuid)           to authenticated;
+grant execute on function public.inv_retorno_salvar(uuid, date, numeric, text) to authenticated;
+grant execute on function public.inv_retorno_excluir(uuid)           to authenticated;
+grant execute on function public.inv_investidores(uuid)              to authenticated;
+grant execute on function public.inv_comparativo(uuid, date)         to authenticated;
+grant execute on function public.inv_indicadores_listar(uuid)        to authenticated;
+grant execute on function public.inv_indicador_salvar(uuid, uuid, jsonb) to authenticated;
+grant execute on function public.inv_link_criar(uuid, uuid, numeric) to authenticated;
+grant execute on function public.inv_link_ativar(uuid, boolean)      to authenticated;
+grant execute on function public.inv_interesses_listar(uuid)         to authenticated;
+grant execute on function public.inv_interesse_status(uuid, text)    to authenticated;
+grant execute on function public.inv_comissoes(uuid, date, date)     to authenticated;
+grant execute on function public.inv_comissao_pagar(uuid, date)      to authenticated;
+grant execute on function public.inv_dashboard(uuid, date, date)     to authenticated;
+-- Só estas duas funcionam sem login (página pública do link de indicação)
+grant execute on function public.inv_link_publico(text)               to anon, authenticated;
+grant execute on function public.inv_interesse_registrar(text, jsonb) to anon, authenticated;
+
+-- =====================================================================
+-- 14) PRIMEIRO USUÁRIO MASTER
 --    Depois de criar o usuário em Authentication > Users, troque o e-mail e o nome,
 --    tire os dois traços do início das linhas e rode:
 -- =====================================================================

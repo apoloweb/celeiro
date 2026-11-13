@@ -33,6 +33,7 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | `supabase.sql` | Tabelas, regras de segurança e auditoria, para rodar no painel do Supabase |
 | `supabase/functions/criar-usuario/index.ts` | Função do servidor que cria o acesso de um novo usuário (para publicar no Supabase) |
 | `supabase/functions/mcp/index.ts` | Servidor MCP do backoffice (para publicar no Supabase, com "Verify JWT" desligado) |
+| `indicacao/index.html` | Página pública do link de indicação (registro de interesse, sem login) |
 | `assets/` | Logo e favicon |
 
 ## Configuração (uma vez)
@@ -174,6 +175,39 @@ recorrentes; sem conciliação bancária; sem encerramento de exercício; pagar 
 despesa (compra de imobilizado e empréstimos entram por lançamento manual). O Dashboard geral do sistema ainda
 não lê os números do Financeiro, e o MCP ainda não tem ferramentas do Financeiro. Os demonstrativos são
 gerenciais: não substituem a escrituração feita pela contabilidade.
+
+## Investimentos
+
+Menus internos: Dashboard, Projetos, Investidores, Retorno esperado × real, Indicadores, Links e interesses, Comissões.
+
+- **Projetos de captação**: nome, produto, situação, valor a ser arrecadado, taxa de retorno esperada (% ao ano),
+  prazo, datas da captação, descrição e a lista de **quem está envolvido** (nome, papel e contato). O valor já
+  arrecadado é a soma dos aportes ativos. A página do projeto mostra os investidores, os retornos e o andamento.
+- **Investidores**: são pessoas do Cadastro (física ou jurídica) da mesma origem. "Vincular investidor" registra o
+  aporte: data, valor, retorno esperado (herda o do projeto, pode mudar) e, se houver, o indicador e a comissão.
+- **Retorno esperado × real**: o esperado aplica a taxa anual de cada aporte em juros simples, da data do aporte
+  até a data escolhida. O real soma os retornos lançados no projeto ("Lançar retorno"). As taxas ao ano dividem
+  o retorno pelo capital investido e pelo tempo, e a tela mostra a diferença em pontos percentuais.
+- **Indicadores**: cadastro com contato, comissão padrão e chave Pix.
+- **Link de indicação**: criado em Indicadores → "Criar link", geral ou de um projeto, com o percentual de
+  comissão do link. O link abre a página pública `indicacao/` (sem login), que mostra só o primeiro nome de quem
+  indicou, o projeto e o nome da empresa, e recolhe nome, e-mail, telefone, valor pretendido e a autorização de
+  contato. O interesse chega em "Links e interesses" com o indicador e a comissão do link. A comissão e as taxas
+  não aparecem na página pública. Ao virar investidor, a pessoa é cadastrada no Cadastro e vinculada ao projeto
+  com o indicador.
+- **Comissões**: calculadas em cada aporte (valor × percentual). O relatório por período agrupa por indicador,
+  marca como paga ou a pagar e pode ser impresso ou salvo em PDF. Os totais aparecem no Dashboard.
+- **Segurança**: as tabelas não são lidas direto pelo navegador. As duas operações da página pública são as
+  únicas do sistema que funcionam sem login; elas não devolvem dados internos e têm freio contra abuso
+  (5 envios por endereço e 20 por link a cada hora, 500 por dia no total).
+
+Pontos de atenção: (1) divulgar captação de investimentos ao público pode exigir registro ou dispensa na CVM;
+a página pública foi feita só como registro de interesse, sem taxas nem promessa de retorno, mas o uso dos links
+deve ser validado com o jurídico; (2) a página pública recolhe dados pessoais: incluir no aviso de privacidade;
+(3) a comissão não vira conta a pagar no Financeiro, e o aporte não vira lançamento contábil: os dois módulos
+ainda não conversam; (4) o retorno real é lançado por projeto, não por investidor; (5) o banco usa o horário
+universal: entre 21h e meia-noite de Brasília, "hoje" no banco já é o dia seguinte (afeta só o que conta como
+vencido ou futuro nessas três horas).
 
 ## Conexão MCP
 

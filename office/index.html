@@ -176,6 +176,8 @@ tr.grupo-l th{background:var(--nevoa);font-size:13px;font-weight:600;padding:8px
 .cabeca>.acoes{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px;max-width:none;flex:0 1 auto}
 .botao.sutil{background:none;color:var(--texto2);font-weight:500;text-decoration:underline;padding:0 10px}
 .botao.sutil:hover{background:none;color:var(--verde)}
+.texto-livre{white-space:pre-wrap;margin:0}
+#ip-env input{width:100%;min-width:0}
 .dlg.largo{width:min(880px,calc(100vw - 24px))}
 td.num,th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .neg{color:var(--erro)}
@@ -226,7 +228,7 @@ var app=document.getElementById('app');
 var elAviso=document.getElementById('aviso');
 
 var PERFIS={master:'Master',gerencial:'Gerencial',corp_master:'Corporativo master',corp_operador:'Corporativo operador'};
-var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true,mcp:true,financeiro:true};
+var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true,mcp:true,financeiro:true,investimentos:true};
 var INATIVIDADE_MS=15*60*1000;
 var MAX_TENTATIVAS=5;
 var E={acesso:null,modulos:[],recuperando:/type=recovery/.test(hashInicial),novoLogin:false,tentativas:0,relogio:null,avisoRelogio:null};
@@ -555,6 +557,7 @@ var ROTAS={
   dashboard:{titulo:'Dashboard',modulo:'Dashboard',fn:telaDashboard,pode:function(){return temModulo('dashboard');},semGrupo:true},
   cadastro:{titulo:'Cadastro',modulo:'Cadastro',fn:telaCadPessoas,pode:function(){return temModulo('cadastro');},semGrupo:true},
   financeiro:{titulo:'Financeiro',modulo:'Financeiro',fn:telaFinanceiro,pode:function(){return temModulo('financeiro');},semGrupo:true},
+  investimentos:{titulo:'Investimentos',modulo:'Investimentos',fn:telaInvestimentos,pode:function(){return temModulo('investimentos');},semGrupo:true},
   mcp:{titulo:'Conexão MCP',modulo:'Conexão MCP',fn:telaMcp,pode:function(){return temModulo('mcp');},semGrupo:true},
   app:{titulo:'Aplicativo',modulo:'Aplicativo',fn:telaApp,pode:function(){return temModulo('app');},semGrupo:true}
 };
@@ -1441,8 +1444,9 @@ function finDlg(titulo,corpo,rodape,largo){
 function finCartao(rotulo,valor,apoio,classe){
   return '<div class="cartao-d baixo"><div class="cartao-d-topo"><span>'+esc(rotulo)+'</span></div><div class="numero'+(classe?' '+classe:'')+'">'+esc(valor)+'</div>'+(apoio?'<p class="apoio">'+esc(apoio)+'</p>':'')+'</div>';
 }
-function finBarras(grupos,series){
-  var topo=1;grupos.forEach(function(g){g.v.forEach(function(x){if(x>topo)topo=x;});});
+function finBarras(grupos,series,fmt){
+  fmt=fmt||moeda;
+  var topo=4;grupos.forEach(function(g){g.v.forEach(function(x){if(x>topo)topo=x;});});
   var L=64,T=12,W=640,H=230,AW=W-L-8,AH=H-T-30,passo=AW/grupos.length,bw=Math.min(34,(passo-14)/series.length),svg='';
   for(var i=0;i<=4;i++){
     var y=T+AH-AH*i/4;
@@ -1452,7 +1456,7 @@ function finBarras(grupos,series){
     var x0=L+k*passo+(passo-bw*series.length-2*(series.length-1))/2;
     g.v.forEach(function(x,j){
       var h=Math.max(x>0?2:0,AH*x/topo);
-      svg+='<rect x="'+(x0+j*(bw+2))+'" y="'+(T+AH-h)+'" width="'+bw+'" height="'+h+'" rx="2" fill="'+series[j][1]+'"><title>'+esc(g.r+' · '+series[j][0]+': '+moeda(x))+'</title></rect>';
+      svg+='<rect x="'+(x0+j*(bw+2))+'" y="'+(T+AH-h)+'" width="'+bw+'" height="'+h+'" rx="2" fill="'+series[j][1]+'"><title>'+esc(g.r+' · '+series[j][0]+': '+fmt(x))+'</title></rect>';
     });
     svg+='<text x="'+(L+k*passo+passo/2)+'" y="'+(H-10)+'" text-anchor="middle" font-size="11" fill="#44564E">'+esc(g.r)+'</text>';
   });
@@ -1909,6 +1913,372 @@ function finDlgConta(x){
     var r=await sb.rpc('fin_conta_salvar',{p_id:novo?null:x.id,p_org:finOrg(),p_codigo:$('#fc-cod',d).value.trim(),p_nome:$('#fc-nome',d).value,p_tipo:$('#fc-tipo',d).value,p_grupo:lig('#fc-grupo'),p_caixa:lig('#fc-caixa'),p_ativo:lig('#fc-ativo')});
     if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
     d.fechar();aviso('Conta salva.');finDesenha();
+  };
+}
+
+/* ---------- Investimentos ---------- */
+var INV={aba:'dashboard',org:'',ini:'',fim:'',ate:'',orgs:null,projeto:null,pessoas:null,pessoasDe:null};
+var INV_ABAS=[['dashboard','Dashboard'],['projetos','Projetos'],['investidores','Investidores'],['comparativo','Retorno esperado × real'],['indicadores','Indicadores'],['indicacoes','Links e interesses'],['comissoes','Comissões']];
+var INV_STATUS=[['rascunho','Rascunho'],['captando','Em captação'],['encerrado','Captação encerrada'],['cancelado','Cancelado']];
+var INV_PRODUTOS=['Energia','Financiamento','Captação de recursos','Outro'];
+var INV_INTERESSE=[['novo','Novo'],['em_contato','Em contato'],['convertido','Virou investidor'],['descartado','Descartado']];
+function invOrg(){return ehEquipe()?(INV.org||null):E.acesso.organizacao_id;}
+function pct(v,casas){return Number(v||0).toLocaleString('pt-BR',{maximumFractionDigits:casas==null?2:casas})+'%';}
+function invDoc(tipo,doc){var d=String(doc||'');return tipo==='pj'?formataCnpj(d):d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/,'$1.$2.$3-$4');}
+function invLink(codigo){return location.origin+RAIZ+'indicacao/?c='+codigo;}
+function invSelo(st){return '<span class="'+(st==='captando'?'situacao':st==='rascunho'?'selo claro':'situacao off')+'">'+esc(rotuloDe(INV_STATUS,st))+'</span>';}
+function invProgresso(captado,meta){
+  var p=Number(meta)>0?100*Number(captado)/Number(meta):0;
+  return '<div class="fin-faixa"><div class="fin-faixa-barra" role="img" aria-label="'+esc(pct(p,1))+' da meta arrecadado"><i style="width:'+Math.min(100,Math.max(p>0?2:0,p))+'%"></i></div><span class="sub">'+esc(pct(p,1))+' da meta</span></div>';
+}
+async function invRpc(fn,args){var r=await sb.rpc(fn,args);if(r.error)throw r.error;return r.data;}
+function invPeriodoTexto(){return dataBr(INV.ini)+' a '+dataBr(INV.fim);}
+function invConfirma(b,rotulo,acao){
+  b.onclick=async function(){
+    if(b.getAttribute('data-confirma')!=='1'){
+      var antes=b.textContent;b.setAttribute('data-confirma','1');b.textContent=rotulo;
+      setTimeout(function(){if(b.isConnected){b.removeAttribute('data-confirma');b.textContent=antes;}},5000);return;
+    }
+    ocupar(b,true);
+    try{await acao();}catch(e){ocupar(b,false);aviso(msgErro(e),true);}
+  };
+}
+async function telaInvestimentos(){
+  carregando('Investimentos');
+  if(!INV.ini){var m=finMes(new Date());INV.ini=new Date().getFullYear()+'-01-01';INV.fim=m[1];INV.ate=hojeIso();}
+  if(ehEquipe()&&!INV.orgs){var o=await sb.from('organizacoes').select('id,nome,ativo').order('nome');INV.orgs=o.error?[]:(o.data||[]);}
+  tela('<div class="cabeca"><div><h1>Investimentos</h1><p class="apoio">Projetos de captação, investidores, retorno esperado e real, indicadores e comissões.</p></div></div>'+
+    '<div class="segmento rolavel" role="group" aria-label="Menus de Investimentos">'+INV_ABAS.map(function(a){return '<button type="button" class="aba" data-inv-aba="'+a[0]+'" aria-pressed="'+(INV.aba===a[0])+'">'+a[1]+'</button>';}).join('')+'</div>'+
+    '<form class="painel" id="inv-filtro" novalidate><div class="grade">'+
+      (ehEquipe()?'<div class="campo" style="flex:1 1 220px"><label for="inv-org">Projetos de</label><select id="inv-org"><option value="">Celeiro Administradora</option>'+
+        (INV.orgs||[]).map(function(x){return '<option value="'+esc(x.id)+'"'+(x.id===INV.org?' selected':'')+'>'+esc(x.nome)+(x.ativo?'':' (inativa)')+'</option>';}).join('')+'</select></div>':'')+
+      '<div class="campo" data-inv-ini style="flex:0 1 170px"><label for="inv-ini">De</label><input id="inv-ini" type="date" value="'+esc(INV.ini)+'"></div>'+
+      '<div class="campo" data-inv-fim style="flex:0 1 170px"><label for="inv-fim" id="inv-fim-r">Até</label><input id="inv-fim" type="date" value="'+esc(INV.fim)+'"></div>'+
+      '<button class="botao" type="submit" data-inv-fim>Pesquisar</button></div></form>'+
+    '<div id="inv-corpo" class="pilha"></div>');
+  $$('[data-inv-aba]').forEach(function(b){b.onclick=function(){INV.aba=b.getAttribute('data-inv-aba');INV.projeto=null;$$('[data-inv-aba]').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');});invDesenha();};});
+  if($('#inv-org')){$('#inv-org').onchange=function(){INV.org=this.value;INV.pessoas=null;INV.projeto=null;invDesenha();};}
+  $('#inv-filtro').onsubmit=function(ev){
+    ev.preventDefault();
+    var i=$('#inv-ini').value,f=$('#inv-fim').value;
+    if(INV.aba==='comparativo'){
+      if(!f){aviso('Informe a data.',true);return;}
+      INV.ate=f;invDesenha();return;
+    }
+    if(!i||!f){aviso('Informe as datas.',true);return;}
+    if(f<i){aviso('A data final não pode ser anterior à inicial.',true);return;}
+    INV.ini=i;INV.fim=f;invDesenha();
+  };
+  invDesenha();
+}
+async function invDesenha(){
+  var c=$('#inv-corpo');if(!c)return;
+  var comPeriodo=INV.aba==='dashboard'||INV.aba==='comissoes',soData=INV.aba==='comparativo';
+  $('#inv-filtro').classList.toggle('oculto',!comPeriodo&&!soData&&!ehEquipe());
+  $$('[data-inv-ini]').forEach(function(x){x.classList.toggle('oculto',!comPeriodo);});
+  $$('[data-inv-fim]').forEach(function(x){x.classList.toggle('oculto',!comPeriodo&&!soData);});
+  $('#inv-fim-r').textContent=soData?'Posição em':'Até';
+  $('#inv-fim').value=soData?INV.ate:INV.fim;
+  c.innerHTML='<p class="apoio">Carregando…</p>';
+  var fn={dashboard:invDashboard,projetos:invProjetos,investidores:invInvestidores,comparativo:invComparativo,indicadores:invIndicadores,indicacoes:invIndicacoes,comissoes:invComissoes}[INV.aba];
+  try{await fn(c);}catch(e){c.innerHTML='<p class="erro" role="alert">'+esc(msgErro(e))+'</p>';}
+}
+function invIr(aba){INV.aba=aba;INV.projeto=null;$$('[data-inv-aba]').forEach(function(x){x.setAttribute('aria-pressed',x.getAttribute('data-inv-aba')===aba?'true':'false');});invDesenha();}
+
+async function invDashboard(c){
+  var d=await invRpc('inv_dashboard',{p_org:invOrg(),p_ini:INV.ini,p_fim:INV.fim});
+  var meses=(d.meses||[]).map(function(m){return {r:m.mes.slice(5)+'/'+m.mes.slice(2,4),v:[Number(m.captado)]};});
+  var acum=(d.meses||[]).map(function(m){return {r:m.mes.slice(5)+'/'+m.mes.slice(2,4),v:Number(m.acumulado)};});
+  var prj=(d.por_projeto||[]).slice(0,8).reverse().map(function(p){return {r:p.codigo,v:[Number(p.meta),Number(p.captado)]};});
+  var aPagar=Number(d.comissao_total)-Number(d.comissao_paga);
+  c.innerHTML='<div class="grade-d">'+
+      finCartao('Valor captado',moeda(d.captado_total),Number(d.meta_total)>0?pct(100*Number(d.captado_total)/Number(d.meta_total),1)+' da meta de '+moeda(d.meta_total):'Sem meta cadastrada')+
+      finCartao('Captado no período',moeda(d.captado_periodo),invPeriodoTexto())+
+      finCartao('Investidores',String(d.investidores),d.investidores_periodo+' com aporte no período')+
+      finCartao('Projetos em captação',String(d.projetos_captando),(function(n){return n+(n===1?' projeto':' projetos')+' no total';})((d.por_projeto||[]).length))+
+      finCartao('Comissões de indicação',moeda(d.comissao_total),moeda(aPagar)+' a pagar · '+moeda(d.comissao_periodo)+' no período')+
+      finCartao('Interesses novos',String(d.interesses_novos),'Recebidos pelos links de indicação')+
+    '</div>'+
+    '<div class="grade3">'+
+      '<div class="painel"><h2>Valor captado por mês</h2><p class="apoio">Aportes dos seis meses até '+esc(dataBr(INV.fim).slice(3))+'.</p>'+finBarras(meses,[['Captado no mês','#0F3D2E']])+'</div>'+
+      '<div class="painel"><h2>Valor captado acumulado</h2><p class="apoio">Soma de todos os aportes até o fim de cada mês.</p>'+finLinha(acum,'Valor captado acumulado')+'</div>'+
+    '</div>'+
+    '<div class="painel"><h2>Captação por projeto</h2><p class="apoio">Valor a ser arrecadado e já arrecadado em cada projeto.</p>'+
+      (prj.length?finBarras(prj,[['Meta','#E3A72F'],['Arrecadado','#0F3D2E']]):'')+
+      '<div class="rolagem"><table id="inv-dash-projetos"><thead><tr><th scope="col">Projeto</th><th scope="col">Situação</th><th scope="col" class="num">Meta</th><th scope="col" class="num">Arrecadado</th><th scope="col">Andamento</th><th scope="col" class="num">Investidores</th></tr></thead><tbody>'+
+      ((d.por_projeto||[]).map(function(p){return '<tr><td><a href="#investimentos" data-abrir-projeto="'+esc(p.id)+'">'+esc(p.nome)+'</a><span class="sub">'+esc(p.codigo)+'</span></td><td>'+invSelo(p.status)+'</td><td class="num">'+esc(moeda(p.meta))+'</td><td class="num">'+esc(moeda(p.captado))+'</td><td style="min-width:160px">'+invProgresso(p.captado,p.meta)+'</td><td class="num">'+esc(p.investidores)+'</td></tr>';}).join('')||'<tr><td colspan="6" class="vazio">Nenhum projeto cadastrado.</td></tr>')+'</tbody></table></div></div>'+
+    '<div class="painel"><div class="cabeca"><div><h2>Comissões por indicador</h2><p class="apoio">Sobre todos os aportes indicados. O detalhe por período está no relatório.</p></div><div class="acoes"><button class="botao claro pequeno" type="button" id="inv-ver-comissoes">Abrir relatório de comissões</button></div></div>'+
+      '<div class="rolagem"><table id="inv-dash-comissoes"><thead><tr><th scope="col">Indicador</th><th scope="col" class="num">Investidores indicados</th><th scope="col" class="num">Valor indicado</th><th scope="col" class="num">Comissão</th><th scope="col" class="num">A pagar</th></tr></thead><tbody>'+
+      ((d.por_indicador||[]).map(function(i){return '<tr><td>'+esc(i.nome)+'</td><td class="num">'+esc(i.indicados)+'</td><td class="num">'+esc(moeda(i.base))+'</td><td class="num">'+esc(moeda(i.comissao))+'</td><td class="num'+(Number(i.a_pagar)>0?' neg':'')+'">'+esc(moeda(i.a_pagar))+'</td></tr>';}).join('')||'<tr><td colspan="5" class="vazio">Nenhum aporte com indicador.</td></tr>')+'</tbody></table></div></div>';
+  $('#inv-ver-comissoes').onclick=function(){invIr('comissoes');};
+  $$('[data-abrir-projeto]',c).forEach(function(a){a.onclick=function(ev){ev.preventDefault();INV.aba='projetos';INV.projeto=a.getAttribute('data-abrir-projeto');$$('[data-inv-aba]').forEach(function(x){x.setAttribute('aria-pressed',x.getAttribute('data-inv-aba')==='projetos'?'true':'false');});invDesenha();};});
+}
+
+async function invProjetos(c){
+  if(INV.projeto){return invProjetoPagina(c,INV.projeto);}
+  var lista=await invRpc('inv_projetos_listar',{p_org:invOrg()});
+  c.innerHTML='<div class="cabeca"><div><h2>Projetos de captação</h2><p class="apoio">Cada projeto tem o valor a ser arrecadado, a taxa de retorno esperada, os envolvidos e os investidores vinculados.</p></div>'+
+      '<div class="acoes"><button class="botao" type="button" id="inv-projeto-novo">Novo projeto</button></div></div>'+
+    '<div class="rolagem"><table id="inv-projetos"><thead><tr><th scope="col">Projeto</th><th scope="col">Situação</th><th scope="col" class="num">A arrecadar</th><th scope="col" class="num">Já arrecadado</th><th scope="col">Andamento</th><th scope="col" class="num">Investidores</th><th scope="col" class="num">Retorno esperado</th><th scope="col">Ação</th></tr></thead><tbody>'+
+      (lista.map(function(p){return '<tr><td>'+esc(p.nome)+'<span class="sub">'+esc(p.codigo+(p.produto?' · '+p.produto:''))+'</span></td><td>'+invSelo(p.status)+'</td><td class="num">'+esc(moeda(p.meta))+'</td><td class="num">'+esc(moeda(p.captado))+'</td><td style="min-width:150px">'+invProgresso(p.captado,p.meta)+'</td><td class="num">'+esc(p.investidores)+'</td><td class="num">'+esc(pct(p.taxa_esperada))+' a.a.</td><td><button class="botao claro pequeno" type="button" data-projeto="'+esc(p.id)+'">Abrir</button></td></tr>';}).join('')||'<tr><td colspan="8" class="vazio">Nenhum projeto cadastrado.</td></tr>')+'</tbody></table></div>';
+  $('#inv-projeto-novo').onclick=function(){invDlgProjeto(null);};
+  $$('[data-projeto]',c).forEach(function(b){b.onclick=function(){INV.projeto=b.getAttribute('data-projeto');invDesenha();};});
+}
+function invEnvolvidoLinha(e){
+  e=e||{};
+  return '<tr><td><input type="text" maxlength="160" aria-label="Nome do envolvido" data-ev="nome" value="'+esc(e.nome||'')+'"></td><td><input type="text" maxlength="80" aria-label="Papel no projeto" data-ev="papel" value="'+esc(e.papel||'')+'" placeholder="Ex.: Responsável técnico"></td>'+
+    '<td><input type="text" maxlength="160" aria-label="Contato" data-ev="contato" value="'+esc(e.contato||'')+'" placeholder="E-mail ou telefone"></td><td><button class="botao sutil pequeno" type="button" data-ev-tirar>Remover</button></td></tr>';
+}
+function invDlgProjeto(p){
+  var novo=!p;p=p||{status:'captando',envolvidos:[]};
+  var num=function(v){return v==null||v===''?'':Number(v).toLocaleString('pt-BR',{maximumFractionDigits:3});};
+  var d=finDlg(novo?'Novo projeto de captação':'Editar '+p.codigo,
+    '<div class="grade"><div class="campo" style="flex:2 1 280px"><label for="ip-nome">Nome do projeto</label><input id="ip-nome" type="text" maxlength="160" value="'+esc(p.nome||'')+'" required></div>'+
+      '<div class="campo"><label for="ip-produto">Produto</label><select id="ip-produto"><option value="">Não informado</option>'+INV_PRODUTOS.map(function(x){return '<option'+(p.produto===x?' selected':'')+'>'+esc(x)+'</option>';}).join('')+'</select></div>'+
+      '<div class="campo"><label for="ip-status">Situação</label><select id="ip-status">'+INV_STATUS.map(function(s){return '<option value="'+s[0]+'"'+(p.status===s[0]?' selected':'')+'>'+s[1]+'</option>';}).join('')+'</select></div></div>'+
+    '<div class="grade"><div class="campo"><label for="ip-meta">Valor a ser arrecadado (R$)</label><input id="ip-meta" type="text" inputmode="decimal" value="'+esc(p.meta?Number(p.meta).toLocaleString('pt-BR',{minimumFractionDigits:2}):'')+'" placeholder="0,00" required></div>'+
+      '<div class="campo"><label for="ip-taxa">Taxa de retorno esperada (% ao ano)</label><input id="ip-taxa" type="text" inputmode="decimal" value="'+esc(num(p.taxa_esperada))+'" placeholder="Ex.: 12"></div>'+
+      '<div class="campo"><label for="ip-prazo">Prazo (meses)</label><input id="ip-prazo" type="text" inputmode="numeric" value="'+esc(p.prazo_meses||'')+'"></div></div>'+
+    '<div class="grade"><div class="campo"><label for="ip-ini">Início da captação</label><input id="ip-ini" type="date" value="'+esc(p.inicio||'')+'"></div>'+
+      '<div class="campo"><label for="ip-fim">Fim da captação</label><input id="ip-fim" type="date" value="'+esc(p.fim_captacao||'')+'"></div></div>'+
+    '<div class="campo"><label for="ip-desc">Descrição do projeto</label><textarea id="ip-desc" rows="4" maxlength="4000">'+esc(p.descricao||'')+'</textarea></div>'+
+    '<div class="campo"><span class="rotulo">Quem está envolvido</span><div class="rolagem"><table id="ip-env"><thead><tr><th scope="col">Nome</th><th scope="col">Papel</th><th scope="col">Contato</th><th scope="col"></th></tr></thead><tbody>'+
+      ((p.envolvidos||[]).map(invEnvolvidoLinha).join('')||invEnvolvidoLinha())+'</tbody></table></div>'+
+      '<button class="botao claro pequeno" type="button" id="ip-env-mais" style="align-self:flex-start">Adicionar envolvido</button></div>',
+    '<button class="botao" type="submit">Salvar projeto</button>',true);
+  $('#ip-env-mais',d).onclick=function(){$('#ip-env tbody',d).insertAdjacentHTML('beforeend',invEnvolvidoLinha());};
+  $('#ip-env',d).addEventListener('click',function(ev){var b=ev.target.closest('[data-ev-tirar]');if(b){b.closest('tr').remove();}});
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),meta=valorDe($('#ip-meta',d).value),taxa=$('#ip-taxa',d).value.trim()===''?0:valorDe($('#ip-taxa',d).value);
+    if(!$('#ip-nome',d).value.trim()){aviso('Informe o nome do projeto.',true);return;}
+    if(!(meta>0)){aviso('Informe o valor a ser arrecadado.',true);return;}
+    if(isNaN(taxa)||taxa<0){aviso('Confira a taxa de retorno esperada.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('inv_projeto_salvar',{p_id:novo?null:p.id,p_org:invOrg(),p_dados:{nome:$('#ip-nome',d).value,produto:$('#ip-produto',d).value,status:$('#ip-status',d).value,
+      meta:meta,taxa_esperada:taxa,prazo_meses:$('#ip-prazo',d).value.trim(),inicio:$('#ip-ini',d).value,fim_captacao:$('#ip-fim',d).value,descricao:$('#ip-desc',d).value,
+      envolvidos:$$('#ip-env tbody tr',d).map(function(tr){return {nome:$('[data-ev=nome]',tr).value,papel:$('[data-ev=papel]',tr).value,contato:$('[data-ev=contato]',tr).value};})}});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso(novo?'Projeto criado.':'Projeto salvo.');
+    if(novo){INV.projeto=r.data;}
+    invDesenha();
+  };
+  $('#ip-nome',d).focus();
+}
+async function invProjetoPagina(c,id){
+  var p=await invRpc('inv_projeto_ver',{p_id:id}),falta=Math.max(0,Number(p.meta)-Number(p.captado)),captando=p.status==='captando';
+  c.innerHTML='<button class="voltar" type="button" id="inv-voltar"><span aria-hidden="true">←</span> Voltar para os projetos</button>'+
+    '<div class="cabeca"><div><h2>'+esc(p.nome)+' '+invSelo(p.status)+'</h2><p class="apoio">'+esc(p.codigo+(p.produto?' · '+p.produto:'')+(p.prazo_meses?' · prazo de '+p.prazo_meses+' meses':'')+(p.inicio?' · captação desde '+dataBr(p.inicio):'')+(p.fim_captacao?' até '+dataBr(p.fim_captacao):''))+'</p></div>'+
+      '<div class="acoes">'+(captando?'<button class="botao pequeno" type="button" id="inv-aporte">Vincular investidor</button>':'')+'<button class="botao claro pequeno" type="button" id="inv-retorno">Lançar retorno</button><button class="botao claro pequeno" type="button" id="inv-editar">Editar projeto</button></div></div>'+
+    '<div class="grade-d">'+finCartao('Valor a ser arrecadado',moeda(p.meta))+finCartao('Já arrecadado',moeda(p.captado),pct(Number(p.meta)>0?100*Number(p.captado)/Number(p.meta):0,1)+' da meta')+
+      finCartao('Falta arrecadar',moeda(falta))+finCartao('Investidores',String(p.investidores))+finCartao('Retorno esperado',pct(p.taxa_esperada)+' a.a.')+finCartao('Retorno já distribuído',moeda(p.retornos))+'</div>'+
+    '<div class="painel">'+invProgresso(p.captado,p.meta)+'</div>'+
+    '<div class="grade3"><div class="painel"><h2>Descrição</h2><p class="texto-livre">'+(esc(p.descricao)||'<span class="apoio">Sem descrição.</span>')+'</p></div>'+
+      '<div class="painel"><h2>Quem está envolvido</h2><div class="rolagem"><table id="inv-envolvidos"><thead><tr><th scope="col">Nome</th><th scope="col">Papel</th><th scope="col">Contato</th></tr></thead><tbody>'+
+        ((p.envolvidos||[]).map(function(e){return '<tr><td>'+esc(e.nome)+'</td><td>'+esc(e.papel||'—')+'</td><td>'+esc(e.contato||'—')+'</td></tr>';}).join('')||'<tr><td colspan="3" class="vazio">Ninguém cadastrado. Use "Editar projeto".</td></tr>')+'</tbody></table></div></div></div>'+
+    '<h2>Investidores do projeto</h2><div class="rolagem"><table id="inv-aportes"><thead><tr><th scope="col">Investidor</th><th scope="col">Data</th><th scope="col" class="num">Valor</th><th scope="col" class="num">Retorno esperado</th><th scope="col">Indicador</th><th scope="col">Ação</th></tr></thead><tbody>'+
+      ((p.aportes||[]).map(function(a){
+        var canc=a.status==='cancelado';
+        return '<tr><td>'+esc(a.investidor_nome)+'<span class="sub">'+esc(invDoc(a.investidor_tipo,a.investidor_documento))+'</span></td><td>'+esc(dataBr(a.data))+'</td><td class="num">'+esc(moeda(a.valor))+'</td><td class="num">'+esc(pct(a.taxa_esperada))+' a.a.</td>'+
+          '<td>'+(a.indicador?esc(a.indicador)+'<span class="sub">'+esc(pct(a.comissao_percentual))+' · '+esc(moeda(a.comissao_valor))+'</span>':'—')+'</td>'+
+          '<td>'+(canc?'<span class="situacao off">Cancelado</span>':'<button class="botao sutil pequeno" type="button" data-cancelar-aporte="'+esc(a.id)+'">Cancelar</button>')+'</td></tr>';
+      }).join('')||'<tr><td colspan="6" class="vazio">Nenhum investidor vinculado.</td></tr>')+'</tbody></table></div>'+
+    '<h2>Retornos distribuídos</h2><p class="apoio">O retorno real do projeto. É o que entra no comparativo com o retorno esperado.</p><div class="rolagem"><table id="inv-retornos"><thead><tr><th scope="col">Data</th><th scope="col">Descrição</th><th scope="col" class="num">Valor</th><th scope="col">Ação</th></tr></thead><tbody>'+
+      ((p.lista_retornos||[]).map(function(r){return '<tr><td>'+esc(dataBr(r.data))+'</td><td>'+esc(r.descricao||'—')+'</td><td class="num">'+esc(moeda(r.valor))+'</td><td><button class="botao sutil pequeno" type="button" data-excluir-retorno="'+esc(r.id)+'">Excluir</button></td></tr>';}).join('')||'<tr><td colspan="4" class="vazio">Nenhum retorno lançado.</td></tr>')+'</tbody></table></div>';
+  $('#inv-voltar').onclick=function(){INV.projeto=null;invDesenha();};
+  $('#inv-editar').onclick=function(){invDlgProjeto(p);};
+  $('#inv-retorno').onclick=function(){invDlgRetorno(p);};
+  if(captando){$('#inv-aporte').onclick=function(){invDlgAporte(p);};}
+  $$('[data-cancelar-aporte]',c).forEach(function(b){invConfirma(b,'Confirmar cancelamento',async function(){await invRpc('inv_aporte_cancelar',{p_id:b.getAttribute('data-cancelar-aporte')});aviso('Aporte cancelado.');invDesenha();});});
+  $$('[data-excluir-retorno]',c).forEach(function(b){invConfirma(b,'Confirmar exclusão',async function(){await invRpc('inv_retorno_excluir',{p_id:b.getAttribute('data-excluir-retorno')});aviso('Retorno excluído.');invDesenha();});});
+}
+async function invDlgAporte(p){
+  var org=invOrg();
+  if(!INV.pessoas||INV.pessoasDe!==org){var r=await sb.rpc('inv_pessoas',{p_org:org});INV.pessoas=r.error?[]:(r.data||[]);INV.pessoasDe=org;}
+  var ps=INV.pessoas,inds=[];
+  try{inds=(await invRpc('inv_indicadores_listar',{p_org:org})).filter(function(i){return i.ativo;});}catch(e){}
+  var d=finDlg('Vincular investidor a '+p.codigo,
+    '<div class="campo"><label for="ia-pessoa">Investidor</label><input id="ia-pessoa" type="text" list="inv-pessoas" autocomplete="off" required><datalist id="inv-pessoas">'+ps.map(function(x){return '<option value="'+esc(x.nome)+'">';}).join('')+'</datalist>'+
+      '<p class="meta">'+(ps.length?'Digite para buscar entre as pessoas físicas e jurídicas do Cadastro.':'Não há pessoas ativas no Cadastro. Cadastre o investidor primeiro, no módulo Cadastro.')+'</p></div>'+
+    '<div class="grade"><div class="campo"><label for="ia-data">Data do aporte</label><input id="ia-data" type="date" value="'+esc(hojeIso())+'" max="'+esc(hojeIso())+'" required></div>'+
+      '<div class="campo"><label for="ia-valor">Valor (R$)</label><input id="ia-valor" type="text" inputmode="decimal" placeholder="0,00" required></div>'+
+      '<div class="campo"><label for="ia-taxa">Retorno esperado (% ao ano)</label><input id="ia-taxa" type="text" inputmode="decimal" value="'+esc(Number(p.taxa_esperada).toLocaleString('pt-BR',{maximumFractionDigits:3}))+'"></div></div>'+
+    '<div class="grade"><div class="campo" style="flex:2 1 260px"><label for="ia-ind">Indicado por</label><select id="ia-ind"><option value="">Ninguém (sem comissão)</option>'+inds.map(function(i){return '<option value="'+esc(i.id)+'">'+esc(i.nome)+'</option>';}).join('')+'</select></div>'+
+      '<div class="campo"><label for="ia-pct">Comissão (%)</label><input id="ia-pct" type="text" inputmode="decimal" value="" disabled></div></div>'+
+    '<div class="campo"><label for="ia-obs">Observações</label><textarea id="ia-obs" rows="2" maxlength="1000"></textarea></div>',
+    '<button class="botao" type="submit">Vincular investidor</button>');
+  $('#ia-ind',d).onchange=function(){
+    var i=inds.filter(function(x){return x.id===$('#ia-ind',d).value;})[0];
+    $('#ia-pct',d).disabled=!i;$('#ia-pct',d).value=i?Number(i.percentual).toLocaleString('pt-BR',{maximumFractionDigits:3}):'';
+  };
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),nome=$('#ia-pessoa',d).value.trim().toLowerCase(),pes=ps.filter(function(x){return x.nome.toLowerCase()===nome;})[0];
+    var valor=valorDe($('#ia-valor',d).value),taxa=valorDe($('#ia-taxa',d).value),ind=$('#ia-ind',d).value,pc=ind?valorDe($('#ia-pct',d).value):0;
+    if(!pes){aviso('Escolha o investidor entre as pessoas do Cadastro.',true);return;}
+    if(!(valor>0)){aviso('Informe o valor do aporte.',true);return;}
+    if(isNaN(taxa)||taxa<0||isNaN(pc)||pc<0||pc>100){aviso('Confira a taxa e a comissão.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('inv_aporte_salvar',{p_projeto:p.id,p_dados:{investidor_tipo:pes.tipo,investidor_id:pes.id,data:$('#ia-data',d).value,valor:valor,taxa_esperada:taxa,indicador_id:ind||null,comissao_percentual:pc,observacoes:$('#ia-obs',d).value}});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso('Investidor vinculado ao projeto.');invDesenha();
+  };
+  $('#ia-pessoa',d).focus();
+}
+function invDlgRetorno(p){
+  var d=finDlg('Lançar retorno de '+p.codigo,
+    '<p class="apoio">Valor total distribuído aos investidores do projeto nesta data.</p>'+
+    '<div class="grade"><div class="campo"><label for="ir-data">Data</label><input id="ir-data" type="date" value="'+esc(hojeIso())+'" max="'+esc(hojeIso())+'" required></div>'+
+      '<div class="campo"><label for="ir-valor">Valor (R$)</label><input id="ir-valor" type="text" inputmode="decimal" placeholder="0,00" required></div></div>'+
+    '<div class="campo"><label for="ir-desc">Descrição</label><input id="ir-desc" type="text" maxlength="200" placeholder="Ex.: Distribuição do 1º semestre"></div>',
+    '<button class="botao" type="submit">Lançar retorno</button>');
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),v=valorDe($('#ir-valor',d).value);
+    if(!(v>0)){aviso('Informe o valor do retorno.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('inv_retorno_salvar',{p_projeto:p.id,p_data:$('#ir-data',d).value,p_valor:v,p_descricao:$('#ir-desc',d).value});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso('Retorno lançado.');invDesenha();
+  };
+}
+async function invInvestidores(c){
+  var l=await invRpc('inv_investidores',{p_org:invOrg()}),total=l.reduce(function(s,x){return s+Number(x.total);},0);
+  c.innerHTML='<div class="cabeca"><div><h2>Investidores</h2><p class="apoio">Todas as pessoas com aporte ativo, somando os projetos. Para ver os investidores de um projeto, abra o projeto.</p></div></div>'+
+    '<div class="grade-d">'+finCartao('Investidores',String(l.length))+finCartao('Valor investido',moeda(total))+finCartao('Média por investidor',moeda(l.length?total/l.length:0))+'</div>'+
+    '<div class="rolagem"><table id="inv-investidores"><thead><tr><th scope="col">Investidor</th><th scope="col">Projetos</th><th scope="col" class="num">Aportes</th><th scope="col" class="num">Valor investido</th><th scope="col">Primeiro e último aporte</th></tr></thead><tbody>'+
+      (l.map(function(x){return '<tr><td>'+esc(x.nome)+'<span class="sub">'+esc(invDoc(x.tipo,x.documento))+'</span></td><td>'+esc((x.projetos||[]).join(', '))+'</td><td class="num">'+esc(x.aportes)+'</td><td class="num">'+esc(moeda(x.total))+'</td><td>'+esc(dataBr(x.primeiro))+(x.ultimo!==x.primeiro?' a '+esc(dataBr(x.ultimo)):'')+'</td></tr>';}).join('')||'<tr><td colspan="5" class="vazio">Nenhum investidor vinculado a projetos.</td></tr>')+'</tbody></table></div>';
+}
+async function invComparativo(c){
+  var l=(await invRpc('inv_comparativo',{p_org:invOrg(),p_ate:INV.ate})).filter(function(x){return Number(x.aportado)>0;});
+  var ta=0,te=0,tr=0;l.forEach(function(x){ta+=Number(x.aportado);te+=Number(x.esperado);tr+=Number(x.real);});
+  var g=l.slice(0,8).reverse().map(function(x){return {r:x.codigo,v:[Math.max(0,Number(x.taxa_esperada_aa||0)),Math.max(0,Number(x.taxa_real_aa||0))]};});
+  c.innerHTML='<div class="cabeca"><div><h2>Retorno esperado × retorno real</h2><p class="apoio">Posição em '+esc(dataBr(INV.ate))+'. O esperado aplica a taxa anual de cada aporte, em juros simples, desde a data do aporte. O real soma os retornos lançados no projeto. As taxas ao ano dividem o retorno pelo capital investido e pelo tempo.</p></div></div>'+
+    '<div class="grade-d">'+finCartao('Capital investido',moeda(ta))+finCartao('Retorno esperado até a data',moeda(te))+finCartao('Retorno real até a data',moeda(tr))+finCartao('Diferença',moeda(tr-te),tr>=te?'Real igual ou acima do esperado':'Real abaixo do esperado',tr<te?'neg':'')+'</div>'+
+    (g.length?'<div class="painel"><h2>Taxa ao ano por projeto</h2>'+finBarras(g,[['Esperada (% a.a.)','#E3A72F'],['Real (% a.a.)','#0F3D2E']],function(v){return pct(v);})+'</div>':'')+
+    '<div class="rolagem"><table id="inv-comparativo"><thead><tr><th scope="col">Projeto</th><th scope="col" class="num">Capital investido</th><th scope="col" class="num">Taxa esperada</th><th scope="col" class="num">Taxa real</th><th scope="col" class="num">Diferença</th><th scope="col" class="num">Retorno esperado</th><th scope="col" class="num">Retorno real</th></tr></thead><tbody>'+
+      (l.map(function(x){
+        var e=x.taxa_esperada_aa,r=x.taxa_real_aa,dif=(e==null||r==null)?null:Number(r)-Number(e);
+        return '<tr><td>'+esc(x.nome)+'<span class="sub">'+esc(x.codigo)+'</span></td><td class="num">'+esc(moeda(x.aportado))+'</td><td class="num">'+(e==null?'—':esc(pct(e))+' a.a.')+'</td><td class="num">'+(r==null?'—':esc(pct(r))+' a.a.')+'</td>'+
+          '<td class="num'+(dif!=null&&dif<0?' neg':'')+'">'+(dif==null?'—':esc((dif>0?'+':'')+dif.toLocaleString('pt-BR',{maximumFractionDigits:2}))+' p.p.')+'</td><td class="num">'+esc(moeda(x.esperado))+'</td><td class="num">'+esc(moeda(x.real))+'</td></tr>';
+      }).join('')||'<tr><td colspan="7" class="vazio">Nenhum projeto com aportes até esta data.</td></tr>')+
+      (l.length?'<tr class="total"><td>Total</td><td class="num">'+esc(moeda(ta))+'</td><td></td><td></td><td></td><td class="num">'+esc(moeda(te))+'</td><td class="num">'+esc(moeda(tr))+'</td></tr>':'')+'</tbody></table></div>';
+}
+async function invIndicadores(c){
+  var l=await invRpc('inv_indicadores_listar',{p_org:invOrg()});
+  c.innerHTML='<div class="cabeca"><div><h2>Indicadores</h2><p class="apoio">Quem indica investidores e recebe comissão sobre os aportes. Cada indicador pode ter links de indicação próprios.</p></div>'+
+      '<div class="acoes"><button class="botao" type="button" id="inv-ind-novo">Novo indicador</button></div></div>'+
+    '<div class="rolagem"><table id="inv-indicadores"><thead><tr><th scope="col">Indicador</th><th scope="col" class="num">Comissão padrão</th><th scope="col" class="num">Indicados</th><th scope="col" class="num">Valor indicado</th><th scope="col" class="num">Comissão</th><th scope="col" class="num">A pagar</th><th scope="col">Ações</th></tr></thead><tbody>'+
+      (l.map(function(i){return '<tr><td>'+esc(i.nome)+(i.ativo?'':' <span class="situacao off">Inativo</span>')+'<span class="sub">'+esc([i.email,i.telefone].filter(Boolean).join(' · ')||'sem contato')+'</span></td><td class="num">'+esc(pct(i.percentual,3))+'</td><td class="num">'+esc(i.indicados)+'</td><td class="num">'+esc(moeda(i.base))+'</td><td class="num">'+esc(moeda(i.comissao))+'</td><td class="num'+(Number(i.a_pagar)>0?' neg':'')+'">'+esc(moeda(i.a_pagar))+'</td>'+
+        '<td><div class="fin-acoes">'+(i.ativo?'<button class="botao pequeno" type="button" data-link-novo="'+esc(i.id)+'">Criar link</button>':'')+'<button class="botao claro pequeno" type="button" data-ind="'+esc(i.id)+'">Editar</button></div></td></tr>';}).join('')||'<tr><td colspan="7" class="vazio">Nenhum indicador cadastrado.</td></tr>')+'</tbody></table></div>';
+  var achar=function(id){return l.filter(function(i){return i.id===id;})[0];};
+  $('#inv-ind-novo').onclick=function(){invDlgIndicador(null);};
+  $$('[data-ind]',c).forEach(function(b){b.onclick=function(){invDlgIndicador(achar(b.getAttribute('data-ind')));};});
+  $$('[data-link-novo]',c).forEach(function(b){b.onclick=function(){invDlgLink(achar(b.getAttribute('data-link-novo')));};});
+}
+function invDlgIndicador(i){
+  var novo=!i;i=i||{ativo:true};
+  var d=finDlg(novo?'Novo indicador':'Editar indicador',
+    '<div class="grade"><div class="campo" style="flex:2 1 260px"><label for="ii-nome">Nome</label><input id="ii-nome" type="text" maxlength="160" value="'+esc(i.nome||'')+'" required></div>'+
+      '<div class="campo"><label for="ii-doc">CPF ou CNPJ</label><input id="ii-doc" type="text" maxlength="20" value="'+esc(i.documento||'')+'"></div></div>'+
+    '<div class="grade"><div class="campo"><label for="ii-email">E-mail</label><input id="ii-email" type="email" maxlength="254" value="'+esc(i.email||'')+'"></div>'+
+      '<div class="campo"><label for="ii-tel">Telefone</label><input id="ii-tel" type="text" maxlength="30" value="'+esc(i.telefone||'')+'"></div></div>'+
+    '<div class="grade"><div class="campo"><label for="ii-pct">Comissão padrão (%)</label><input id="ii-pct" type="text" inputmode="decimal" value="'+esc(i.percentual==null?'':Number(i.percentual).toLocaleString('pt-BR',{maximumFractionDigits:3}))+'" placeholder="Ex.: 2,5"></div>'+
+      '<div class="campo"><label for="ii-pix">Chave Pix para pagamento</label><input id="ii-pix" type="text" maxlength="120" value="'+esc(i.chave_pix||'')+'"></div>'+
+      (novo?'':'<div class="campo" style="flex:0 1 120px"><span class="rotulo">Ativo</span>'+chaveSw(i.ativo,'Indicador ativo','id="ii-ativo"')+'</div>')+'</div>'+
+    '<div class="campo"><label for="ii-obs">Observações</label><textarea id="ii-obs" rows="2" maxlength="1000">'+esc(i.observacoes||'')+'</textarea></div>'+
+    '<p class="meta">A comissão padrão é sugerida ao criar links e ao vincular investidores; pode ser alterada em cada caso.</p>',
+    '<button class="botao" type="submit">Salvar indicador</button>');
+  var sw=$('#ii-ativo',d);if(sw){sw.onclick=function(){sw.setAttribute('aria-checked',sw.getAttribute('aria-checked')==='true'?'false':'true');};}
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),pc=$('#ii-pct',d).value.trim()===''?0:valorDe($('#ii-pct',d).value);
+    if(!$('#ii-nome',d).value.trim()){aviso('Informe o nome do indicador.',true);return;}
+    if(isNaN(pc)||pc<0||pc>100){aviso('A comissão fica entre 0 e 100%.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('inv_indicador_salvar',{p_id:novo?null:i.id,p_org:invOrg(),p_dados:{nome:$('#ii-nome',d).value,documento:$('#ii-doc',d).value,email:$('#ii-email',d).value,telefone:$('#ii-tel',d).value,percentual:pc,chave_pix:$('#ii-pix',d).value,observacoes:$('#ii-obs',d).value,ativo:sw?sw.getAttribute('aria-checked')==='true':true}});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso('Indicador salvo.');invDesenha();
+  };
+  $('#ii-nome',d).focus();
+}
+async function invDlgLink(i){
+  var prjs=[];
+  try{prjs=(await invRpc('inv_projetos_listar',{p_org:invOrg()})).filter(function(p){return p.status==='captando';});}catch(e){}
+  var d=finDlg('Link de indicação de '+i.nome,
+    '<div class="campo"><label for="il-projeto">Projeto</label><select id="il-projeto"><option value="">Todos os projetos (link geral)</option>'+prjs.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.codigo+' '+p.nome)+'</option>';}).join('')+'</select></div>'+
+    '<div class="campo" style="max-width:240px"><label for="il-pct">Comissão deste link (%)</label><input id="il-pct" type="text" inputmode="decimal" value="'+esc(Number(i.percentual).toLocaleString('pt-BR',{maximumFractionDigits:3}))+'"></div>'+
+    '<p class="meta">O indicador envia o link aos investidores dele. Quem abre o link vê uma página pública da Celeiro e deixa o contato; o interesse chega em "Links e interesses" já com o indicador e a comissão. A comissão não aparece na página pública.</p>'+
+    '<div id="il-pronto"></div>',
+    '<button class="botao" type="submit">Criar link</button>');
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),pc=valorDe($('#il-pct',d).value);
+    if(isNaN(pc)||pc<0||pc>100){aviso('A comissão fica entre 0 e 100%.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('inv_link_criar',{p_indicador:i.id,p_projeto:$('#il-projeto',d).value||null,p_percentual:pc});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    var url=invLink(r.data.codigo);
+    $('#il-pronto',d).innerHTML='<p class="sucesso">Link criado, com comissão de '+esc(pct(r.data.percentual,3))+'.</p><div class="grade"><div class="campo" style="flex:1 1 320px"><label for="il-url">Link para enviar</label><input id="il-url" type="text" readonly value="'+esc(url)+'"></div><button class="botao claro" type="button" id="il-copiar">Copiar link</button></div>';
+    $('#il-copiar',d).onclick=function(){mcpCopiar(url,'Link');};
+    b.classList.add('oculto');aviso('Link criado.');
+    if(INV.aba==='indicacoes'){invDesenha();}
+  };
+}
+async function invIndicacoes(c){
+  var org=invOrg(),rs=await Promise.all([invRpc('inv_indicadores_listar',{p_org:org}),invRpc('inv_interesses_listar',{p_org:org})]),links=[];
+  rs[0].forEach(function(i){(i.links||[]).forEach(function(l){links.push({i:i,l:l});});});
+  c.innerHTML='<div class="cabeca"><div><h2>Links de indicação</h2><p class="apoio">Cada link pertence a um indicador e tem a comissão definida. Para criar um link, vá em Indicadores → Criar link.</p></div>'+
+      '<div class="acoes"><button class="botao claro" type="button" id="inv-ir-ind">Ir para Indicadores</button></div></div>'+
+    '<div class="rolagem"><table id="inv-links"><thead><tr><th scope="col">Indicador</th><th scope="col">Projeto</th><th scope="col" class="num">Comissão</th><th scope="col">Link</th><th scope="col" class="num">Interesses</th><th scope="col">Ativo</th></tr></thead><tbody>'+
+      (links.map(function(x){var url=invLink(x.l.codigo);return '<tr><td>'+esc(x.i.nome)+'</td><td>'+esc(x.l.projeto||'Todos os projetos')+'</td><td class="num">'+esc(pct(x.l.percentual,3))+'</td>'+
+        '<td><div class="fin-acoes"><input type="text" readonly aria-label="Link de indicação" value="'+esc(url)+'" style="flex:1 1 220px;min-width:0"><button class="botao claro pequeno" type="button" data-copiar="'+esc(url)+'">Copiar</button></div></td>'+
+        '<td class="num">'+esc(x.l.interesses)+'</td><td>'+chaveSw(x.l.ativo,'Link ativo','data-link="'+esc(x.l.id)+'"')+'</td></tr>';}).join('')||'<tr><td colspan="6" class="vazio">Nenhum link criado.</td></tr>')+'</tbody></table></div>'+
+    '<h2>Interesses recebidos</h2><p class="apoio">Pessoas que abriram um link de indicação e deixaram o contato. Ao virar investidor, cadastre a pessoa no Cadastro e vincule ao projeto escolhendo o indicador.</p>'+
+    '<div class="rolagem"><table id="inv-interesses"><thead><tr><th scope="col">Recebido em</th><th scope="col">Pessoa</th><th scope="col">Projeto</th><th scope="col">Indicador</th><th scope="col" class="num">Valor pretendido</th><th scope="col">Situação</th></tr></thead><tbody>'+
+      (rs[1].map(function(n){var q=dataHora(n.criado_em);return '<tr><td>'+esc(q.data)+'<span class="sub">'+esc(q.hora)+'</span></td><td>'+esc(n.nome)+'<span class="sub">'+esc([n.email,n.telefone].filter(Boolean).join(' · '))+'</span>'+(n.mensagem?'<span class="sub">“'+esc(n.mensagem)+'”</span>':'')+'</td><td>'+esc(n.projeto||'Não escolhido')+'</td>'+
+        '<td>'+esc(n.indicador||'—')+(n.percentual!=null?'<span class="sub">comissão de '+esc(pct(n.percentual,3))+'</span>':'')+'</td><td class="num">'+(n.valor_pretendido!=null?esc(moeda(n.valor_pretendido)):'—')+'</td>'+
+        '<td><select aria-label="Situação do interesse de '+esc(n.nome)+'" data-interesse="'+esc(n.id)+'">'+INV_INTERESSE.map(function(s){return '<option value="'+s[0]+'"'+(n.status===s[0]?' selected':'')+'>'+s[1]+'</option>';}).join('')+'</select></td></tr>';}).join('')||'<tr><td colspan="6" class="vazio">Nenhum interesse recebido.</td></tr>')+'</tbody></table></div>';
+  $('#inv-ir-ind').onclick=function(){invIr('indicadores');};
+  $$('[data-copiar]',c).forEach(function(b){b.onclick=function(){mcpCopiar(b.getAttribute('data-copiar'),'Link');};});
+  $$('[data-link]',c).forEach(function(b){b.onclick=async function(){
+    var novo=b.getAttribute('aria-checked')!=='true';ocupar(b,true);
+    var r=await sb.rpc('inv_link_ativar',{p_id:b.getAttribute('data-link'),p_ativo:novo});ocupar(b,false);
+    if(r.error){aviso(msgErro(r.error),true);return;}
+    b.setAttribute('aria-checked',novo?'true':'false');aviso(novo?'Link reativado.':'Link desativado. Quem abrir verá que não está mais disponível.');
+  };});
+  $$('[data-interesse]',c).forEach(function(s){s.onchange=async function(){
+    var r=await sb.rpc('inv_interesse_status',{p_id:s.getAttribute('data-interesse'),p_status:s.value});
+    if(r.error){aviso(msgErro(r.error),true);return;}
+    aviso('Situação atualizada.');
+  };});
+}
+async function invComissoes(c){
+  var l=await invRpc('inv_comissoes',{p_org:invOrg(),p_ini:INV.ini,p_fim:INV.fim}),tot=0,paga=0,grupos={},ordem=[];
+  l.forEach(function(x){tot+=Number(x.comissao);if(x.paga_em)paga+=Number(x.comissao);if(!grupos[x.indicador_id]){grupos[x.indicador_id]={nome:x.indicador,pix:x.chave_pix,linhas:[],base:0,com:0,pend:0};ordem.push(x.indicador_id);}
+    var g=grupos[x.indicador_id];g.linhas.push(x);g.base+=Number(x.base);g.com+=Number(x.comissao);if(!x.paga_em)g.pend+=Number(x.comissao);});
+  function corpo(imp){
+    return ordem.map(function(id){var g=grupos[id];
+      return '<tr class="grupo"><td colspan="3">'+esc(g.nome)+(g.pix?'<span class="sub">Pix: '+esc(g.pix)+'</span>':'')+'</td><td class="num">'+esc(moeda(g.base))+'</td><td></td><td class="num">'+esc(moeda(g.com))+'</td><td colspan="'+(imp?1:2)+'">'+(g.pend>0?esc(moeda(g.pend))+' a pagar':'Tudo pago')+'</td></tr>'+
+        g.linhas.map(function(x){return '<tr><td>'+esc(dataBr(x.data))+'</td><td>'+esc(x.projeto)+'</td><td>'+esc(x.investidor)+'</td><td class="num">'+esc(moeda(x.base))+'</td><td class="num">'+esc(pct(x.percentual,3))+'</td><td class="num">'+esc(moeda(x.comissao))+'</td>'+
+          '<td>'+(x.paga_em?(imp?'Paga em '+esc(dataBr(x.paga_em)):'<span class="situacao">Paga em '+esc(dataBr(x.paga_em))+'</span>'):(imp?'A pagar':'<span class="selo claro">A pagar</span>'))+'</td>'+
+          (imp?'':'<td>'+(x.paga_em?'<button class="botao sutil pequeno" type="button" data-despagar="'+esc(x.aporte_id)+'">Desfazer</button>':'<button class="botao pequeno" type="button" data-pagar="'+esc(x.aporte_id)+'">Marcar paga</button>')+'</td>')+'</tr>';}).join('');
+    }).join('');
+  }
+  var cab='<tr><th scope="col">Data do aporte</th><th scope="col">Projeto</th><th scope="col">Investidor</th><th scope="col" class="num">Valor do aporte</th><th scope="col" class="num">%</th><th scope="col" class="num">Comissão</th><th scope="col">Situação</th>';
+  c.innerHTML='<div class="cabeca"><div><h2>Relatório de comissões</h2><p class="apoio">Comissões dos indicadores sobre os aportes de '+esc(invPeriodoTexto())+', agrupadas por indicador.</p></div>'+
+      '<div class="acoes"><button class="botao claro" type="button" id="inv-com-imprimir"'+(l.length?'':' disabled')+'>Imprimir ou salvar em PDF</button></div></div>'+
+    '<div class="grade-d">'+finCartao('Comissões do período',moeda(tot),ordem.length+(ordem.length===1?' indicador':' indicadores'))+finCartao('Pagas',moeda(paga))+finCartao('A pagar',moeda(tot-paga),'',tot-paga>0?'neg':'')+'</div>'+
+    '<div class="rolagem"><table id="inv-comissoes"><thead>'+cab+'<th scope="col">Ação</th></tr></thead><tbody>'+(corpo(false)||'<tr><td colspan="8" class="vazio">Nenhuma comissão no período.</td></tr>')+
+      (l.length?'<tr class="total"><td colspan="5">Total do período</td><td class="num">'+esc(moeda(tot))+'</td><td colspan="2">'+esc(moeda(tot-paga))+' a pagar</td></tr>':'')+'</tbody></table></div>';
+  $$('[data-pagar]',c).forEach(function(b){b.onclick=async function(){ocupar(b,true);var r=await sb.rpc('inv_comissao_pagar',{p_aporte:b.getAttribute('data-pagar'),p_data:hojeIso()});if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}aviso('Comissão marcada como paga hoje.');invDesenha();};});
+  $$('[data-despagar]',c).forEach(function(b){invConfirma(b,'Confirmar',async function(){await invRpc('inv_comissao_pagar',{p_aporte:b.getAttribute('data-despagar'),p_data:null});aviso('Pagamento desfeito.');invDesenha();});});
+  $('#inv-com-imprimir').onclick=function(){
+    var w=window.open('','_blank');
+    if(!w){aviso('O navegador bloqueou a janela de impressão. Permita pop-ups para este site.',true);return;}
+    w.document.write('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de comissões</title><style>'+FIN_FATURA_CSS+'tr.grupo td{font-weight:700;background:#F4F6F3}.sub{display:block;font-size:12px;font-weight:400;color:#44564E}h1{font-size:20px;margin:0 0 4px}</style></head><body><h1>Relatório de comissões</h1><p class="fatura-obs">Aportes de '+esc(invPeriodoTexto())+' · total '+esc(moeda(tot))+' · a pagar '+esc(moeda(tot-paga))+'</p><br><table><thead>'+cab+'</tr></thead><tbody>'+corpo(true)+'</tbody></table></body></html>');
+    w.document.close();w.focus();setTimeout(function(){w.print();},200);
+    evento('Imprimiu o relatório de comissões','Investimentos');
   };
 }
 

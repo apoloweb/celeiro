@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Indicação · Celeiro Administradora</title>
+<link rel="icon" href="../assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--verde:#0F3D2E;--ambar:#E3A72F;--nevoa:#F4F6F3;--linha:#D5DED9;--borda:#9FB0A8;--texto2:#44564E;--branco:#FFFFFF;--erro:#B3261E}
+*{box-sizing:border-box}
+body{margin:0;font-family:Sora,system-ui,Arial,sans-serif;background:var(--verde);color:var(--verde);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:32px 16px;gap:24px}
+header img{height:56px;width:auto;display:block}
+main{background:var(--branco);border-radius:16px;padding:28px;width:min(560px,100%);display:flex;flex-direction:column;gap:18px}
+h1{font-size:24px;line-height:1.25;margin:0}
+p{margin:0;line-height:1.6}
+.apoio{color:var(--texto2);font-size:15px}
+form{display:flex;flex-direction:column;gap:16px}
+.campo{display:flex;flex-direction:column;gap:8px}
+label{font-size:14px;font-weight:500}
+input,textarea{font:inherit;color:inherit;border:1px solid var(--borda);border-radius:8px;padding:12px 14px;min-height:48px;width:100%;background:var(--branco)}
+input:focus,textarea:focus,button:focus-visible{outline:3px solid var(--ambar);outline-offset:2px}
+.aceite{display:flex;gap:12px;align-items:flex-start;font-size:14px;font-weight:400;line-height:1.5}
+.aceite input{width:22px;min-height:22px;height:22px;flex:0 0 22px;margin-top:2px;padding:0}
+button{font:inherit;font-weight:600;min-height:52px;border:0;border-radius:10px;background:var(--verde);color:var(--nevoa);cursor:pointer;padding:0 20px}
+button:disabled{opacity:.6;cursor:default}
+.erro{background:#FBE9E7;color:var(--erro);border:1px solid #F0B4B4;border-radius:8px;padding:12px 14px;font-size:14px}
+.sucesso{background:#E4F1EA;border:1px solid #B5D3C4;border-radius:8px;padding:16px;font-size:15px}
+.nota{font-size:12px;color:var(--texto2);border-top:1px solid var(--linha);padding-top:16px}
+.oculto{display:none!important}
+footer{color:#C9D6CF;font-size:12px;text-align:center;max-width:560px;line-height:1.6}
+</style>
+</head>
+<body>
+<header><img src="../assets/logo-negativa.png" alt="Celeiro Administradora"></header>
+<main id="caixa" aria-live="polite"><p class="apoio">Carregando…</p></main>
+<footer>Esta página apenas registra o seu interesse em receber contato. Não é uma oferta de investimento nem promessa de rentabilidade.</footer>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.104.1"></script>
+<script src="../config.js"></script>
+<script>
+(function(){
+'use strict';
+var caixa=document.getElementById('caixa');
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function indisponivel(msg){caixa.innerHTML='<h1>Link indisponível</h1><p class="apoio">'+esc(msg||'Este link de indicação não está mais ativo. Peça um novo link a quem indicou você.')+'</p>';}
+var cfg=window.CELEIRO_OFFICE_CONFIG||{};
+var codigo=(new URLSearchParams(location.search).get('c')||'').trim().toLowerCase();
+if(!cfg.url||!cfg.anonKey||!window.supabase){indisponivel('Não foi possível carregar a página. Tente de novo em instantes.');return;}
+if(!/^[a-f0-9]{12}$/.test(codigo)){indisponivel();return;}
+var sb=window.supabase.createClient(cfg.url,cfg.anonKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+sb.rpc('inv_link_publico',{p_codigo:codigo}).then(function(r){
+  if(r.error){indisponivel('Não foi possível carregar a página. Tente de novo em instantes.');return;}
+  var d=r.data||{};
+  if(!d.ok){indisponivel();return;}
+  caixa.innerHTML='<h1>'+esc(d.indicador)+' indicou você para conhecer '+(d.projeto?'o projeto '+esc(d.projeto):'os projetos')+' da '+esc(d.empresa)+'</h1>'+
+    '<p class="apoio">Deixe seu contato e a nossa equipe fala com você para apresentar os detalhes.</p>'+
+    '<form id="f" novalidate>'+
+      '<div class="campo"><label for="nome">Nome completo</label><input id="nome" type="text" maxlength="120" autocomplete="name" required></div>'+
+      '<div class="campo"><label for="email">E-mail</label><input id="email" type="email" maxlength="254" autocomplete="email" required></div>'+
+      '<div class="campo"><label for="tel">Telefone com DDD (opcional)</label><input id="tel" type="tel" maxlength="30" autocomplete="tel"></div>'+
+      '<div class="campo"><label for="valor">Valor que pensa em investir, em reais (opcional)</label><input id="valor" type="text" inputmode="decimal" maxlength="20" placeholder="Ex.: 10.000,00"></div>'+
+      '<div class="campo"><label for="msg">Mensagem (opcional)</label><textarea id="msg" rows="3" maxlength="500"></textarea></div>'+
+      '<label class="aceite"><input id="aceite" type="checkbox"> <span>Autorizo a '+esc(d.empresa)+' a usar estes dados para entrar em contato comigo sobre este assunto.</span></label>'+
+      '<p class="erro oculto" id="erro" role="alert"></p>'+
+      '<button type="submit">Quero receber contato</button>'+
+    '</form>'+
+    '<p class="nota">Seus dados são usados apenas para este contato e ficam registrados junto com a indicação de '+esc(d.indicador)+'.</p>';
+  var f=document.getElementById('f'),erro=document.getElementById('erro');
+  function falha(m){erro.textContent=m;erro.classList.remove('oculto');}
+  f.onsubmit=function(ev){
+    ev.preventDefault();
+    erro.classList.add('oculto');
+    var nome=document.getElementById('nome').value.trim(),email=document.getElementById('email').value.trim();
+    var v=document.getElementById('valor').value.replace(/[R$\s]/g,'');
+    if(v.indexOf(',')>=0){v=v.replace(/\./g,'').replace(',','.');}
+    if(nome.length<2){falha('Informe seu nome.');return;}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){falha('Informe um e-mail válido.');return;}
+    if(v!==''&&(isNaN(Number(v))||Number(v)<0)){falha('Confira o valor informado, ou deixe em branco.');return;}
+    if(!document.getElementById('aceite').checked){falha('Marque a autorização de contato para enviar.');return;}
+    var b=f.querySelector('button');b.disabled=true;
+    sb.rpc('inv_interesse_registrar',{p_codigo:codigo,p_dados:{nome:nome,email:email,telefone:document.getElementById('tel').value.trim(),valor_pretendido:v,mensagem:document.getElementById('msg').value.trim(),aceite:true}}).then(function(x){
+      if(x.error){b.disabled=false;falha(/Failed to fetch|NetworkError/i.test(x.error.message||'')?'Sem conexão. Verifique a internet e tente de novo.':(x.error.message||'Não foi possível enviar. Tente de novo.'));return;}
+      caixa.innerHTML='<h1>Recebemos o seu contato</h1><p class="sucesso">Obrigado, '+esc(nome.split(' ')[0])+'. A equipe da '+esc(d.empresa)+' vai falar com você em breve.</p>';
+    });
+  };
+});
+})();
+</script>
+</body>
+</html>
