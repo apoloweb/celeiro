@@ -34,6 +34,8 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | `supabase/functions/criar-usuario/index.ts` | Função do servidor que cria o acesso de um novo usuário (para publicar no Supabase) |
 | `supabase/functions/mcp/index.ts` | Servidor MCP do backoffice (para publicar no Supabase, com "Verify JWT" desligado) |
 | `indicacao/index.html` | Página pública do link de indicação (registro de interesse, sem login) |
+| `verificar/index.html` | Página pública onde a pessoa digita o código de verificação |
+| `supabase/functions/enviar-verificacao/index.ts` | Função do servidor que envia o código por e-mail (Resend) e WhatsApp (Z-API) |
 | `assets/` | Logo e favicon |
 
 ## Configuração (uma vez)
@@ -175,6 +177,51 @@ recorrentes; sem conciliação bancária; sem encerramento de exercício; pagar 
 despesa (compra de imobilizado e empréstimos entram por lançamento manual). O Dashboard geral do sistema ainda
 não lê os números do Financeiro, e o MCP ainda não tem ferramentas do Financeiro. Os demonstrativos são
 gerenciais: não substituem a escrituração feita pela contabilidade.
+
+## Endereço
+
+O Office é publicado em `https://office.celeiroadministradora.com.br/` por um segundo projeto na Vercel, do mesmo
+repositório, com a pasta `office` como raiz. O endereço antigo `https://www.celeiroadministradora.com.br/office/`
+redireciona para o subdomínio (regra no `vercel.json` da raiz do repositório), mantendo o caminho e os parâmetros,
+de modo que links antigos de indicação continuam valendo. No Supabase do Office, o Site URL é o subdomínio e as
+Redirect URLs aceitam os dois endereços. Como a sessão do navegador é por endereço, quem estava logado no
+endereço antigo entra de novo no subdomínio.
+
+## Verificação de contatos por código (e-mail e WhatsApp)
+
+Ao cadastrar uma pessoa física no Cadastro, ou ao criar um usuário do sistema, o Office envia um código de
+6 números para o e-mail e para o WhatsApp informados. A mensagem leva o código e um link para a página pública
+`verificar/`. A própria pessoa abre a página, digita o código e o contato passa a constar como verificado.
+
+- **Cadastro**: o envio sai sozinho ao cadastrar uma pessoa nova (para os contatos preenchidos e ainda não
+  conferidos). Na ficha, cada contato mostra a situação e o botão "Enviar código" ou "Reenviar código".
+  As caixas "Celular conferido" e "E-mail conferido" continuam existindo para a equipe marcar à mão.
+  Trocar o e-mail ou o celular derruba a marca de verificado daquele contato.
+- **Usuários**: o formulário de novo usuário ganhou o campo WhatsApp (opcional). Ao criar ou vincular, o código
+  vai para o e-mail e, se informado, para o WhatsApp. A lista mostra "verificado" ou "não verificado" e o botão
+  "Enviar verificação".
+- **Regras do código**: vale 24 horas, aceita até 5 tentativas, um novo envio invalida o anterior, no máximo
+  um envio por minuto e 5 por dia para cada contato. O banco guarda só o resumo do código. Quem está logado
+  não consegue ler o código: ele só passa pela função do servidor que faz o envio.
+- **Página pública**: mostra apenas o canal, o contato mascarado (a***@dominio, (11) *****-1234) e o nome da
+  empresa. Não devolve dados do cadastro.
+
+Para publicar:
+
+1. Rodar o `supabase.sql` atualizado.
+2. Criar a função `enviar-verificacao` em Edge Functions com o conteúdo de
+   `supabase/functions/enviar-verificacao/index.ts` (pode ficar com "Verify JWT" ligado ou desligado; ela mesma
+   confere a sessão).
+3. Em Edge Functions → Secrets, criar (quem faz é o dono da conta; as chaves não passam pelo código):
+   - `RESEND_API_KEY`: chave da Resend. Opcional `VERIFICACAO_REMETENTE`, no formato
+     `Nome <endereco@dominio-verificado>`; o padrão é `nao-responda@celeiroadministradora.com.br`.
+   - `ZAPI_INSTANCE_ID`, `ZAPI_TOKEN` e `ZAPI_CLIENT_TOKEN`: dados da instância e o token de segurança da conta
+     na Z-API, com o número já conectado por QR code.
+   Sem esses segredos, o canal responde "envio ainda não configurado" e nada é enviado.
+
+Limites: só celular brasileiro (DDD + 9 dígitos); a Z-API não é a API oficial do WhatsApp, então o número
+conectado pode ser bloqueado pelo WhatsApp se houver muitos envios ou denúncias; o cadastro de empresa (PJ) não
+tem verificação própria, só a pessoa do representante; a verificação do usuário é informativa e não bloqueia o login.
 
 ## Investimentos
 

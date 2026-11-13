@@ -177,6 +177,8 @@ tr.grupo-l th{background:var(--nevoa);font-size:13px;font-weight:600;padding:8px
 .botao.sutil{background:none;color:var(--texto2);font-weight:500;text-decoration:underline;padding:0 10px}
 .botao.sutil:hover{background:none;color:var(--verde)}
 .texto-livre{white-space:pre-wrap;margin:0}
+.verif{display:flex;flex-direction:column;gap:6px;align-items:flex-start;margin-top:6px}
+.verif:empty{display:none}
 #ip-env input{width:100%;min-width:0}
 .dlg.largo{width:min(880px,calc(100vw - 24px))}
 td.num,th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -716,12 +718,14 @@ async function telaUsuarios(op){
   /* ----- tabela de usuários ----- */
   var linhas=usuarios.map(function(u){
     var eu=u.user_id===a.user_id,m=modsDe[u.user_id]||{modulos:[],bloqueados:[]},n=u.nivel_id?nivelPorId[u.nivel_id]:null;
-    return '<tr><td>'+esc(u.nome)+(eu?'<span class="sub">você</span>':'')+'<span class="sub">'+esc(u.email)+'</span></td>'+
+    return '<tr><td>'+esc(u.nome)+(eu?'<span class="sub">você</span>':'')+'<span class="sub">'+esc(u.email)+' · '+(u.email_verificado_em?'verificado':'não verificado')+'</span>'+
+        (u.telefone?'<span class="sub">WhatsApp '+esc(fmtTel(String(u.telefone).replace(/^55/,'')))+' · '+(u.telefone_verificado_em?'verificado':'não verificado')+'</span>':'')+'</td>'+
       '<td>'+esc(PERFIS[u.perfil]||u.perfil)+'<span class="sub">'+esc(u.organizacao_id?(nomeOrg[u.organizacao_id]||'—'):'Celeiro')+'</span></td>'+
       '<td>'+(u.perfil==='master'?'—':esc(n?n.nome:'Padrão do perfil'))+'</td>'+
       '<td>'+(u.perfil==='master'?'<span class="chips"><span class="chipm">Todos os módulos</span></span>':(u.ativo?chipsModulos(m.modulos,m.bloqueados):'<span class="apoio">Sem acesso (inativo)</span>'))+'</td>'+
       '<td><span class="situacao'+(u.ativo?'':' off')+'">'+(u.ativo?'Ativo':'Inativo')+'</span></td>'+
       '<td>'+(podeAlterar(u)?'<button class="botao claro pequeno" type="button" data-editar="'+esc(u.user_id)+'">Editar</button> '+
+        (u.ativo&&(!u.email_verificado_em||(u.telefone&&!u.telefone_verificado_em))?'<button class="botao claro pequeno" type="button" data-verificar="'+esc(u.user_id)+'">Enviar verificação</button> ':'')+
         (eu?'':'<button class="botao claro pequeno" type="button" data-situacao="'+esc(u.user_id)+'">'+(u.ativo?'Desativar':'Ativar')+'</button>'):'')+'</td></tr>';
   }).join('');
 
@@ -733,7 +737,7 @@ async function telaUsuarios(op){
   var tituloForm=ed?'Editar usuário':(vincular?'Vincular acesso existente':'Novo usuário');
   var criadoHtml=op.criado?'<div class="sucesso" role="status"><strong>Usuário criado: '+esc(op.criado.nome)+' ('+esc(op.criado.email)+').</strong><br>'+
     (op.criado.senha?'Senha inicial: <span class="senha-inicial">'+esc(op.criado.senha)+'</span><br>Anote agora: ela não será mostrada de novo. Passe à pessoa por um canal seguro. ':'')+
-    'No primeiro acesso a pessoa cadastra o próprio Google Authenticator e pode trocar a senha em "Trocar senha".</div>':'';
+    'No primeiro acesso a pessoa cadastra o próprio Google Authenticator e pode trocar a senha em "Trocar senha".'+(op.criado.verif?'<br>Verificação de contato: '+esc(op.criado.verif):'')+'</div>':'';
 
   /* ----- níveis ----- */
   var escopoNivel=edN?(edN.organizacao_id||''):(master?'':a.organizacao_id);
@@ -760,6 +764,7 @@ async function telaUsuarios(op){
       '<div class="grade">'+
       '<div class="campo"><label for="u-nome">Nome</label><input id="u-nome" type="text" maxlength="120" value="'+esc(ed?ed.nome:'')+'" required></div>'+
       '<div class="campo"><label for="u-email">E-mail</label><input id="u-email" type="email" autocomplete="off" value="'+esc(ed?ed.email:'')+'" required></div>'+
+      (ed?'':'<div class="campo"><label for="u-fone">WhatsApp (opcional)</label><input id="u-fone" type="tel" inputmode="tel" autocomplete="off" maxlength="20" placeholder="(11) 99999-9999"></div>')+
       (ed||vincular?'':'<div class="campo"><label for="u-senha">Senha inicial (mínimo 10 caracteres)</label><div class="junto"><input id="u-senha" type="text" autocomplete="off" maxlength="72" required><button class="botao claro pequeno" type="button" id="b-gerar">Gerar</button></div></div>')+
       '</div><div class="grade">'+
       '<div class="campo"><label for="u-perfil">Perfil</label><select id="u-perfil"'+(ed&&ed.user_id===a.user_id?' disabled':'')+'>'+optPerfil+'</select></div>'+
@@ -852,10 +857,18 @@ async function telaUsuarios(op){
       aviso((vincular?'':'O acesso foi criado, mas o vínculo falhou: ')+msgErro(r.error)+(vincular?'':' Use "Vincular acesso existente" para concluir.'),true);
       return;
     }
-    if(vincular){aviso('Usuário vinculado.');telaUsuarios();}
-    else{telaUsuarios({criado:{nome:nome,email:email,senha:senha}});}
+    var fone=$('#u-fone')?$('#u-fone').value.trim():'',vx=await enviarVerificacao('usuario',r.data,fone?['email','whatsapp']:['email'],fone);
+    if(vincular){await telaUsuarios();aviso('Usuário vinculado. '+verifResumo(vx),verifRuim(vx));}
+    else{telaUsuarios({criado:{nome:nome,email:email,senha:senha,verif:verifResumo(vx)}});}
   };
   $$('[data-editar]').forEach(function(b){b.onclick=function(){telaUsuarios({editar:b.getAttribute('data-editar')});};});
+  $$('[data-verificar]').forEach(function(b){b.onclick=async function(){
+    var u=usuarios.filter(function(x){return x.user_id===b.getAttribute('data-verificar');})[0];if(!u)return;
+    var canais=[];if(!u.email_verificado_em)canais.push('email');if(u.telefone&&!u.telefone_verificado_em)canais.push('whatsapp');
+    ocupar(b,true);
+    var x=await enviarVerificacao('usuario',u.user_id,canais);
+    ocupar(b,false);aviso(verifResumo(x),verifRuim(x));
+  };});
   $$('[data-situacao]').forEach(function(b){
     b.onclick=async function(){
       var u=usuarios.filter(function(x){return x.user_id===b.getAttribute('data-situacao');})[0];
@@ -2510,6 +2523,38 @@ function ligaCep(pre){
   };
 }
 
+/* ----- verificação de contatos por código (e-mail e WhatsApp) ----- */
+var VERIF_TXT={enviado:'código enviado',nao_configurado:'envio ainda não configurado no servidor',falhou:'falha no envio',sem_destino:'sem contato cadastrado',ja_verificado:'já verificado',aguarde:'aguarde um minuto para reenviar',limite:'limite de envios do dia atingido',telefone_invalido:'número de celular inválido',invalido:'não enviado',nao_encontrado:'registro não encontrado'};
+async function enviarVerificacao(tipo,id,canais,telefone){
+  var r=await sb.functions.invoke('enviar-verificacao',{body:{alvo_tipo:tipo,alvo_id:id,canais:canais,telefone:telefone||null}});
+  if(r.error){return {erro:await erroFuncao(r.error),resultados:[]};}
+  return {resultados:(r.data&&r.data.resultados)||[]};
+}
+function verifResumo(x){
+  if(x.erro)return 'Verificação não enviada: '+x.erro;
+  return x.resultados.map(function(r){return (r.canal==='email'?'E-mail':'WhatsApp')+': '+(VERIF_TXT[r.situacao]||r.situacao);}).join(' · ')+'.';
+}
+function verifRuim(x){return !!x.erro||x.resultados.some(function(r){return r.situacao!=='enviado'&&r.situacao!=='ja_verificado';});}
+async function verifPainel(p){
+  var caixas=$$('[data-verif]');
+  if(!caixas.length)return;
+  var r=await sb.rpc('verificacao_situacao',{p_alvo_tipo:'cadastro_pf',p_alvo_id:p.id}),s=r.error?{}:(r.data||{});
+  caixas.forEach(function(c){
+    var canal=c.getAttribute('data-verif'),tem=canal==='email'?p.email:p.telefone_celular,ok=canal==='email'?p.email_verificado:p.celular_verificado,v=s[canal];
+    if(!tem){c.innerHTML='';return;}
+    if(ok){c.innerHTML=v&&v.confirmado_em?'<span class="sub">Confirmado pela própria pessoa em '+esc(dataHora(v.confirmado_em).data)+'.</span>':'<span class="sub">Marcado como conferido pela equipe.</span>';return;}
+    var q=v?dataHora(v.enviado_em):null;
+    var txt=!v?'Código ainda não enviado.':v.envio==='enviado'?('Código enviado em '+q.data+' às '+q.hora.slice(0,5)+(v.expirado?'; já expirou.':'. Aguardando a pessoa confirmar.')):v.envio==='nao_configurado'?'O envio ainda não está configurado no servidor.':'O último envio falhou.';
+    c.innerHTML='<span class="sub">'+esc(txt)+'</span><button class="botao claro pequeno" type="button">'+(v?'Reenviar código':'Enviar código')+'</button>';
+    $('button',c).onclick=async function(){
+      ocupar(this,true);
+      var x=await enviarVerificacao('cadastro_pf',p.id,[canal]);
+      aviso(verifResumo(x),verifRuim(x));
+      verifPainel(p);
+    };
+  });
+}
+
 /* ----- blocos de pessoa física (usados no cadastro PF e no representante da PJ) ----- */
 function pfDetalheHtml(p){
   return '<h2 class="titulo-s">Dados pessoais</h2><div class="dados">'+
@@ -2517,8 +2562,8 @@ function pfDetalheHtml(p){
       dado('Nascimento',p.nascimento?dataBr(p.nascimento):'')+dado('Sexo',p.sexo?rotuloDe(SEXOS,p.sexo):'')+dado('Nome da mãe',p.nome_mae)+
       dado('Naturalidade',p.naturalidade)+dado('Nacionalidade',p.nacionalidade)+dado('Estado civil',p.estado_civil?rotuloDe(CIVIS,p.estado_civil):'')+'</div>'+
     '<h2 class="titulo-s">Contatos</h2><div class="contatos">'+
-      '<div class="contato"><div>'+dado('Telefone celular',fmtTel(p.telefone_celular),true)+'</div>'+(p.telefone_celular?seloVerificado(p.celular_verificado):'')+'</div>'+
-      '<div class="contato"><div>'+dado('E-mail',p.email,true)+'</div>'+(p.email?seloVerificado(p.email_verificado):'')+'</div></div>'+
+      '<div class="contato"><div>'+dado('Telefone celular',fmtTel(p.telefone_celular),true)+'<div class="verif" data-verif="whatsapp"></div></div>'+(p.telefone_celular?seloVerificado(p.celular_verificado):'')+'</div>'+
+      '<div class="contato"><div>'+dado('E-mail',p.email,true)+'<div class="verif" data-verif="email"></div></div>'+(p.email?seloVerificado(p.email_verificado):'')+'</div></div>'+
       (p.telefone_fixo?'<div class="dados">'+dado('Telefone fixo',fmtTel(p.telefone_fixo),true)+'</div>':'')+
     '<h2 class="titulo-s">Endereço</h2><div class="dados">'+
       dado('CEP',fmtCep(p.cep),true)+dado('Logradouro',p.logradouro)+dado('Número',p.numero)+
@@ -2637,6 +2682,7 @@ async function verPf(id){
     '<p class="nota">"Verificado" indica conferência feita manualmente por quem preencheu o cadastro. A confirmação automática por código (SMS ou e-mail) ainda não existe.</p>');
   ligaCopiar();
   $('#f-voltar').onclick=function(){telaCadPessoas();};
+  verifPainel(p);
   $('#f-editar').onclick=function(){editarPf(p);};
   $('#f-situacao').onclick=async function(){
     ocupar(this,true);
@@ -2661,7 +2707,12 @@ function editarPf(p){
     var org=ehEquipe()?($('#p-org').value||null):E.acesso.organizacao_id;
     var r=await sb.rpc('cadastro_pf_salvar',{p_id:novo?null:p.id,p_org:org,p_dados:d});
     if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
-    aviso(novo?'Pessoa física cadastrada.':'Cadastro salvo.');verPf(r.data);
+    var msg=novo?'Pessoa física cadastrada.':'Cadastro salvo.',ruim=false;
+    if(novo){
+      var canais=[];if(d.email)canais.push('email');if(d.telefone_celular)canais.push('whatsapp');
+      if(canais.length){var x=await enviarVerificacao('cadastro_pf',r.data,canais);msg+=' '+verifResumo(x);ruim=verifRuim(x);}
+    }
+    await verPf(r.data);aviso(msg,ruim);
   };
 }
 

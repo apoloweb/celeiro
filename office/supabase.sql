@@ -4830,7 +4830,334 @@ grant execute on function public.inv_link_publico(text)               to anon, a
 grant execute on function public.inv_interesse_registrar(text, jsonb) to anon, authenticated;
 
 -- =====================================================================
--- 14) PRIMEIRO USUÁRIO MASTER
+-- 14) VERIFICAÇÃO DE CONTATOS (e-mail e WhatsApp por código)
+--    Ao cadastrar uma pessoa no Cadastro ou criar um usuário, a função
+--    "enviar-verificacao" manda um código por e-mail e por WhatsApp. A própria
+--    pessoa abre a página pública, digita o código e o contato passa a constar
+--    como verificado.
+--    - O código nunca é guardado: só o resumo dele. Vale 24 horas e aceita
+--      até 5 tentativas.
+--    - Quem está logado não consegue ler o código: ele só passa pela função
+--      do servidor, que faz o envio.
+--    - A página pública só confere o código; não devolve dados do cadastro.
+-- =====================================================================
+
+alter table public.usuarios add column if not exists telefone text not null default '';
+alter table public.usuarios add column if not exists email_verificado_em timestamptz;
+alter table public.usuarios add column if not exists telefone_verificado_em timestamptz;
+
+create table if not exists public.verificacoes (
+  id             uuid primary key default gen_random_uuid(),
+  token          text not null unique check (token ~ '^[a-f0-9]{32}$'),
+  alvo_tipo      text not null check (alvo_tipo in ('cadastro_pf','usuario')),
+  alvo_id        uuid not null,
+  organizacao_id uuid,
+  canal          text not null check (canal in ('email','whatsapp')),
+  destino        text not null,
+  codigo_hash    text not null,
+  tentativas     int not null default 0,
+  envio          text not null default 'pendente' check (envio in ('pendente','enviado','falhou','nao_configurado')),
+  expira_em      timestamptz not null,
+  confirmado_em  timestamptz,
+  criado_por     uuid,
+  criado_em      timestamptz not null default now()
+);
+create index if not exists verificacoes_alvo on public.verificacoes (alvo_tipo, alvo_id, canal, criado_em desc);
+alter table public.verificacoes enable row level security;
+
+-- Telefone no formato do WhatsApp: só números, com 55 na frente. Nulo se não parecer celular brasileiro.
+create or replace function public.verificacao_fone(p_fone text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when d ~ '^[1-9][0-9]9[0-9]{8}$' then '55' || d
+    when d ~ '^55[1-9][0-9]9[0-9]{8}$' then d
+  end
+  from (select regexp_replace(coalesce(p_fone, ''), '[^0-9]', '', 'g') as d) x;
+$$;
+
+create or replace function public.verificacao_mascara(p_canal text, p_destino text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case when p_canal = 'email'
+    then left(p_destino, 1) || '***@' || split_part(p_destino, '@', 2)
+    else '(' || substr(p_destino, 3, 2) || ') *****-' || right(p_destino, 4) end;
+$$;
+
+-- Quem está logado pode pedir a verificação deste cadastro ou usuário?
+create or replace function public.verificacao_pode(p_alvo_tipo text, p_alvo_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select public.aal2() and public.meu_perfil() is not null and case p_alvo_tipo
+    when 'cadastro_pf' then exists (
+      select 1 from public.cadastro_pf f where f.id = p_alvo_id and public.cadastro_escopo_ok(f.organizacao_id))
+    when 'usuario' then exists (
+      select 1 from public.usuarios u where u.user_id = p_alvo_id
+        and coalesce(u.user_id = (select auth.uid()) or public.eh_master()
+                     or (public.meu_perfil() = 'corp_master' and u.organizacao_id = public.minha_org()), false))
+    else false end;
+$$;
+
+-- Situação da verificação de cada contato (para a tela)
+create or replace function public.verificacao_situacao(p_alvo_tipo text, p_alvo_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.verificacao_pode(p_alvo_tipo, p_alvo_id) then
+    raise exception 'Registro não encontrado';
+  end if;
+  return coalesce((
+    select jsonb_object_agg(x.canal, jsonb_build_object(
+      'envio', x.envio, 'enviado_em', x.criado_em, 'confirmado_em', x.confirmado_em,
+      'expirado', x.confirmado_em is null and (x.expira_em <= now() or x.tentativas >= 5),
+      'destino', public.verificacao_mascara(x.canal, x.destino)))
+    from (
+      select distinct on (v.canal) v.* from public.verificacoes v
+      where v.alvo_tipo = p_alvo_tipo and v.alvo_id = p_alvo_id
+      order by v.canal, v.criado_em desc) x), '{}'::jsonb);
+end;
+$$;
+
+-- Gera o código de um contato. Só a função "enviar-verificacao" (com a chave secreta
+-- do projeto) chama isto, depois de conferir a permissão de quem pediu.
+create or replace function public.verificacao_criar(
+  p_autor uuid, p_alvo_tipo text, p_alvo_id uuid, p_canal text, p_telefone text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_nome    text;
+  v_org     uuid;
+  v_email   text;
+  v_fone    text;
+  v_ok      boolean;
+  v_destino text;
+  v_codigo  text;
+  v_token   text;
+  v_id      uuid;
+  v_novo    text := public.verificacao_fone(p_telefone);
+begin
+  if p_canal is null or p_canal not in ('email','whatsapp') then
+    return jsonb_build_object('ok', false, 'situacao', 'invalido');
+  end if;
+  if p_alvo_tipo = 'cadastro_pf' then
+    select f.nome_completo, f.organizacao_id, lower(f.email), public.verificacao_fone(f.telefone_celular),
+           case when p_canal = 'email' then f.email_verificado else f.celular_verificado end
+      into v_nome, v_org, v_email, v_fone, v_ok
+    from public.cadastro_pf f where f.id = p_alvo_id;
+  elsif p_alvo_tipo = 'usuario' then
+    if p_canal = 'whatsapp' and coalesce(trim(p_telefone), '') <> '' then
+      if v_novo is null then
+        return jsonb_build_object('ok', false, 'situacao', 'telefone_invalido');
+      end if;
+      update public.usuarios set telefone = v_novo, telefone_verificado_em = null
+       where user_id = p_alvo_id and telefone is distinct from v_novo;
+    end if;
+    select u.nome, u.organizacao_id, lower(u.email), public.verificacao_fone(u.telefone),
+           case when p_canal = 'email' then u.email_verificado_em is not null else u.telefone_verificado_em is not null end
+      into v_nome, v_org, v_email, v_fone, v_ok
+    from public.usuarios u where u.user_id = p_alvo_id;
+  end if;
+  if v_nome is null then
+    return jsonb_build_object('ok', false, 'situacao', 'nao_encontrado');
+  end if;
+  v_destino := case when p_canal = 'email' then nullif(v_email, '') else v_fone end;
+  if v_destino is null or (p_canal = 'email' and v_destino !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$') then
+    return jsonb_build_object('ok', false, 'situacao', 'sem_destino');
+  end if;
+  if v_ok then
+    return jsonb_build_object('ok', false, 'situacao', 'ja_verificado', 'destino', public.verificacao_mascara(p_canal, v_destino));
+  end if;
+  if exists (select 1 from public.verificacoes v where v.alvo_tipo = p_alvo_tipo and v.alvo_id = p_alvo_id
+             and v.canal = p_canal and v.criado_em > now() - interval '1 minute') then
+    return jsonb_build_object('ok', false, 'situacao', 'aguarde');
+  end if;
+  if (select count(*) from public.verificacoes v where v.alvo_tipo = p_alvo_tipo and v.alvo_id = p_alvo_id
+      and v.canal = p_canal and v.criado_em > now() - interval '1 day') >= 5 then
+    return jsonb_build_object('ok', false, 'situacao', 'limite');
+  end if;
+
+  -- Os códigos anteriores deste contato deixam de valer
+  update public.verificacoes set expira_em = now()
+   where alvo_tipo = p_alvo_tipo and alvo_id = p_alvo_id and canal = p_canal and confirmado_em is null and expira_em > now();
+
+  v_codigo := lpad(((('x' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 8))::bit(32)::bigint) % 1000000)::text, 6, '0');
+  v_token  := replace(gen_random_uuid()::text, '-', '');
+  insert into public.verificacoes (token, alvo_tipo, alvo_id, organizacao_id, canal, destino, codigo_hash, expira_em, criado_por)
+  values (v_token, p_alvo_tipo, p_alvo_id, v_org, p_canal, v_destino,
+          encode(sha256(convert_to(v_token || ':' || v_codigo, 'UTF8')), 'hex'), now() + interval '24 hours', p_autor)
+  returning id into v_id;
+
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', p_autor, 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claim.sub', coalesce(p_autor::text, ''), true);
+  perform public.grava_auditoria('Enviou código de verificação', case when p_alvo_tipo = 'usuario' then 'Usuários' else 'Cadastro' end,
+    'verificacoes', v_id::text, jsonb_build_object('alvo', p_alvo_tipo, 'alvo_id', p_alvo_id, 'canal', p_canal,
+      'destino', public.verificacao_mascara(p_canal, v_destino)), 'banco');
+
+  return jsonb_build_object('ok', true, 'id', v_id, 'token', v_token, 'codigo', v_codigo, 'destino', v_destino,
+    'nome', split_part(v_nome, ' ', 1),
+    'empresa', coalesce((select o.nome from public.organizacoes o where o.id = v_org), 'Celeiro Administradora'));
+end;
+$$;
+
+-- A função do servidor informa se o envio deu certo
+create or replace function public.verificacao_envio(p_id uuid, p_envio text)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  update public.verificacoes set envio = p_envio
+   where id = p_id and p_envio in ('enviado','falhou','nao_configurado');
+$$;
+
+-- ---------- Operações públicas da página de verificação (funcionam sem login) ----------
+
+create or replace function public.verificacao_publica(p_token text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select jsonb_build_object('ok', true, 'canal', v.canal,
+      'destino', public.verificacao_mascara(v.canal, v.destino),
+      'empresa', coalesce((select o.nome from public.organizacoes o where o.id = v.organizacao_id), 'Celeiro Administradora'),
+      'situacao', case when v.confirmado_em is not null then 'confirmado'
+                       when v.expira_em <= now() or v.tentativas >= 5 then 'expirado' else 'pendente' end)
+    from public.verificacoes v where v.token = lower(trim(coalesce(p_token, '')))
+  ), jsonb_build_object('ok', false));
+$$;
+
+create or replace function public.verificacao_confirmar(p_token text, p_codigo text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_v   public.verificacoes%rowtype;
+  v_cod text := regexp_replace(coalesce(p_codigo, ''), '[^0-9]', '', 'g');
+begin
+  select * into v_v from public.verificacoes where token = lower(trim(coalesce(p_token, ''))) for update;
+  if v_v.id is null then
+    return jsonb_build_object('ok', false, 'situacao', 'invalido', 'erro', 'Este link não é válido.');
+  end if;
+  if v_v.confirmado_em is not null then
+    return jsonb_build_object('ok', true, 'situacao', 'confirmado');
+  end if;
+  if v_v.expira_em <= now() or v_v.tentativas >= 5 then
+    return jsonb_build_object('ok', false, 'situacao', 'expirado', 'erro', 'Este código não vale mais. Peça um novo envio a quem fez o seu cadastro.');
+  end if;
+  if char_length(v_cod) <> 6 or v_v.codigo_hash <> encode(sha256(convert_to(v_v.token || ':' || v_cod, 'UTF8')), 'hex') then
+    update public.verificacoes set tentativas = tentativas + 1 where id = v_v.id;
+    return jsonb_build_object('ok', false, 'situacao', case when v_v.tentativas + 1 >= 5 then 'expirado' else 'pendente' end,
+      'erro', case when v_v.tentativas + 1 >= 5 then 'Código incorreto. O limite de tentativas foi atingido; peça um novo envio.'
+                   else 'Código incorreto. Confira e tente de novo.' end);
+  end if;
+
+  update public.verificacoes set confirmado_em = now() where id = v_v.id;
+  -- Só marca como verificado se o contato do cadastro ainda é o que recebeu o código
+  if v_v.alvo_tipo = 'cadastro_pf' and v_v.canal = 'email' then
+    update public.cadastro_pf set email_verificado = true where id = v_v.alvo_id and lower(email) = v_v.destino and not email_verificado;
+  elsif v_v.alvo_tipo = 'cadastro_pf' then
+    update public.cadastro_pf set celular_verificado = true
+     where id = v_v.alvo_id and public.verificacao_fone(telefone_celular) = v_v.destino and not celular_verificado;
+  elsif v_v.canal = 'email' then
+    update public.usuarios set email_verificado_em = now() where user_id = v_v.alvo_id and lower(email) = v_v.destino;
+  else
+    update public.usuarios set telefone_verificado_em = now() where user_id = v_v.alvo_id and telefone = v_v.destino;
+  end if;
+  perform public.grava_auditoria('Contato verificado por código', case when v_v.alvo_tipo = 'usuario' then 'Usuários' else 'Cadastro' end,
+    'verificacoes', v_v.id::text, jsonb_build_object('alvo', v_v.alvo_tipo, 'alvo_id', v_v.alvo_id, 'canal', v_v.canal), 'link');
+  return jsonb_build_object('ok', true, 'situacao', 'confirmado');
+end;
+$$;
+
+-- Se o contato de um usuário mudar, a verificação antiga deixa de valer
+create or replace function public.usuarios_contato_mudou()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if lower(new.email) is distinct from lower(old.email) then
+    new.email_verificado_em := null;
+  end if;
+  if new.telefone is distinct from old.telefone then
+    new.telefone_verificado_em := null;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists usuarios_contato_mudou on public.usuarios;
+create trigger usuarios_contato_mudou before update on public.usuarios
+  for each row execute function public.usuarios_contato_mudou();
+
+-- No Cadastro, trocar o e-mail ou o celular derruba a marca de verificado daquele contato
+create or replace function public.cadastro_pf_contato_mudou()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if lower(new.email) is distinct from lower(old.email) and old.email_verificado then
+    new.email_verificado := false;
+  end if;
+  if regexp_replace(new.telefone_celular, '[^0-9]', '', 'g') is distinct from regexp_replace(old.telefone_celular, '[^0-9]', '', 'g')
+     and old.celular_verificado then
+    new.celular_verificado := false;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists cadastro_pf_contato_mudou on public.cadastro_pf;
+create trigger cadastro_pf_contato_mudou before update on public.cadastro_pf
+  for each row execute function public.cadastro_pf_contato_mudou();
+
+revoke all on public.verificacoes from anon, authenticated;
+
+revoke all on function public.verificacao_criar(uuid, text, uuid, text, text) from public, anon, authenticated;
+revoke all on function public.verificacao_envio(uuid, text)                  from public, anon, authenticated;
+revoke all on function public.usuarios_contato_mudou()                       from public, anon, authenticated;
+revoke all on function public.cadastro_pf_contato_mudou()                    from public, anon, authenticated;
+grant execute on function public.verificacao_criar(uuid, text, uuid, text, text) to service_role;
+grant execute on function public.verificacao_envio(uuid, text)                  to service_role;
+
+revoke all on function public.verificacao_fone(text)             from public, anon;
+revoke all on function public.verificacao_mascara(text, text)    from public, anon;
+revoke all on function public.verificacao_pode(text, uuid)       from public, anon;
+revoke all on function public.verificacao_situacao(text, uuid)   from public, anon;
+revoke all on function public.verificacao_publica(text)          from public;
+revoke all on function public.verificacao_confirmar(text, text)  from public;
+grant execute on function public.verificacao_fone(text)           to authenticated;
+grant execute on function public.verificacao_mascara(text, text)  to authenticated;
+grant execute on function public.verificacao_pode(text, uuid)     to authenticated;
+grant execute on function public.verificacao_situacao(text, uuid) to authenticated;
+-- Só estas duas funcionam sem login (página pública de verificação)
+grant execute on function public.verificacao_publica(text)         to anon, authenticated;
+grant execute on function public.verificacao_confirmar(text, text) to anon, authenticated;
+
+-- =====================================================================
+-- 15) PRIMEIRO USUÁRIO MASTER
 --    Depois de criar o usuário em Authentication > Users, troque o e-mail e o nome,
 --    tire os dois traços do início das linhas e rode:
 -- =====================================================================
