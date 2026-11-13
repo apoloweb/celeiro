@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App Celeiro V1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Plano: app de uma tela em moldura de celular, conforme o Manual de Marca Celeiro ADM v1.0.
+   Verde é a cor institucional; âmbar só como destaque (barra da marca, botões, realces),
+   nunca em texto sobre fundo claro. Família única: Sora. */
+:root{
+  color-scheme: light;
+  --fundo:#F4F6F3;        /* Névoa: fundo das telas */
+  --superficie:#FFFFFF;   /* cartões e campos */
+  --tinta:#0F3D2E;        /* Verde Celeiro: texto, marca, fundos institucionais */
+  --apoio:#3F5F53;        /* Verde médio: texto secundário */
+  --destaque:#E3A72F;     /* Âmbar Energia: ação principal e realces */
+  --linha:#C9D2C8;        /* fios e bordas */
+  --palco:#DFE4DD;        /* área fora do celular */
+  --sobre-tinta:#F4F6F3;  /* texto sobre verde */
+  --fonte-titulo:"Sora", "Helvetica Neue", Arial, sans-serif;
+  --fonte-texto:"Sora", "Helvetica Neue", Arial, sans-serif;
+  --raio:14px;
+  --raio-p:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--palco);color:var(--tinta);font-family:var(--fonte-texto);font-size:14.5px;font-weight:400;line-height:1.5;display:flex;align-items:center;justify-content:center;-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0}
+:focus-visible{outline:2px solid var(--tinta);outline-offset:2px}
+
+#aparelho{width:100%;height:100%;max-width:400px;max-height:860px;background:var(--fundo);display:flex;flex-direction:column;position:relative;overflow:hidden}
+@media (min-width:480px) and (min-height:700px){
+  #aparelho{height:calc(100% - 32px);border:1px solid var(--linha);border-radius:34px;box-shadow:0 20px 50px rgba(15,61,46,.18)}
+}
+#topo{flex:none;display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid var(--linha);min-height:56px}
+#topo h1{font-family:var(--fonte-titulo);font-size:17px;font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
+
+.icone-btn{width:40px;height:40px;display:grid;place-items:center;border-radius:50%;flex:none}
+.icone-btn:hover{background:var(--superficie)}
+#tela{flex:1;overflow-y:auto;padding:16px 16px 28px;display:flex;flex-direction:column;gap:18px}
+#abas{flex:none;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--linha);padding:6px 6px 10px}
+#abas button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;font-size:11px;font-weight:500;color:var(--apoio);border-radius:var(--raio-p)}
+#abas button{position:relative}
+#abas button[aria-current="page"]{color:var(--tinta);font-weight:600}
+#abas button[aria-current="page"]::before{content:"";position:absolute;top:-7px;left:50%;width:28px;height:3px;margin-left:-14px;background:var(--destaque)}
+svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+h2{font-family:var(--fonte-titulo);font-size:22px;font-weight:600;line-height:1.15;text-wrap:balance}
+h3{font-family:var(--fonte-titulo);font-size:15px;font-weight:600;text-wrap:balance}
+.sec{display:flex;flex-direction:column;gap:10px}
+.sec-topo{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.link{font-weight:600;text-decoration:underline;text-decoration-color:var(--destaque);text-decoration-thickness:2px;text-underline-offset:3px;font-size:13px}
+.apoio{color:var(--apoio);font-size:13px}
+.rotulo{font-size:10.5px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--apoio)}
+.num{font-variant-numeric:tabular-nums}
+
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;padding:10px 16px;border-radius:var(--raio);font-weight:600;border:1.5px solid var(--tinta);text-align:center}
+.btn.cheio{background:var(--destaque);border-color:var(--destaque);color:var(--tinta)}
+.btn.claro{border-color:var(--linha)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.curto{width:auto;min-height:38px;padding:6px 14px;font-size:13px}
+.pilha{display:flex;flex-direction:column;gap:10px}
+.fila{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+.campo{display:flex;flex-direction:column;gap:5px}
+.campo label{font-size:13px;font-weight:600}
+.campo input,.campo textarea,.campo select{background:var(--superficie);border:1.5px solid var(--linha);border-radius:var(--raio-p);padding:12px;width:100%}
+.campo input:focus,.campo textarea:focus,.campo select:focus{outline:none;border-color:var(--tinta);background:var(--fundo)}
+.campo textarea{min-height:96px;resize:vertical}
+.erro{font-size:13px;font-weight:600;border-left:3px solid var(--destaque);padding:6px 10px;background:var(--superficie)}
+.divisor{display:flex;align-items:center;gap:10px;color:var(--apoio);font-size:12px}
+.divisor::before,.divisor::after{content:"";flex:1;height:1px;background:var(--linha)}
+
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.chips.quebra{flex-wrap:wrap;overflow:visible}
+.chip{flex:none;padding:7px 14px;border-radius:99px;border:1.5px solid var(--linha);font-size:13px;font-weight:600}
+.chip[aria-pressed="true"]{background:var(--tinta);color:var(--sobre-tinta);border-color:var(--tinta)}
+.selo{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border:1px solid var(--tinta);border-radius:99px;white-space:nowrap}
+.selo.cheio{background:var(--tinta);color:var(--sobre-tinta)}
+
+.capa{aspect-ratio:16/9;background:var(--tinta);color:var(--sobre-tinta);border-radius:var(--raio);display:grid;place-items:center;position:relative;overflow:hidden;width:100%}
+.capa .play{width:52px;height:52px;border-radius:50%;border:2px solid var(--sobre-tinta);display:grid;place-items:center}
+.capa .dur{position:absolute;right:8px;bottom:8px;font-size:11px;font-weight:600;background:var(--fundo);color:var(--tinta);padding:1px 6px;border-radius:4px}
+.capa .txt{position:absolute;left:12px;bottom:10px;right:60px;font-size:12px;opacity:.8}
+.capa video{width:100%;height:100%;background:#000}
+.barra-play{position:absolute;left:0;bottom:0;height:4px;background:var(--sobre-tinta);width:0}
+.capa.tocando .barra-play{animation:tocar 30s linear forwards}
+@keyframes tocar{to{width:100%}}
+@media (prefers-reduced-motion:reduce){.capa.tocando .barra-play{animation:none;width:35%}}
+
+.item-video{display:grid;grid-template-columns:128px 1fr;gap:12px;text-align:left;align-items:start;width:100%}
+.item-video .capa{border-radius:var(--raio-p)}
+.item-video .capa .play{width:30px;height:30px;border-width:1.5px}
+.item-video .capa .play svg{width:14px;height:14px}
+.cartao{background:var(--superficie);border:1px solid var(--linha);border-radius:var(--raio);padding:14px;display:flex;flex-direction:column;gap:10px;text-align:left;width:100%}
+.progresso{height:7px;background:var(--superficie);border-radius:99px;overflow:hidden;border:1px solid var(--linha)}
+.progresso i{display:block;height:100%;background:var(--destaque)}
+.lista{display:flex;flex-direction:column}
+.linha{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--linha);text-align:left;width:100%}
+.linha:last-child{border-bottom:0}
+.linha .cresce{flex:1;min-width:0;overflow-wrap:anywhere}
+.avatar{width:56px;height:56px;border-radius:50%;background:var(--tinta);color:var(--sobre-tinta);display:grid;place-items:center;font-weight:600;font-size:20px;flex:none}
+.texto-longo{white-space:pre-line;max-width:65ch}
+.aviso{background:var(--superficie);border-left:3px solid var(--destaque);border-radius:var(--raio-p);padding:12px;font-size:13px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--linha);background:var(--superficie);border-radius:var(--raio-p);padding:3px}
+.seg button{padding:9px 4px;border-radius:8px;font-size:12.5px;font-weight:600}
+.seg button[aria-pressed="true"]{background:var(--tinta);color:var(--sobre-tinta)}
+.centro{align-items:center;text-align:center}
+.servicos{background:var(--superficie);border:1px solid var(--linha);border-radius:var(--raio);padding:0 14px}
+.servicos .linha{padding:14px 0}
+.servico-ic{width:42px;height:42px;border-radius:var(--raio-p);background:var(--tinta);color:var(--sobre-tinta);display:grid;place-items:center;flex:none}
+.etapas{display:flex;flex-direction:column;gap:0}
+.etapas li{list-style:none;display:flex;gap:12px;align-items:flex-start;padding:8px 0;color:var(--apoio)}
+.etapas li::before{content:"";width:12px;height:12px;border-radius:50%;border:2px solid var(--linha);margin-top:4px;flex:none}
+.etapas li.feita{color:var(--tinta)}
+.etapas li.feita::before{background:var(--tinta);border-color:var(--tinta)}
+.etapas li.agora{color:var(--tinta);font-weight:600}
+.etapas li.agora::before{background:var(--destaque);border-color:var(--destaque)}
+.abertura{flex:1;display:flex;flex-direction:column;justify-content:space-between;gap:24px}
+b{font-weight:600}
+#topo,#abas{background:var(--superficie)}
+#aparelho.verde{background:var(--tinta);color:var(--sobre-tinta)}
+.verde .apoio{color:var(--linha)}
+.verde .btn{border-color:var(--sobre-tinta)}
+.verde .btn.cheio{border-color:var(--destaque)}
+.verde .btn.claro{border-color:rgba(244,246,243,.35)}
+.verde :focus-visible{outline-color:var(--sobre-tinta)}
+.mono{display:block;height:100%;width:auto;fill:currentColor}
+.mono .barra{fill:var(--destaque)}
+/* Assinatura horizontal: 40 px de altura (mínimo do manual), fio entre monograma e nome */
+.ass-h{display:flex;align-items:center;gap:12px;height:40px;color:var(--tinta)}
+.ass-h .m{height:30px}
+.ass-h .fio{width:1px;align-self:stretch;background:currentColor;opacity:.7}
+.ass-h .nome{display:flex;flex-direction:column;gap:5px}
+.ass-h .n1{font-size:15px;font-weight:500;letter-spacing:.34em;line-height:1}
+.ass-h .n2,.ass-v .n2{font-size:6.5px;font-weight:400;letter-spacing:.72em;line-height:1;text-transform:uppercase;color:var(--apoio)}
+/* Assinatura vertical: telas de abertura */
+.ass-v{display:flex;flex-direction:column;align-items:center;gap:16px}
+.ass-v .m{height:64px}
+.ass-v .n1{font-size:24px;font-weight:500;letter-spacing:.34em;margin-right:-.34em;line-height:1}
+.ass-v .n2{font-size:9px;margin-right:-.72em}
+.sobre-verde{background:var(--tinta);color:var(--sobre-tinta);border-radius:var(--raio);padding:36px 16px}
+.verde .n2,.sobre-verde .n2{color:var(--destaque)}
+.avatar.realce{background:var(--destaque);color:var(--tinta)}
+.interruptor{width:46px;height:26px;border-radius:99px;border:1.5px solid var(--tinta);position:relative;flex:none}
+.interruptor::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:var(--tinta);transition:transform .15s}
+.interruptor[aria-checked="true"]{background:var(--tinta)}
+.interruptor[aria-checked="true"]::after{background:var(--sobre-tinta);transform:translateX(20px)}
+#aviso-flutuante{position:absolute;left:16px;right:16px;bottom:84px;background:var(--tinta);color:var(--sobre-tinta);padding:12px 14px;border-radius:var(--raio-p);font-size:13px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s;text-align:center}
+#aviso-flutuante.ver{opacity:1}
+</style>
+</head>
+<body>
+<div id="aparelho">
+  <header id="topo"></header>
+  <main id="tela"></main>
+  <nav id="abas" aria-label="Navegação principal"></nav>
+  <div id="aviso-flutuante" role="status"></div>
+</div>
+
+<script>
+/* ---------- Ícones ---------- */
+const P={
+  inicio:'<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
+  video:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/>',
+  assinar:'<path d="M4 20h16"/><path d="M6 16l9-9 3 3-9 9H6z"/>',
+  perfil:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+  voltar:'<path d="M15 5l-7 7 7 7"/>',
+  seta:'<path d="M9 5l7 7-7 7"/>',
+  play:'<path d="M8 5l11 7-11 7z" fill="currentColor"/>',
+  mais:'<path d="M12 5v14M5 12h14"/>',
+  ok:'<path d="M5 12l5 5 9-10"/>',
+  lixo:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  cadeado:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+  carro:'<path d="M5 13l1.6-4.6A2 2 0 018.5 7h7a2 2 0 011.9 1.4L19 13"/><rect x="3" y="13" width="18" height="5" rx="1.5"/><path d="M6.5 18v2M17.5 18v2"/>',
+  raio:'<path d="M13 2L5 14h6l-1 8 9-12h-6z"/>',
+  conta:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/>',
+  engrenagem:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>'
+};
+const ic=n=>`<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+const mono=()=>`<svg class="mono" viewBox="0 0 388.57 148.31" role="img" aria-label="Monograma CE"><path d="M175.01 0H74.15a74.15 74.15 0 0 0 0 148.31h81.28l28.48-35.6H74.15a38.56 38.56 0 0 1 0-77.12h72.38z"/><path d="M207.63 0h180.94l-28.48 35.59H243.23v77.12h145.34l-28.48 35.6H165.81l28.48-35.6h13.34z"/><path class="barra" d="M289.5 56.36h84.24l-28.48 35.59h-84.23z"/></svg>`;
+const assH=()=>`<span class="ass-h" aria-label="Celeiro Administradora"><span class="m">${mono()}</span><span class="fio"></span><span class="nome"><span class="n1">CELEIRO</span><span class="n2">Administradora</span></span></span>`;
+const assV=()=>`<div class="ass-v" aria-label="Celeiro Administradora"><span class="m">${mono()}</span><span class="n1">CELEIRO</span><span class="n2">Administradora</span></div>`;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n=x=>Number(x).toLocaleString('pt-BR');
+const hoje=()=>new Date().toLocaleDateString('pt-BR');
+
+/* ---------- Dados de exemplo (substituir pela API do backoffice) ---------- */
+const S={
+  usuario:null, admin:false,
+  pilha:[{v:'abertura'}],
+  filtro:'Todos', busca:'',
+  videos:[
+    {id:1,titulo:'Conheça a Celeiro Administradora',desc:'Apresentação institucional: gestão e administração de grandes estruturas empresariais, energia, incorporação, estruturação financeira e cobranças.',cat:'Institucional',dur:'3:40',data:'10/11/2026',origem:'upload',publico:true},
+    {id:2,titulo:'Como funciona a comercialização de energia',desc:'Entenda como a energia é contratada, o que muda na fatura e de onde vem a economia.',cat:'Energia',dur:'8:15',data:'05/11/2026',origem:'link',url:'https://www.youtube.com/',publico:true},
+    {id:3,titulo:'Unidades geradoras: da obra à operação',desc:'As etapas de construção de uma unidade geradora e como acompanhar cada fase.',cat:'Energia',dur:'12:02',data:'28/10/2026',origem:'link',url:'https://www.youtube.com/',publico:false},
+    {id:4,titulo:'Estruturação financeira de projetos',desc:'Financiamento e captação de recursos: como uma operação é montada do início ao fim.',cat:'Financeiro',dur:'9:48',data:'20/10/2026',origem:'upload',publico:false},
+    {id:5,titulo:'Gestão de ativos imobiliários',desc:'Incorporação, construção e gestão: o papel da administradora em cada etapa.',cat:'Imobiliário',dur:'6:30',data:'12/10/2026',origem:'upload',publico:false}
+  ],
+  peticoes:[
+    {id:1,titulo:'Usina solar comunitária no bairro',resumo:'Pedido de instalação de uma unidade geradora compartilhada para os moradores.',texto:'Nós, abaixo assinados, solicitamos a instalação de uma unidade geradora solar compartilhada, com rateio da energia entre os moradores cadastrados.\n\nA medida reduz o valor da fatura de energia das famílias participantes e aproveita a área disponível no bairro.',meta:1500,base:1042,prazo:'15/12/2026',sig:[{nome:'Marina Lopes',data:'11/11/2026'},{nome:'Carlos Antunes',data:'11/11/2026'},{nome:'Rita Okada',data:'10/11/2026'}]},
+    {id:2,titulo:'Adesão do condomínio à compra coletiva de energia',resumo:'Autorização dos condôminos para contratar energia em conjunto.',texto:'Nós, condôminos abaixo assinados, autorizamos a administração a contratar energia de forma coletiva em nome do condomínio, nas condições apresentadas em assembleia.',meta:400,base:318,prazo:'30/11/2026',sig:[{nome:'João Pedro Sá',data:'09/11/2026'},{nome:'Helena Dias',data:'08/11/2026'}]},
+    {id:3,titulo:'Iluminação eficiente nas áreas comuns',resumo:'Troca das luminárias antigas por modelos de baixo consumo.',texto:'Nós, abaixo assinados, pedimos a substituição das luminárias das áreas comuns por modelos de baixo consumo, com acompanhamento da economia obtida.',meta:250,base:87,prazo:'20/01/2027',sig:[{nome:'Bruno Teles',data:'07/11/2026'}]}
+  ],
+  minhas:{} // id da petição -> {protocolo,data}
+};
+const total=p=>p.base+p.sig.length-S.peticoesBase[p.id];
+/* ---------- Módulos do app ----------
+   Cada menu é um módulo que o administrador liga ou desliga.
+   No app publicado, a lista vem do Office (função app_config) e vale para todos os aparelhos. */
+const MODS=[
+  {c:'videos',nome:'Vídeos',desc:'Área de vídeos e streaming'},
+  {c:'assinaturas',nome:'Abaixo-assinados',desc:'Coleta de assinaturas com gov.br'},
+  {c:'veicular',nome:'Aquisição Veicular',desc:'Pedidos de cotação veicular'},
+  {c:'energia',nome:'Energia com Desconto',desc:'Pedidos de migração de energia'},
+  {c:'conta',nome:'Conta digital',desc:'Solicitações de abertura de conta'}
+];
+S.modulos={videos:true,assinaturas:true,veicular:true,energia:true,conta:true};
+const on=m=>!!S.modulos[m];
+const MOD_DA_TELA={videos:'videos',video:'videos',peticoes:'assinaturas',peticao:'assinaturas',assinatura:'assinaturas',minhas:'assinaturas',veicular:'veicular',energia:'energia',conta:'conta'};
+
+/* ---------- Integração com o Celeiro Office ----------
+   Tudo o que o app informa ao backoffice (office.celeiroadministradora.com.br) sai por aqui.
+   Destino: função app_registrar do banco do Office (arquivo office/supabase-app.sql).
+   O que não for entregue fica na fila e é reenviado. */
+const Office={
+  destino:'office.celeiroadministradora.com.br',
+  url:'https://wvvounloqtucagerizct.supabase.co/rest/v1/rpc/app_registrar',
+  chave:'sb_publishable_ZSW04enHBahN-I8wfpkJfw_4z-HBuG3', // chave pública do Office; nunca usar a secreta no app
+  teste:true, // protótipo: os envios chegam marcados como teste. Trocar para false no app publicado.
+  TIPOS:{instalacao:'Instalação do app',lead:'Lead',conta_digital:'Abertura de conta',cotacao_veicular:'Cotação veicular',migracao_energia:'Migração de energia'},
+  fila:[],
+  _id:null,
+  dispositivo(){
+    if(this._id)return this._id;
+    try{this._id=localStorage.getItem('celeiro-dispositivo')}catch(_){}
+    if(!this._id){this._id='d-'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);try{localStorage.setItem('celeiro-dispositivo',this._id)}catch(_){}}
+    return this._id;
+  },
+  registrar(tipo,dados){
+    const e={tipo,dados:{...dados,teste:this.teste},data:hoje(),status:'na fila'};
+    this.fila.unshift(e);this.enviar(e);return e;
+  },
+  async enviar(e){
+    try{
+      const r=await fetch(this.url,{method:'POST',headers:{apikey:this.chave,Authorization:'Bearer '+this.chave,'Content-Type':'application/json'},
+        body:JSON.stringify({p_tipo:e.tipo,p_dispositivo:this.dispositivo(),p_dados:e.dados})});
+      e.status=r.ok?'enviado':'na fila';
+    }catch(_){e.status='na fila'}
+    if(atual().v==='admin'&&atual().seg==='office')desenhar();
+  },
+  async reenviar(){for(const e of this.fila.filter(x=>x.status!=='enviado'))await this.enviar(e)},
+  instalacao(){
+    let ja=false;try{ja=localStorage.getItem('celeiro-instalado')==='1'}catch(_){}
+    if(ja)return;
+    this.registrar('instalacao',{plataforma:'web-prototipo',versao:'1.0'});
+    try{localStorage.setItem('celeiro-instalado','1')}catch(_){}
+  }
+};
+
+S.pedidos=[]; // solicitações de Aquisição Veicular e Energia com Desconto
+S.conta=null; // proposta de conta digital do usuário
+
+/* ---------- Conta digital: camada de integração ----------
+   Único ponto do app que fala com a instituição financeira parceira.
+   Hoje responde localmente. Para integrar: o app chama o backend da Celeiro
+   (POST /conta-digital/propostas e GET /conta-digital/propostas/{protocolo}),
+   e o backend repassa à API da instituição. As telas não mudam. */
+const ContaDigital={
+  STATUS:{em_analise:'Em análise',pendente_documentos:'Documentos pendentes',aprovada:'Conta aberta',recusada:'Não aprovada'},
+  async abrirProposta(dados){
+    // dados: {tipo:'PF'|'PJ', documento, nome, nascimento, celular, email, consentimento:true}
+    return {protocolo:'CD-'+String(Date.now()).slice(-8),status:'em_analise',criadaEm:hoje()};
+  },
+  async consultarStatus(protocolo){return {protocolo,status:'em_analise'}}
+};
+S.peticoesBase={}; S.peticoes.forEach(p=>S.peticoesBase[p.id]=p.sig.length);
+
+/* ---------- Navegação ---------- */
+const RAIZ=['inicio','videos','peticoes','perfil'];
+const atual=()=>S.pilha[S.pilha.length-1];
+function ir(v,p={}){S.erro='';S.pilha.push({v,...p});desenhar()}
+function aba(v){S.erro='';S.pilha=[{v}];desenhar()}
+function voltar(){S.erro='';if(S.pilha.length>1)S.pilha.pop();desenhar()}
+function trocar(v,p={}){S.erro='';S.pilha[S.pilha.length-1]={v,...p};desenhar()}
+let tAviso;
+function avisar(m){const a=document.getElementById('aviso-flutuante');a.textContent=m;a.classList.add('ver');clearTimeout(tAviso);tAviso=setTimeout(()=>a.classList.remove('ver'),2600)}
+
+/* ---------- Peças ---------- */
+const capa=(v,grande)=>`<span class="capa">${grande?'':''}<span class="play">${ic('play')}</span><span class="dur num">${esc(v.dur)}</span></span>`;
+const itemVideo=v=>{
+  const travado=!S.usuario&&!v.publico;
+  return `<button class="item-video" data-a="abrir-video" data-id="${v.id}">${capa(v)}
+    <span class="pilha" style="gap:4px"><h3>${esc(v.titulo)}</h3>
+    <span class="apoio">${esc(v.cat)} · ${esc(v.data)}</span>
+    ${travado?`<span><span class="selo">Só para cadastrados</span></span>`:''}</span></button>`};
+const cartaoPeticao=p=>{
+  const t=total(p),pc=Math.min(100,Math.round(t/p.meta*100));
+  return `<button class="cartao" data-a="abrir-peticao" data-id="${p.id}">
+    <span class="fila" style="justify-content:space-between"><span class="rotulo">Até ${esc(p.prazo)}</span>${S.minhas[p.id]?'<span class="selo cheio">Você assinou</span>':''}</span>
+    <h3>${esc(p.titulo)}</h3><span class="apoio">${esc(p.resumo)}</span>
+    <span class="progresso"><i style="width:${pc}%"></i></span>
+    <span class="apoio num"><b style="color:var(--tinta)">${n(t)}</b> de ${n(p.meta)} assinaturas · ${pc}%</span></button>`};
+const campo=(id,rot,tipo='text',val='',extra='')=>`<div class="campo"><label for="${id}">${rot}</label><input id="${id}" type="${tipo}" value="${esc(val)}" ${extra}></div>`;
+const erro=()=>S.erro?`<p class="erro" role="alert">${esc(S.erro)}</p>`:'';
+
+/* ---------- Telas ---------- */
+const T={
+abertura:()=>({semTopo:true,verde:true,html:`
+  <div class="abertura">
+    <div class="pilha centro" style="gap:18px;margin-top:56px">
+      ${assV()}
+      <h2 style="margin-top:36px">Os serviços da Celeiro em um só lugar.</h2>
+      <p class="apoio" style="font-size:14.5px">Acompanhe os conteúdos e solicite os serviços da Celeiro pelo aplicativo.</p>
+    </div>
+    <div class="pilha">
+      <button class="btn cheio" data-a="ir" data-v="login">Entrar</button>
+      <button class="btn" data-a="ir" data-v="cadastro">Criar conta</button>
+      <button class="btn claro" data-a="aba" data-v="inicio">Explorar sem cadastro</button>
+    </div>
+  </div>`}),
+
+login:()=>({titulo:'Entrar',html:`
+  <h2>Acesse sua conta</h2>
+  ${atual().motivo?`<p class="aviso">${esc(atual().motivo)}</p>`:''}
+  <form class="pilha" data-form="login" novalidate>
+    ${campo('l-email','E-mail','email','','autocomplete="email" placeholder="voce@exemplo.com.br"')}
+    ${campo('l-senha','Senha','password','','autocomplete="current-password"')}
+    ${erro()}
+    <button class="btn cheio" type="submit">Entrar</button>
+    <button class="link" type="button" data-a="avisar" data-m="Enviaremos um link de redefinição para o seu e-mail quando o servidor estiver ligado." style="align-self:center">Esqueci minha senha</button>
+  </form>
+  <div class="divisor">ou continue com</div>
+  <div class="pilha">
+    <button class="btn" data-a="social" data-m="gov.br">Entrar com gov.br</button>
+    <button class="btn" data-a="social" data-m="Google">Entrar com Google</button>
+    <button class="btn" data-a="social" data-m="Apple">Entrar com Apple</button>
+  </div>
+  <p class="apoio centro" style="text-align:center">Ainda não tem conta? <button class="link" data-a="trocar" data-v="cadastro">Criar conta</button></p>`}),
+
+cadastro:()=>({titulo:'Criar conta',html:`
+  <h2>Cadastre-se</h2>
+  <form class="pilha" data-form="cadastro" novalidate>
+    ${campo('c-nome','Nome completo','text','','autocomplete="name"')}
+    ${campo('c-email','E-mail','email','','autocomplete="email"')}
+    ${campo('c-tel','Celular','tel','','autocomplete="tel" placeholder="(00) 00000-0000"')}
+    ${campo('c-senha','Senha (mínimo de 8 caracteres)','password','','autocomplete="new-password"')}
+    ${campo('c-senha2','Repita a senha','password','','autocomplete="new-password"')}
+    <label class="fila apoio" style="flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="c-termos" style="margin-top:3px"> <span>Li e aceito os Termos de Uso e a Política de Privacidade.</span></label>
+    ${erro()}
+    <button class="btn cheio" type="submit">Criar conta</button>
+  </form>
+  <div class="divisor">ou cadastre-se com</div>
+  <div class="pilha">
+    <button class="btn" data-a="social" data-m="gov.br">Continuar com gov.br</button>
+    <button class="btn" data-a="social" data-m="Google">Continuar com Google</button>
+  </div>`}),
+
+inicio:()=>{
+  const d=S.videos[0];
+  const serv=[['veicular','carro','Aquisição Veicular','Solicite uma proposta para o seu veículo'],['energia','raio','Energia com Desconto','Peça uma análise da sua fatura de energia'],['conta','conta','Abra sua conta digital',S.conta?'Acompanhe a sua proposta':'Envie seus dados e acompanhe a abertura']].filter(x=>on(x[0]));
+  return {marca:true,html:`
+  <div class="pilha" style="gap:4px"><span class="apoio">${S.usuario?'Olá, '+esc(S.usuario.nome.split(' ')[0]):'Olá, visitante'}</span><h2>O que há de novo</h2></div>
+  ${S.usuario?'':`<div class="aviso fila" style="justify-content:space-between"><span style="flex:1;min-width:150px">Crie sua conta para acessar todos os serviços.</span><button class="btn cheio curto" data-a="ir" data-v="cadastro">Criar conta</button></div>`}
+  ${serv.length?`<section class="sec"><span class="rotulo">Serviços</span><nav class="servicos lista" aria-label="Serviços">
+    ${serv.map(([v,i,t,d])=>`<button class="linha" data-a="${v==='conta'?'abrir-conta':'ir'}" data-v="${v}"><span class="servico-ic">${ic(i)}</span><span class="cresce"><b>${t}</b><br><span class="apoio">${d}</span></span>${ic('seta')}</button>`).join('')}
+  </nav></section>`:''}
+  ${on('videos')&&d?`<section class="sec"><span class="rotulo">Vídeo em destaque</span>
+    <button class="pilha" style="text-align:left" data-a="abrir-video" data-id="${d.id}">${capa(d,1)}<h3>${esc(d.titulo)}</h3><span class="apoio">${esc(d.cat)} · ${esc(d.data)}</span></button></section>`:''}
+  ${on('assinaturas')?`<section class="sec"><div class="sec-topo"><h3>Abaixo-assinados em andamento</h3><button class="link" data-a="aba" data-v="peticoes">Ver todos</button></div>
+    ${S.peticoes.slice(0,2).map(cartaoPeticao).join('')}</section>`:''}
+  ${on('videos')?`<section class="sec"><div class="sec-topo"><h3>Vídeos recentes</h3><button class="link" data-a="aba" data-v="videos">Ver todos</button></div>
+    ${S.videos.slice(1,4).map(itemVideo).join('')}</section>`:''}
+  <button class="cartao" data-a="ir" data-v="sobre"><span class="rotulo">Quem somos</span><span>A Celeiro Administradora promove a gestão e administração de grandes estruturas empresariais.</span><span class="link">Conhecer a Celeiro</span></button>`}},
+
+videos:()=>{
+  const cats=['Todos',...new Set(S.videos.map(v=>v.cat))];
+  const b=S.busca.trim().toLowerCase();
+  const l=S.videos.filter(v=>(S.filtro==='Todos'||v.cat===S.filtro)&&(!b||(v.titulo+' '+v.desc).toLowerCase().includes(b)));
+  return {titulo:'Vídeos',html:`
+  <div class="campo"><label for="busca" class="apoio">Buscar vídeo</label><input id="busca" type="search" value="${esc(S.busca)}" placeholder="Título ou assunto"></div>
+  <div class="chips">${cats.map(c=>`<button class="chip" aria-pressed="${c===S.filtro}" data-a="filtro" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+  <div class="pilha" style="gap:16px" id="lista-videos">${l.length?l.map(itemVideo).join(''):'<p class="apoio">Nenhum vídeo encontrado. Tente outro termo ou categoria.</p>'}</div>`}},
+
+video:()=>{
+  const v=S.videos.find(x=>x.id==atual().id); if(!v)return{titulo:'Vídeo',html:'<p>Este vídeo foi removido.</p>'};
+  if(!S.usuario&&!v.publico)return{titulo:'Vídeo',html:`
+    <span class="capa">${ic('cadeado')}</span><h2>${esc(v.titulo)}</h2>
+    <p class="aviso">Este vídeo é exclusivo para pessoas cadastradas.</p>
+    <button class="btn cheio" data-a="ir" data-v="login">Entrar</button><button class="btn" data-a="ir" data-v="cadastro">Criar conta</button>`};
+  const tocador=v.blob?`<span class="capa"><video src="${v.blob}" controls playsinline></video></span>`
+    :`<button class="capa" data-a="tocar" aria-label="Reproduzir vídeo"><span class="play">${ic('play')}</span><span class="txt">${v.origem==='link'?'Vídeo incorporado de plataforma externa':'Vídeo hospedado na Celeiro'}</span><span class="dur num">${esc(v.dur)}</span><span class="barra-play"></span></button>`;
+  const outros=S.videos.filter(x=>x.id!==v.id&&x.cat===v.cat).slice(0,3);
+  return {titulo:'Vídeo',html:`
+  ${tocador}
+  <div class="pilha" style="gap:6px"><span class="fila"><span class="selo">${esc(v.cat)}</span><span class="apoio">${esc(v.data)}</span></span><h2>${esc(v.titulo)}</h2></div>
+  <p class="texto-longo">${esc(v.desc)}</p>
+  ${v.origem==='link'&&v.url?`<p class="apoio" style="overflow-wrap:anywhere">Origem: ${esc(v.url)}</p>`:''}
+  ${outros.length?`<section class="sec"><h3>Mais em ${esc(v.cat)}</h3>${outros.map(itemVideo).join('')}</section>`:''}`}},
+
+peticoes:()=>({titulo:'Abaixo-assinados',html:`
+  <p class="apoio">Cada assinatura é reconhecida pela conta gov.br de quem assina.</p>
+  ${S.peticoes.length?S.peticoes.map(cartaoPeticao).join(''):'<p class="apoio">Nenhum abaixo-assinado aberto no momento.</p>'}`}),
+
+peticao:()=>{
+  const p=S.peticoes.find(x=>x.id==atual().id); if(!p)return{titulo:'Abaixo-assinado',html:'<p>Este abaixo-assinado foi encerrado.</p>'};
+  const t=total(p),pc=Math.min(100,Math.round(t/p.meta*100)),m=S.minhas[p.id];
+  return {titulo:'Abaixo-assinado',html:`
+  <div class="pilha" style="gap:6px"><span class="rotulo">Aberto até ${esc(p.prazo)}</span><h2>${esc(p.titulo)}</h2></div>
+  <div class="cartao"><span class="num" style="font-size:28px;font-weight:600;line-height:1">${n(t)}</span>
+    <span class="apoio num">assinaturas de uma meta de ${n(p.meta)}</span>
+    <span class="progresso"><i style="width:${pc}%"></i></span></div>
+  <p class="texto-longo">${esc(p.texto)}</p>
+  ${m?`<div class="aviso pilha" style="gap:4px"><b>Você assinou em ${esc(m.data)}</b><span class="num">Protocolo ${esc(m.protocolo)}</span></div>`
+     :`<button class="btn cheio" data-a="assinar" data-id="${p.id}">${ic('assinar')} Assinar com gov.br</button>`}
+  <section class="sec"><h3>Últimas assinaturas</h3><div class="lista">${p.sig.slice(0,5).map(s=>`<div class="linha"><span class="cresce">${esc(s.nome)}</span><span class="apoio num">${esc(s.data)}</span></div>`).join('')}</div></section>`}},
+
+assinatura:()=>{
+  const p=S.peticoes.find(x=>x.id==atual().id),e=atual().etapa||1;
+  if(e===1)return{titulo:'Assinar',html:`
+    <span class="rotulo">Etapa 1 de 2 · Conferência</span><h2>Confira antes de assinar</h2>
+    <div class="cartao"><span class="rotulo">Documento</span><h3>${esc(p.titulo)}</h3></div>
+    <div class="cartao"><span class="rotulo">Assinante</span><b>${esc(S.usuario.nome)}</b><span class="apoio">${esc(S.usuario.email)}</span></div>
+    <p class="apoio">Ao continuar, você será levado ao gov.br para confirmar a sua identidade. Seu nome aparecerá na lista de assinantes.</p>
+    <button class="btn cheio" data-a="etapa" data-e="2">Continuar para o gov.br</button><button class="btn claro" data-a="voltar">Cancelar</button>`};
+  if(e===2)return{titulo:'gov.br',html:`
+    <span class="rotulo">Etapa 2 de 2 · Reconhecimento da assinatura</span><h2>Autorizar assinatura</h2>
+    <p class="aviso"><b>Simulação.</b> Nesta versão a tela do gov.br é representada aqui. No app final, a autenticação acontece no ambiente oficial.</p>
+    <div class="cartao"><span>O aplicativo <b>Celeiro</b> solicita o uso da sua identidade gov.br para assinar:</span><h3>${esc(p.titulo)}</h3></div>
+    <button class="btn cheio" data-a="confirmar-assinatura" data-id="${p.id}">Autorizar e assinar</button><button class="btn claro" data-a="voltar">Não autorizar</button>`};
+  const m=S.minhas[p.id];
+  return {titulo:'Assinatura registrada',semVoltar:true,html:`
+    <div class="pilha centro" style="gap:14px;margin-top:20px"><span class="avatar realce">${ic('ok')}</span><h2>Assinatura registrada</h2>
+    <p class="apoio">Sua assinatura em “${esc(p.titulo)}” foi reconhecida.</p></div>
+    <div class="cartao"><div class="linha" style="padding:4px 0"><span class="cresce apoio">Protocolo</span><b class="num">${esc(m.protocolo)}</b></div>
+      <div class="linha" style="padding:4px 0"><span class="cresce apoio">Data</span><b class="num">${esc(m.data)}</b></div>
+      <div class="linha" style="padding:4px 0"><span class="cresce apoio">Validação</span><b>gov.br</b></div></div>
+    <button class="btn cheio" data-a="aba" data-v="peticoes">Ver abaixo-assinados</button>`}},
+
+veicular:()=>{const u=S.usuario||{};return{titulo:'Aquisição Veicular',html:`
+  <h2>Solicite uma proposta para o seu veículo</h2>
+  <p class="apoio">Conte o que você procura. A equipe da Celeiro analisa e retorna o contato.</p>
+  <form class="pilha" data-form="veicular" novalidate>
+    ${campo('s-nome','Nome completo','text',u.nome||'','autocomplete="name"')}
+    ${campo('s-tel','Celular','tel',u.tel||'','autocomplete="tel" placeholder="(00) 00000-0000"')}
+    <div class="campo"><label for="s-veic">Tipo de veículo</label><select id="s-veic">${['Carro','Moto','Caminhão','Utilitário','Outro'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div class="campo"><label for="s-cond">Condição</label><select id="s-cond"><option>Novo</option><option>Usado</option></select></div>
+    ${campo('s-valor','Valor aproximado do veículo (R$)','text','','inputmode="numeric" placeholder="80.000"')}
+    ${campo('s-cidade','Cidade e UF','text','','placeholder="São Miguel do Oeste, SC"')}
+    ${erro()}<button class="btn cheio" type="submit">Solicitar proposta</button></form>`}},
+
+energia:()=>{const u=S.usuario||{};return{titulo:'Energia com Desconto',html:`
+  <h2>Peça uma análise da sua fatura de energia</h2>
+  <p class="apoio">Informe os dados da unidade consumidora. A equipe da Celeiro avalia a fatura e retorna com as condições.</p>
+  <form class="pilha" data-form="energia" novalidate>
+    ${campo('s-nome','Nome completo ou razão social','text',u.nome||'','autocomplete="name"')}
+    ${campo('s-tel','Celular','tel',u.tel||'','autocomplete="tel" placeholder="(00) 00000-0000"')}
+    <div class="campo"><label for="s-unid">Tipo de unidade</label><select id="s-unid">${['Residência','Comércio','Indústria','Condomínio','Propriedade rural'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    ${campo('s-dist','Distribuidora de energia','text','','placeholder="Nome que aparece na fatura"')}
+    ${campo('s-valor','Valor médio da fatura (R$)','text','','inputmode="numeric" placeholder="450"')}
+    <div class="campo"><label for="s-fatura">Fatura recente (opcional)</label><input id="s-fatura" type="file" accept="image/*,application/pdf"></div>
+    ${erro()}<button class="btn cheio" type="submit">Pedir análise</button></form>`}},
+
+pedidoOk:()=>({titulo:'Solicitação enviada',semVoltar:true,html:`
+  <div class="pilha centro" style="gap:14px;margin-top:20px"><span class="avatar realce">${ic('ok')}</span><h2>Recebemos a sua solicitação</h2>
+  <p class="apoio">${esc(atual().servico)} · ${hoje()}<br>A equipe da Celeiro entra em contato pelo celular informado.</p></div>
+  <button class="btn cheio" data-a="aba" data-v="inicio">Voltar ao início</button>`}),
+
+conta:()=>{
+  const c=S.conta,u=S.usuario;
+  if(c)return{titulo:'Conta digital',html:`
+    <div class="pilha" style="gap:6px"><span class="rotulo">Proposta ${esc(c.protocolo)}</span><h2>${esc(ContaDigital.STATUS[c.status])}</h2></div>
+    <div class="cartao"><div class="linha" style="padding:4px 0"><span class="cresce apoio">Titular</span><b>${esc(c.nome)}</b></div>
+      <div class="linha" style="padding:4px 0"><span class="cresce apoio">${c.tipo==='PF'?'CPF':'CNPJ'}</span><b class="num">${esc(c.documento)}</b></div>
+      <div class="linha" style="padding:4px 0"><span class="cresce apoio">Enviada em</span><b class="num">${esc(c.criadaEm)}</b></div></div>
+    <ol class="etapas"><li class="feita">Dados enviados</li><li class="agora">Análise pela instituição financeira</li><li>Envio de documentos e selfie</li><li>Conta aberta</li></ol>
+    <p class="aviso"><b>Simulação.</b> A proposta ainda não é enviada a nenhuma instituição. O status muda quando a integração estiver ligada.</p>
+    <button class="btn" data-a="atualizar-conta">Atualizar status</button>`};
+  const t=atual().tipo||'PF';
+  return{titulo:'Conta digital',html:`
+  <h2>Abra sua conta digital</h2>
+  <p class="apoio">Envie seus dados para análise. A conta é aberta por uma instituição financeira parceira da Celeiro.</p>
+  <form class="pilha" data-form="conta" novalidate>
+    <div class="campo"><label>Tipo de conta</label><div class="seg"><button type="button" aria-pressed="${t==='PF'}" data-a="tipo-conta" data-t="PF">Pessoa física</button><button type="button" aria-pressed="${t==='PJ'}" data-a="tipo-conta" data-t="PJ">Pessoa jurídica</button></div></div>
+    ${campo('k-doc',t==='PF'?'CPF':'CNPJ','text','','inputmode="numeric" placeholder="'+(t==='PF'?'000.000.000-00':'00.000.000/0000-00')+'"')}
+    ${campo('k-nome',t==='PF'?'Nome completo':'Razão social','text',t==='PF'?u.nome:'')}
+    ${t==='PF'?campo('k-nasc','Data de nascimento','date'):campo('k-resp','Nome do responsável legal','text',u.nome)}
+    ${campo('k-tel','Celular','tel',u.tel||'','placeholder="(00) 00000-0000"')}
+    ${campo('k-email','E-mail','email',u.email)}
+    <label class="fila apoio" style="flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="k-ok" style="margin-top:3px"> <span>Autorizo a Celeiro a compartilhar estes dados com a instituição financeira parceira para a abertura da conta.</span></label>
+    ${erro()}<button class="btn cheio" type="submit">Enviar para análise</button></form>`}},
+
+perfil:()=>{
+  if(!S.usuario)return{titulo:'Perfil',html:`
+    <h2>Você está navegando como visitante</h2><p class="apoio">Entre para acessar todos os serviços do aplicativo.</p>
+    <button class="btn cheio" data-a="ir" data-v="login">Entrar</button><button class="btn" data-a="ir" data-v="cadastro">Criar conta</button>
+    <div class="lista"><button class="linha" data-a="ir" data-v="sobre"><span class="cresce">Quem somos</span>${ic('seta')}</button></div>`};
+  const u=S.usuario,qt=Object.keys(S.minhas).length;
+  return {titulo:'Perfil',html:`
+  <div class="fila" style="flex-wrap:nowrap"><span class="avatar">${esc(u.nome[0].toUpperCase())}</span>
+    <div class="pilha" style="gap:2px;min-width:0"><h2 style="font-size:19px;overflow-wrap:anywhere">${esc(u.nome)}</h2><span class="apoio" style="overflow-wrap:anywhere">${esc(u.email)}</span><span><span class="selo">Acesso por ${esc(u.metodo)}</span></span></div></div>
+  <div class="lista">
+    <button class="linha" data-a="ir" data-v="dados"><span class="cresce">Meus dados</span>${ic('seta')}</button>
+    ${on('assinaturas')?`<button class="linha" data-a="ir" data-v="minhas"><span class="cresce">Minhas assinaturas</span><span class="apoio num">${qt}</span>${ic('seta')}</button>`:''}
+    <button class="linha" data-a="ir" data-v="sobre"><span class="cresce">Quem somos</span>${ic('seta')}</button>
+    ${S.admin?`<button class="linha" data-a="ir" data-v="admin"><span class="cresce"><b>Área administrativa</b></span>${ic('seta')}</button>`:''}
+  </div>
+  <div class="aviso fila" style="flex-wrap:nowrap"><span class="cresce" style="flex:1"><b>Demonstração: perfil administrador</b><br>No app final, essa permissão vem do backoffice.</span>
+    <button class="interruptor" role="switch" aria-checked="${S.admin}" aria-label="Ativar perfil administrador" data-a="alternar-admin"></button></div>
+  <button class="btn" data-a="sair">Sair da conta</button>`}},
+
+dados:()=>({titulo:'Meus dados',html:`
+  <form class="pilha" data-form="dados" novalidate>
+    ${campo('d-nome','Nome completo','text',S.usuario.nome)}
+    ${campo('d-email','E-mail','email',S.usuario.email)}
+    ${campo('d-tel','Celular','tel',S.usuario.tel||'')}
+    ${erro()}<button class="btn cheio" type="submit">Salvar alterações</button></form>`}),
+
+minhas:()=>{
+  const ids=Object.keys(S.minhas);
+  return {titulo:'Minhas assinaturas',html:ids.length?`<div class="lista">${ids.map(id=>{const p=S.peticoes.find(x=>x.id==id),m=S.minhas[id];
+    return `<button class="linha" data-a="abrir-peticao" data-id="${id}"><span class="cresce"><b>${esc(p?p.titulo:'Abaixo-assinado encerrado')}</b><br><span class="apoio num">${esc(m.data)} · ${esc(m.protocolo)}</span></span>${ic('seta')}</button>`}).join('')}</div>`
+    :`<p class="apoio">Você ainda não assinou nenhum abaixo-assinado.</p><button class="btn cheio" data-a="aba" data-v="peticoes">Ver abaixo-assinados</button>`}},
+
+sobre:()=>({titulo:'Quem somos',html:`
+  <div class="sobre-verde">${assV()}</div>
+  <p class="texto-longo">A Celeiro Administradora tem como missão promover a gestão e administração de grandes estruturas empresariais, atuando nas áreas de comercialização de energia, construção de unidades geradoras, incorporação, construção e gestão imobiliária, estruturação financeira, cobranças e divulgação de produtos e serviços.</p>
+  <section class="sec"><h3>Áreas de atuação</h3><div class="lista">
+    ${['Comercialização de energia elétrica','Construção de unidades geradoras','Incorporação, construção e gestão imobiliária','Estruturação de operações financeiras','Cobranças','Divulgação de produtos e serviços'].map(a=>`<div class="linha"><span class="cresce">${a}</span></div>`).join('')}</div></section>`}),
+
+admin:()=>{
+  const seg=atual().seg||'modulos';
+  return {titulo:'Área administrativa',html:`
+  <div class="chips quebra">${[['modulos','Módulos'],['videos','Vídeos'],['peticoes','Abaixo-assinados'],['pedidos','Solicitações'],['office','Integração Office']].map(([c,r])=>`<button class="chip" aria-pressed="${seg===c}" data-a="seg" data-s="${c}">${r}</button>`).join('')}</div>
+  ${seg==='videos'?`
+    <button class="btn cheio" data-a="ir" data-v="novoVideo">${ic('mais')} Publicar vídeo</button>
+    <div class="lista">${S.videos.map(v=>`<div class="linha"><span class="cresce"><b>${esc(v.titulo)}</b><br><span class="apoio">${esc(v.cat)} · ${v.origem==='link'?'Link externo':'Upload'} · ${v.publico?'Público':'Só cadastrados'}</span></span>
+      <button class="icone-btn" aria-label="Excluir ${esc(v.titulo)}" data-a="excluir-video" data-id="${v.id}">${ic('lixo')}</button></div>`).join('')}</div>`
+  :seg==='pedidos'?listaPedidos():seg==='modulos'?telaModulosApp():seg==='office'?telaOffice()
+  :`<button class="btn cheio" data-a="ir" data-v="novaPeticao">${ic('mais')} Criar abaixo-assinado</button>
+    <div class="lista">${S.peticoes.map(p=>`<button class="linha" data-a="ir" data-v="assinantes" data-id="${p.id}"><span class="cresce"><b>${esc(p.titulo)}</b><br><span class="apoio num">${n(total(p))} de ${n(p.meta)} · até ${esc(p.prazo)}</span></span>${ic('seta')}</button>`).join('')}</div>`}`}},
+
+novoVideo:()=>{
+  const o=atual().origem||'upload';
+  return {titulo:'Publicar vídeo',html:`
+  <form class="pilha" data-form="video" novalidate>
+    <div class="campo"><label>Origem do vídeo</label><div class="seg"><button type="button" aria-pressed="${o==='upload'}" data-a="origem" data-o="upload">Enviar arquivo</button><button type="button" aria-pressed="${o==='link'}" data-a="origem" data-o="link">Link externo</button></div></div>
+    ${o==='upload'?`<div class="campo"><label for="v-arq">Arquivo de vídeo</label><input id="v-arq" type="file" accept="video/*"></div>`
+      :campo('v-url','Link do YouTube ou de outra plataforma','url','','placeholder="https://"')}
+    ${campo('v-titulo','Título')}
+    <div class="campo"><label for="v-desc">Descrição</label><textarea id="v-desc"></textarea></div>
+    <div class="campo"><label for="v-cat">Categoria</label><select id="v-cat">${['Institucional','Energia','Financeiro','Imobiliário'].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div class="campo"><label for="v-vis">Quem pode assistir</label><select id="v-vis"><option value="0">Só pessoas cadastradas</option><option value="1">Qualquer pessoa</option></select></div>
+    ${erro()}<button class="btn cheio" type="submit">Publicar</button></form>`}},
+
+novaPeticao:()=>({titulo:'Criar abaixo-assinado',html:`
+  <form class="pilha" data-form="peticao" novalidate>
+    ${campo('p-titulo','Título')}
+    ${campo('p-resumo','Resumo em uma frase')}
+    <div class="campo"><label for="p-texto">Texto do abaixo-assinado</label><textarea id="p-texto" style="min-height:140px"></textarea></div>
+    ${campo('p-meta','Meta de assinaturas','number','','min="1" inputmode="numeric"')}
+    ${campo('p-prazo','Aberto até','date')}
+    ${erro()}<button class="btn cheio" type="submit">Abrir para assinaturas</button></form>`}),
+
+assinantes:()=>{
+  const p=S.peticoes.find(x=>x.id==atual().id);
+  return {titulo:'Assinantes',html:`
+  <h2>${esc(p.titulo)}</h2>
+  <div class="cartao"><span class="num" style="font-size:28px;font-weight:600;line-height:1">${n(total(p))}</span><span class="apoio num">de ${n(p.meta)} · aberto até ${esc(p.prazo)}</span></div>
+  <section class="sec"><h3>Assinaturas mais recentes</h3><div class="lista">${p.sig.map(s=>`<div class="linha"><span class="cresce">${esc(s.nome)}<br><span class="apoio">Validada por gov.br</span></span><span class="apoio num">${esc(s.data)}</span></div>`).join('')||'<p class="apoio">Ainda sem assinaturas.</p>'}</div></section>
+  <button class="btn" data-a="encerrar" data-id="${p.id}">Encerrar abaixo-assinado</button>`}}
+};
+
+function telaModulosApp(){
+  return `<p class="apoio">Ligue ou desligue cada módulo. Um módulo desligado some do início, do menu e das telas do app.</p>
+  <div class="lista">${MODS.map(m=>`<div class="linha"><span class="cresce"><b>${m.nome}</b><br><span class="apoio">${m.desc}</span></span>
+    <button class="interruptor" role="switch" aria-checked="${on(m.c)}" aria-label="${m.nome}" data-a="alternar-modulo" data-m="${m.c}"></button></div>`).join('')}</div>
+  <p class="aviso">Neste protótipo a chave vale só para esta sessão. No app publicado, a mesma lista é controlada no Office e vale para todos os aparelhos.</p>`;
+}
+function telaOffice(){
+  const f=Office.fila,pend=f.filter(e=>e.status!=='enviado').length;
+  const cont=t=>f.filter(e=>e.tipo===t).length;
+  return `<div class="cartao"><span class="rotulo">Destino</span><b style="overflow-wrap:anywhere">${Office.destino}</b>
+    <span class="apoio num">${f.length-pend} enviados · ${pend} na fila</span></div>
+  <div class="lista">${Object.entries(Office.TIPOS).map(([t,r])=>`<div class="linha"><span class="cresce">${r}</span><b class="num">${cont(t)}</b></div>`).join('')}</div>
+  ${pend?`<button class="btn" data-a="reenviar-office">Reenviar ${pend} da fila</button>`:''}
+  <section class="sec"><h3>Últimos envios</h3>${f.length?`<div class="lista">${f.slice(0,12).map(e=>`<div class="linha"><span class="cresce"><b>${Office.TIPOS[e.tipo]}</b><br><span class="apoio">${esc(e.dados.nome||e.dados.plataforma||'')} · ${esc(e.data)}</span></span><span class="selo ${e.status==='enviado'?'cheio':''}">${e.status==='enviado'?'Enviado':'Na fila'}</span></div>`).join('')}</div>`:'<p class="apoio">Nenhum envio nesta sessão.</p>'}</section>
+  <p class="aviso">Esta prévia não tem saída de rede, então os envios ficam na fila. Fora da prévia, eles chegam ao Office depois que o banco do Office receber a atualização da integração.</p>`;
+}
+function listaPedidos(){
+  const l=[...S.pedidos];
+  if(S.conta)l.unshift({servico:'Conta digital',nome:S.conta.nome,detalhe:S.conta.tipo+' · '+ContaDigital.STATUS[S.conta.status]+' · '+S.conta.protocolo,data:S.conta.criadaEm});
+  return l.length?`<div class="lista">${l.map(x=>`<div class="linha"><span class="cresce"><span class="selo">${esc(x.servico)}</span><br><b>${esc(x.nome)}</b>${x.tel?' · <span class="num">'+esc(x.tel)+'</span>':''}<br><span class="apoio">${esc(x.detalhe)}</span></span><span class="apoio num">${esc(x.data)}</span></div>`).join('')}</div>`
+    :'<p class="apoio">Nenhuma solicitação recebida ainda. Os pedidos de Aquisição Veicular, Energia com Desconto e conta digital aparecem aqui.</p>';
+}
+
+/* ---------- Desenho ---------- */
+function desenhar(){
+  if(MOD_DA_TELA[atual().v]&&!on(MOD_DA_TELA[atual().v]))S.pilha=[{v:'inicio'}];
+  const a=atual(),t=T[a.v](),raiz=RAIZ.includes(a.v);
+  document.getElementById('aparelho').classList.toggle('verde',!!t.verde);
+  const topo=document.getElementById('topo'),abas=document.getElementById('abas');
+  topo.style.display=t.semTopo?'none':'';
+  topo.innerHTML=t.marca?`${assH()}<span style="flex:1"></span>${S.usuario?'':`<button class="btn curto" data-a="ir" data-v="login">Entrar</button>`}`
+    :`${raiz||t.semVoltar?'':`<button class="icone-btn" data-a="voltar" aria-label="Voltar">${ic('voltar')}</button>`}<h1>${esc(t.titulo||'')}</h1>`;
+  const tela=document.getElementById('tela');tela.innerHTML=t.html;tela.scrollTop=0;
+  abas.style.display=raiz?'':'none';
+  const itensAba=[['inicio','Início','inicio'],['videos','Vídeos','video','videos'],['peticoes','Assinaturas','assinar','assinaturas'],['perfil','Perfil','perfil']].filter(x=>!x[3]||on(x[3]));
+  abas.style.gridTemplateColumns='repeat('+itensAba.length+',1fr)';
+  abas.innerHTML=itensAba
+    .map(([v,r,i])=>`<button data-a="aba" data-v="${v}" ${a.v===v?'aria-current="page"':''}>${ic(i)}${r}</button>`).join('');
+}
+function entrar(u){
+  S.usuario=u;const d=S.depois;S.depois=null;
+  S.pilha=[{v:'inicio'}];
+  if(typeof d==='number'){S.pilha.push({v:'peticao',id:d},{v:'assinatura',id:d,etapa:1})}else if(d){S.pilha.push(d)}
+  desenhar();avisar('Você entrou como '+u.nome.split(' ')[0]);
+}
+const val=id=>(document.getElementById(id)?.value||'').trim();
+const falhar=m=>{S.erro=m;const f={};document.querySelectorAll('#tela input,#tela textarea,#tela select').forEach(e=>{if(e.type!=='file'&&e.type!=='checkbox')f[e.id]=e.value});desenhar();for(const k in f){const e=document.getElementById(k);if(e)e.value=f[k]}document.querySelector('.erro')?.scrollIntoView({block:'center'})};
+const emailOk=e=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+/* ---------- Ações ---------- */
+const A={
+  ir:d=>ir(d.v,d.id?{id:+d.id}:{}), aba:d=>aba(d.v), voltar, trocar:d=>trocar(d.v),
+  avisar:d=>avisar(d.m),
+  social:d=>{const u={nome:'Paulo Exemplo',email:'paulo@exemplo.com.br',tel:'',metodo:d.m};Office.registrar('lead',{nome:u.nome,email:u.email,telefone:'',metodo:d.m});entrar(u)},
+  filtro:d=>{S.filtro=d.c;desenhar()},
+  'abrir-video':d=>ir('video',{id:+d.id}),
+  'abrir-peticao':d=>ir('peticao',{id:+d.id}),
+  tocar:(d,el)=>{el.classList.toggle('tocando');el.querySelector('.txt').textContent=el.classList.contains('tocando')?'Reproduzindo (simulação)':'Pausado'},
+  assinar:d=>{if(!S.usuario){S.depois=+d.id;ir('login',{motivo:'Entre na sua conta para assinar este abaixo-assinado.'})}else ir('assinatura',{id:+d.id,etapa:1})},
+  etapa:d=>trocar('assinatura',{id:atual().id,etapa:+d.e}),
+  'confirmar-assinatura':d=>{const p=S.peticoes.find(x=>x.id==d.id);
+    S.minhas[p.id]={protocolo:'CEL-'+new Date().getFullYear()+'-'+String(Math.floor(Math.random()*900000)+100000),data:hoje()};
+    p.sig.unshift({nome:S.usuario.nome,data:hoje()});trocar('assinatura',{id:p.id,etapa:3})},
+  'alternar-admin':()=>{S.admin=!S.admin;desenhar();avisar(S.admin?'Perfil administrador ativado':'Perfil administrador desativado')},
+  sair:()=>{S.usuario=null;S.admin=false;S.minhas={};S.conta=null;S.pilha=[{v:'abertura'}];desenhar()},
+  'abrir-conta':()=>{if(!S.usuario){S.depois={v:'conta'};ir('login',{motivo:'Entre na sua conta para abrir a conta digital.'})}else ir('conta')},
+  'tipo-conta':d=>trocar('conta',{tipo:d.t}),
+  'atualizar-conta':async()=>{const r=await ContaDigital.consultarStatus(S.conta.protocolo);S.conta.status=r.status;desenhar();avisar('Status: '+ContaDigital.STATUS[r.status])},
+  'alternar-modulo':d=>{S.modulos[d.m]=!S.modulos[d.m];desenhar();avisar(MODS.find(m=>m.c===d.m).nome+(S.modulos[d.m]?' habilitado':' desabilitado'))},
+  'reenviar-office':async()=>{await Office.reenviar();desenhar();avisar(Office.fila.some(e=>e.status!=='enviado')?'Sem conexão com o Office. Os envios continuam na fila.':'Fila enviada ao Office')},
+  seg:d=>trocar('admin',{seg:d.s}),
+  origem:d=>trocar('novoVideo',{origem:d.o}),
+  'excluir-video':d=>{S.videos=S.videos.filter(v=>v.id!=d.id);desenhar();avisar('Vídeo excluído')},
+  encerrar:d=>{S.peticoes=S.peticoes.filter(p=>p.id!=d.id);S.pilha=[{v:'perfil'},{v:'admin',seg:'peticoes'}];desenhar();avisar('Abaixo-assinado encerrado')}
+};
+document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&A[el.dataset.a])A[el.dataset.a](el.dataset,el)});
+document.addEventListener('input',e=>{if(e.target.id==='busca'){S.busca=e.target.value;const p=e.target.selectionStart;desenhar();const b=document.getElementById('busca');b.focus();b.setSelectionRange(p,p)}});
+
+const F={
+  login(){const em=val('l-email'),s=val('l-senha');
+    if(!emailOk(em))return falhar('Digite um e-mail válido, como voce@exemplo.com.br.');
+    if(!s)return falhar('Digite a sua senha.');
+    entrar({nome:em.split('@')[0].replace(/[._]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()),email:em,tel:'',metodo:'e-mail e senha'})},
+  cadastro(){const nm=val('c-nome'),em=val('c-email'),s=val('c-senha');
+    if(nm.length<3)return falhar('Digite o seu nome completo.');
+    if(!emailOk(em))return falhar('Digite um e-mail válido, como voce@exemplo.com.br.');
+    if(val('c-tel').replace(/\D/g,'').length<10)return falhar('Digite o celular com DDD.');
+    if(s.length<8)return falhar('A senha precisa ter pelo menos 8 caracteres.');
+    if(s!==val('c-senha2'))return falhar('As duas senhas não são iguais. Digite novamente.');
+    if(!document.getElementById('c-termos').checked)return falhar('Aceite os Termos de Uso para criar a conta.');
+    Office.registrar('lead',{nome:nm,email:em,telefone:val('c-tel'),metodo:'e-mail e senha'});
+    entrar({nome:nm,email:em,tel:val('c-tel'),metodo:'e-mail e senha'})},
+  veicular(){const nm=val('s-nome'),tel=val('s-tel');
+    if(nm.length<3)return falhar('Digite o seu nome completo.');
+    if(tel.replace(/\D/g,'').length<10)return falhar('Digite o celular com DDD.');
+    if(!val('s-valor'))return falhar('Informe o valor aproximado do veículo.');
+    if(!val('s-cidade'))return falhar('Informe a cidade e a UF.');
+    S.pedidos.unshift({servico:'Aquisição Veicular',nome:nm,tel,detalhe:val('s-veic')+' '+val('s-cond').toLowerCase()+' · R$ '+val('s-valor')+' · '+val('s-cidade'),data:hoje()});
+    Office.registrar('cotacao_veicular',{nome:nm,telefone:tel,veiculo:val('s-veic'),condicao:val('s-cond'),valor:val('s-valor'),cidade:val('s-cidade')});
+    trocar('pedidoOk',{servico:'Aquisição Veicular'})},
+  energia(){const nm=val('s-nome'),tel=val('s-tel'),arq=document.getElementById('s-fatura')?.files?.[0];
+    if(nm.length<3)return falhar('Digite o nome completo ou a razão social.');
+    if(tel.replace(/\D/g,'').length<10)return falhar('Digite o celular com DDD.');
+    if(!val('s-dist'))return falhar('Informe a distribuidora que aparece na fatura.');
+    if(!val('s-valor'))return falhar('Informe o valor médio da fatura.');
+    S.pedidos.unshift({servico:'Energia com Desconto',nome:nm,tel,detalhe:val('s-unid')+' · '+val('s-dist')+' · R$ '+val('s-valor')+'/mês'+(arq?' · fatura anexada':''),data:hoje()});
+    Office.registrar('migracao_energia',{nome:nm,telefone:tel,unidade:val('s-unid'),distribuidora:val('s-dist'),valor_fatura:val('s-valor'),fatura_anexada:!!arq});
+    trocar('pedidoOk',{servico:'Energia com Desconto'})},
+  async conta(){const t=atual().tipo||'PF',doc=val('k-doc'),dg=doc.replace(/\D/g,''),nm=val('k-nome');
+    if(dg.length!==(t==='PF'?11:14))return falhar(t==='PF'?'Digite o CPF com 11 números.':'Digite o CNPJ com 14 números.');
+    if(nm.length<3)return falhar(t==='PF'?'Digite o seu nome completo.':'Digite a razão social.');
+    if(t==='PF'&&!val('k-nasc'))return falhar('Informe a data de nascimento.');
+    if(t==='PJ'&&val('k-resp').length<3)return falhar('Informe o nome do responsável legal.');
+    if(val('k-tel').replace(/\D/g,'').length<10)return falhar('Digite o celular com DDD.');
+    if(!emailOk(val('k-email')))return falhar('Digite um e-mail válido.');
+    if(!document.getElementById('k-ok').checked)return falhar('Marque a autorização para enviar os dados à instituição parceira.');
+    const dados={tipo:t,documento:doc,nome:nm,nascimento:val('k-nasc'),responsavel:val('k-resp'),celular:val('k-tel'),email:val('k-email'),consentimento:true};
+    const r=await ContaDigital.abrirProposta(dados);
+    Office.registrar('conta_digital',{nome:nm,telefone:dados.celular,email:dados.email,documento:doc,tipo_pessoa:t,nascimento:dados.nascimento,responsavel:dados.responsavel,protocolo:r.protocolo});
+    S.conta={...dados,...r};trocar('conta');avisar('Proposta enviada para análise')},
+  dados(){const nm=val('d-nome'),em=val('d-email');
+    if(nm.length<3)return falhar('Digite o seu nome completo.');
+    if(!emailOk(em))return falhar('Digite um e-mail válido.');
+    Object.assign(S.usuario,{nome:nm,email:em,tel:val('d-tel')});voltar();avisar('Dados salvos')},
+  video(){const o=atual().origem||'upload',ti=val('v-titulo'),arq=document.getElementById('v-arq')?.files?.[0],url=val('v-url');
+    if(o==='upload'&&!arq)return falhar('Escolha o arquivo de vídeo.');
+    if(o==='link'&&!/^https?:\/\/.+\..+/.test(url))return falhar('Cole o link completo, começando com https://');
+    if(!ti)return falhar('Dê um título ao vídeo.');
+    if(!val('v-desc'))return falhar('Escreva a descrição do vídeo.');
+    S.videos.unshift({id:Date.now(),titulo:ti,desc:val('v-desc'),cat:val('v-cat'),dur:'novo',data:hoje(),origem:o,url,publico:val('v-vis')==='1',blob:arq?URL.createObjectURL(arq):null});
+    S.pilha=[{v:'perfil'},{v:'admin',seg:'videos'}];desenhar();avisar('Vídeo publicado')},
+  peticao(){const ti=val('p-titulo'),meta=+val('p-meta'),pr=val('p-prazo');
+    if(!ti)return falhar('Dê um título ao abaixo-assinado.');
+    if(!val('p-texto'))return falhar('Escreva o texto que as pessoas vão assinar.');
+    if(!(meta>0))return falhar('Informe a meta de assinaturas.');
+    if(!pr)return falhar('Escolha a data de encerramento.');
+    const id=Date.now();S.peticoesBase[id]=0;
+    S.peticoes.unshift({id,titulo:ti,resumo:val('p-resumo')||ti,texto:val('p-texto'),meta,base:0,prazo:pr.split('-').reverse().join('/'),sig:[]});
+    S.pilha=[{v:'perfil'},{v:'admin',seg:'peticoes'}];desenhar();avisar('Abaixo-assinado aberto')}
+};
+document.addEventListener('submit',e=>{e.preventDefault();const f=e.target.dataset.form;if(F[f])F[f]()});
+
+desenhar();
+Office.instalacao();
+</script>
+</body>
+</html>
