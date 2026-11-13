@@ -343,3 +343,36 @@ drop policy if exists "admin 2fa apaga videos" on storage.objects;
 create policy "admin 2fa apaga videos" on storage.objects
   for delete to authenticated
   using (bucket_id = 'videos' and (select public.eh_admin_2fa()));
+
+-- =====================================================================
+-- 7) ACEITE DOS TERMOS
+--    Guarda a versão dos Termos de Uso e da Política de Privacidade aceita no cadastro.
+-- =====================================================================
+
+alter table public.clientes add column if not exists termos_versao     text check (termos_versao is null or char_length(termos_versao) <= 20);
+alter table public.clientes add column if not exists termos_aceitos_em timestamptz;
+
+-- =====================================================================
+-- 8) CÓPIA DA FATURA DE ENERGIA (Storage)
+--    Pasta privada. Cada cliente envia e lê só dentro da própria pasta (o nome da pasta é o
+--    identificador da conta). Administrador com as duas etapas lê todas. Ninguém apaga pela página.
+-- =====================================================================
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('faturas', 'faturas', false, 10485760,
+        array['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic'])
+on conflict (id) do update
+  set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "cliente envia a propria fatura" on storage.objects;
+create policy "cliente envia a propria fatura" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'faturas'
+              and (storage.foldername(name))[1] = (select auth.uid())::text
+              and (select public.acesso_confirmado()));
+
+drop policy if exists "cliente le a propria fatura" on storage.objects;
+create policy "cliente le a propria fatura" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'faturas'
+         and ((storage.foldername(name))[1] = (select auth.uid())::text or (select public.eh_admin_2fa())));

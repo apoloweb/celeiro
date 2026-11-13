@@ -163,6 +163,7 @@ body{display:block;background:var(--fundo)}
 #aparelho.sem-abas #abas{display:none}
 #abas .marca-nav{display:none}
 a.btn{text-decoration:none;color:inherit}
+a.link{color:inherit}
 .capa iframe{width:100%;height:100%;border:0}
 .btn[aria-busy="true"]{opacity:.6}
 .grade2{display:grid;gap:16px;grid-template-columns:1fr}
@@ -245,9 +246,13 @@ const S={
   pilha:[{v:'abertura'}], erro:'', filtro:'Todos', busca:'',
   videos:[], peticoes:[], pedidos:[],
   modulos:{videos:true,assinaturas:true,veicular:true,energia:true,conta:true},
-  pendente:{}      // dados entre telas do acesso (e-mail aguardando código)
+  pendente:{},     // dados entre telas do acesso (e-mail aguardando código)
+  provedores:[]    // logins sociais ligados no Supabase (google, apple); lidos na abertura da página
 };
 const on=m=>!!S.modulos[m];
+const TERMOS_VERSAO='1.0'; // versão dos Termos de Uso e da Política de Privacidade (cliente/termos.html)
+const aceite=()=>({termos_versao:TERMOS_VERSAO,termos_aceitos_em:new Date().toISOString()});
+const LINK_TERMOS='<a class="link" href="termos.html#termos" target="_blank" rel="noopener">Termos de Uso</a>',LINK_PRIV='<a class="link" href="termos.html#privacidade" target="_blank" rel="noopener">Política de Privacidade</a>';
 
 /* ---------- Mensagens de erro em português ---------- */
 function traduz(e){
@@ -305,7 +310,9 @@ async function carregar(){
   S.falhaDados=!!(v.error||p.error||s.error);
   // reenvia ao Office o que ficou pendente
   for(const x of S.pedidos.filter(x=>!x.enviado_office).slice(0,5)){
-    if(await Office.enviar(x.tipo,{...x.dados,nome:S.cliente&&S.cliente.nome,email:S.conta.email,protocolo:x.protocolo})){
+    const ex={};
+    if(x.dados&&x.dados.fatura_arquivo){const lk=await sb.storage.from('faturas').createSignedUrl(x.dados.fatura_arquivo,30*24*3600);if(lk.data&&lk.data.signedUrl)ex.fatura_link=lk.data.signedUrl}
+    if(await Office.enviar(x.tipo,{...x.dados,...ex,nome:S.cliente&&S.cliente.nome,email:S.conta.email,protocolo:x.protocolo})){
       const u=await sb.from('solicitacoes').update({enviado_office:true}).eq('id',x.id);
       if(!u.error)x.enviado_office=true;
     }
@@ -317,18 +324,18 @@ async function recarregarPeticoes(){const p=await sb.rpc('abaixo_listar');if(!p.
 async function entrarNaArea(novo){
   const u=(await sb.auth.getUser()).data.user;
   if(!u){S.pilha=[{v:'abertura'}];desenhar();return}
-  S.conta={id:u.id,email:u.email};
+  S.conta={id:u.id,email:u.email,provedor:(u.app_metadata&&u.app_metadata.provider)||'email'};
   let c=await sb.from('clientes').select('nome,telefone').eq('user_id',u.id).maybeSingle();
   if(!c.data){
-    const m=u.user_metadata||{};
-    if(m.nome&&String(m.nome).trim().length>=3){
-      const i=await sb.from('clientes').insert({user_id:u.id,nome:String(m.nome).trim().slice(0,120),telefone:m.telefone||null}).select('nome,telefone').single();
+    const m=u.user_metadata||{},nomeMeta=String(m.nome||m.full_name||m.name||'').trim();
+    if(nomeMeta.length>=3){
+      const i=await sb.from('clientes').insert({user_id:u.id,nome:nomeMeta.slice(0,120),telefone:m.telefone||null,...aceite()}).select('nome,telefone').single();
       if(!i.error){c=i;novo=true}
     }
   }
   if(!c.data){S.cliente=null;S.pilha=[{v:'completar'}];desenhar();return}
   S.cliente=c.data;
-  if(novo)Office.enviar('lead',{nome:S.cliente.nome,email:S.conta.email,telefone:S.cliente.telefone||'',metodo:'e-mail e senha'});
+  if(novo)Office.enviar('lead',{nome:S.cliente.nome,email:S.conta.email,telefone:S.cliente.telefone||'',metodo:S.conta.provedor==='email'?'e-mail e senha':NOME_PROVEDOR[S.conta.provedor]||S.conta.provedor});
   await carregar();
   S.pilha=[{v:'inicio'}];desenhar();
   if(S.falhaDados)avisar('Parte do conteúdo não carregou. Atualize a página.');
@@ -357,6 +364,9 @@ const cartaoPeticao=p=>`<button class="cartao" data-a="abrir-peticao" data-id="$
   <span class="apoio num"><b style="color:var(--tinta)">${n(p.total)}</b> de ${n(p.meta)} assinaturas · ${pct(p)}%</span></button>`;
 const campo=(id,rot,tipo='text',v='',extra='')=>`<div class="campo"><label for="${id}">${rot}</label><input id="${id}" type="${tipo}" value="${esc(v)}" ${extra}></div>`;
 const erro=()=>S.erro?`<p class="erro" role="alert">${esc(S.erro)}</p>`:'';
+const NOME_PROVEDOR={google:'Google',apple:'Apple'};
+const sociais=verbo=>S.provedores.length?`<div class="divisor">ou</div><div class="pilha">${S.provedores.map(p=>`<button class="btn" type="button" data-a="social" data-p="${p}">${verbo} com ${NOME_PROVEDOR[p]}</button>`).join('')}</div>
+  <p class="apoio" style="text-align:center">Ao continuar com ${S.provedores.map(p=>NOME_PROVEDOR[p]).join(' ou ')}, você aceita os ${LINK_TERMOS} e a ${LINK_PRIV}.</p>`:'';
 const linhaDado=(r,v)=>`<div class="linha" style="padding:4px 0"><span class="cresce apoio">${r}</span><b class="num" style="text-align:right;overflow-wrap:anywhere">${esc(v)}</b></div>`;
 function embutir(url){
   let m=String(url).match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{6,})/);
@@ -393,6 +403,7 @@ login:()=>({titulo:'Entrar',estreita:true,html:`
     <button class="btn cheio" type="submit">Entrar</button>
     <button class="link" type="button" data-a="ir" data-v="recuperar" style="align-self:center">Esqueci minha senha</button>
   </form>
+  ${sociais('Entrar')}
   <p class="apoio" style="text-align:center">Ainda não tem conta? <button class="link" data-a="trocar" data-v="cadastro">Criar conta</button></p>`}),
 
 cadastro:()=>({titulo:'Criar conta',estreita:true,html:`
@@ -403,10 +414,11 @@ cadastro:()=>({titulo:'Criar conta',estreita:true,html:`
     ${campo('c-tel','Celular','tel','','autocomplete="tel" placeholder="(00) 00000-0000"')}
     ${campo('c-senha','Senha (mínimo de 8 caracteres)','password','','autocomplete="new-password"')}
     ${campo('c-senha2','Repita a senha','password','','autocomplete="new-password"')}
-    <label class="fila apoio" style="flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="c-termos" style="margin-top:3px"> <span>Li e aceito os Termos de Uso e a Política de Privacidade.</span></label>
+    <label class="fila apoio" style="flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="c-termos" style="margin-top:3px"> <span>Li e aceito os ${LINK_TERMOS} e a ${LINK_PRIV}.</span></label>
     ${erro()}
     <button class="btn cheio" type="submit">Criar conta</button>
   </form>
+  ${sociais('Cadastrar')}
   <p class="apoio" style="text-align:center">Já tem conta? <button class="link" data-a="trocar" data-v="login">Entrar</button></p>`}),
 
 confirmar:()=>({titulo:'Confirmar e-mail',estreita:true,html:`
@@ -442,6 +454,7 @@ completar:()=>({titulo:'Complete seu cadastro',estreita:true,semVoltar:true,html
   <form class="pilha" data-form="completar" novalidate>
     ${campo('o-nome','Nome completo','text','','autocomplete="name"')}
     ${campo('o-tel','Celular','tel','','autocomplete="tel" placeholder="(00) 00000-0000"')}
+    <p class="apoio">Ao continuar, você aceita os ${LINK_TERMOS} e a ${LINK_PRIV}.</p>
     ${erro()}<button class="btn cheio" type="submit">Continuar</button>
     <button class="btn claro" type="button" data-a="sair">Sair</button></form>`}),
 
@@ -516,7 +529,7 @@ assinatura:()=>{
     <div class="cartao"><span class="rotulo">Assinante</span><b>${esc(S.cliente.nome)}</b><span class="apoio" style="overflow-wrap:anywhere">${esc(S.conta.email)}</span></div>
     <form class="pilha" data-form="assinar" novalidate>
       ${campo('a-cpf','Seu CPF','text','','inputmode="numeric" autocomplete="off" placeholder="000.000.000-00"')}
-      ${campo('a-senha','Sua senha, para confirmar que é você','password','','autocomplete="current-password"')}
+      ${S.conta.provedor==='email'?campo('a-senha','Sua senha, para confirmar que é você','password','','autocomplete="current-password"'):''}
       <p class="apoio">A assinatura registra seu nome, CPF, data, hora e endereço de rede (IP). Na lista pública aparece só o primeiro nome e a inicial do sobrenome. Depois de assinar, não é possível retirar a assinatura por aqui.</p>
       ${erro()}
       <button class="btn cheio" type="submit">Assinar</button><button class="btn claro" type="button" data-a="voltar">Cancelar</button>
@@ -541,6 +554,7 @@ energia:()=>({titulo:'Energia com Desconto',html:`
     <div class="campo"><label for="s-unid">Tipo de unidade</label><select id="s-unid">${['Residência','Comércio','Indústria','Condomínio','Propriedade rural'].map(c=>`<option>${c}</option>`).join('')}</select></div>
     ${campo('s-dist','Distribuidora de energia','text','','placeholder="Nome que aparece na fatura"')}
     ${campo('s-valor','Valor médio da fatura (R$)','text','','inputmode="numeric" placeholder="450"')}
+    <div class="campo"><label for="s-fatura">Cópia da fatura de energia (opcional; PDF ou foto, até 10 MB)</label><input id="s-fatura" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic"></div>
     ${erro()}<button class="btn cheio" type="submit">Pedir análise</button></form>`}),
 
 pedidoOk:()=>({titulo:'Solicitação enviada',semVoltar:true,html:`
@@ -573,18 +587,18 @@ perfil:()=>{
   const u=S.cliente,qt=S.peticoes.filter(p=>p.minha).length;
   return {titulo:'Perfil',html:`
   <div class="fila" style="flex-wrap:nowrap"><span class="avatar">${esc(u.nome[0].toUpperCase())}</span>
-    <div class="pilha" style="gap:2px;min-width:0"><h2 style="font-size:19px;overflow-wrap:anywhere">${esc(u.nome)}</h2><span class="apoio" style="overflow-wrap:anywhere">${esc(S.conta.email)}</span><span><span class="selo">E-mail confirmado</span></span></div></div>
+    <div class="pilha" style="gap:2px;min-width:0"><h2 style="font-size:19px;overflow-wrap:anywhere">${esc(u.nome)}</h2><span class="apoio" style="overflow-wrap:anywhere">${esc(S.conta.email)}</span><span><span class="selo">${S.conta.provedor==='email'?'E-mail confirmado':'Acesso por '+esc(NOME_PROVEDOR[S.conta.provedor]||S.conta.provedor)}</span></span></div></div>
   <div class="lista">
     <button class="linha" data-a="ir" data-v="dados"><span class="cresce">Meus dados</span>${ic('seta')}</button>
     <button class="linha" data-a="ir" data-v="pedidos"><span class="cresce">Minhas solicitações</span><span class="apoio num">${S.pedidos.length}</span>${ic('seta')}</button>
     ${on('assinaturas')?`<button class="linha" data-a="ir" data-v="minhas"><span class="cresce">Minhas assinaturas</span><span class="apoio num">${qt}</span>${ic('seta')}</button>`:''}
-    <button class="linha" data-a="ir" data-v="senha"><span class="cresce">Trocar senha</span>${ic('seta')}</button>
+    ${S.conta.provedor==='email'?`<button class="linha" data-a="ir" data-v="senha"><span class="cresce">Trocar senha</span>${ic('seta')}</button>`:''}
     <button class="linha" data-a="ir" data-v="sobre"><span class="cresce">Quem somos</span>${ic('seta')}</button>
     ${S.admin?`<button class="linha" data-a="ir" data-v="admin"><span class="cresce"><b>Administrar conteúdo</b></span>${ic('seta')}</button>`:''}
   </div>
   ${S.adminSemFator?'<p class="aviso">Você é administrador do site. Para administrar o conteúdo desta área, entre pelo login do site, com o autenticador, e volte a esta página.</p>':''}
   <button class="btn" data-a="sair">Sair da conta</button>
-  <a class="link" href="../" style="align-self:center;text-align:center">Voltar ao site</a>`}},
+  <p class="apoio" style="text-align:center">${LINK_TERMOS} · ${LINK_PRIV} · <a class="link" href="../">Voltar ao site</a></p>`}},
 
 dados:()=>({titulo:'Meus dados',estreita:true,html:`
   <form class="pilha" data-form="dados" novalidate>
@@ -607,7 +621,7 @@ minhas:()=>{
     :`<p class="apoio">Você ainda não assinou nenhum abaixo-assinado.</p><button class="btn cheio" data-a="aba" data-v="peticoes">Ver abaixo-assinados</button>`}},
 
 pedidos:()=>({titulo:'Minhas solicitações',html:S.pedidos.length?`<div class="lista">${S.pedidos.map(x=>
-  `<div class="linha"><span class="cresce"><b>${esc(TIPOS[x.tipo]||x.tipo)}</b><br><span class="apoio num">${dia(x.criado_em)} · ${esc(x.protocolo)}</span></span><span class="selo">Recebida</span></div>`).join('')}</div>`
+  `<div class="linha"><span class="cresce"><b>${esc(TIPOS[x.tipo]||x.tipo)}</b><br><span class="apoio num">${dia(x.criado_em)} · ${esc(x.protocolo)}${x.dados&&x.dados.fatura_arquivo?' · fatura anexada':''}</span></span><span class="selo">Recebida</span></div>`).join('')}</div>`
   :'<p class="apoio">Você ainda não fez nenhuma solicitação. Os serviços ficam na tela de início.</p>'}),
 
 sobre:()=>({titulo:'Quem somos',html:`
@@ -697,6 +711,10 @@ const A={
   'tipo-conta':d=>trocar('conta',{tipo:d.t}),
   seg:d=>trocar('admin',{seg:d.s}),
   origem:d=>trocar('novoVideo',{origem:d.o}),
+  social:async d=>{
+    const r=await sb.auth.signInWithOAuth({provider:d.p,options:{redirectTo:location.origin+location.pathname}});
+    if(r.error)avisar(traduz(r.error));
+  },
   'reenviar-codigo':async()=>{
     const r=await sb.auth.resend({type:'signup',email:S.pendente.email});
     avisar(r.error?traduz(r.error):'Enviamos um novo código para o seu e-mail.');
@@ -732,12 +750,12 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(e
 document.addEventListener('input',e=>{if(e.target.id==='busca'){S.busca=e.target.value;const p=e.target.selectionStart;desenhar();const b=document.getElementById('busca');b.focus();b.setSelectionRange(p,p)}});
 
 /* ---------- Formulários ---------- */
-async function solicitar(tipo,pref,dados,servico){
+async function solicitar(tipo,pref,dados,servico,soOffice){
   const protocolo=codigo(pref);
   const r=await sb.from('solicitacoes').insert({tipo,dados,protocolo}).select().single();
   if(r.error)return falhar(traduz(r.error));
   S.pedidos.unshift(r.data);
-  const ok=await Office.enviar(tipo,{...dados,nome:dados.nome||S.cliente.nome,email:S.conta.email,protocolo});
+  const ok=await Office.enviar(tipo,{...dados,...(soOffice||{}),nome:dados.nome||S.cliente.nome,email:S.conta.email,protocolo});
   if(ok){const u=await sb.from('solicitacoes').update({enviado_office:true}).eq('id',r.data.id);if(!u.error)r.data.enviado_office=true}
   if(servico)trocar('pedidoOk',{servico,protocolo});
   return r.data;
@@ -793,7 +811,7 @@ const F={
     if(nm.length<3)return falhar('Digite o seu nome completo.');
     if(soDigitos(tel).length<10)return falhar('Digite o celular com DDD.');
     ocupar(true);
-    const r=await sb.from('clientes').insert({user_id:S.conta.id,nome:nm,telefone:tel});
+    const r=await sb.from('clientes').insert({user_id:S.conta.id,nome:nm,telefone:tel,...aceite()});
     if(r.error)return falhar(traduz(r.error));
     await entrarNaArea(true)},
   async dados(){const nm=val('d-nome'),tel=val('d-tel');
@@ -812,12 +830,14 @@ const F={
     const u=await sb.auth.updateUser({password:s});
     if(u.error)return falhar(traduz(u.error));
     voltar();avisar('Senha alterada')},
-  async assinar(){const id=atual().id,cpf=val('a-cpf'),s=document.getElementById('a-senha').value;
+  async assinar(){const id=atual().id,cpf=val('a-cpf'),comSenha=S.conta.provedor==='email',s=comSenha?document.getElementById('a-senha').value:'';
     if(!cpfOk(cpf))return falhar('CPF inválido. Confira os números.');
-    if(!s)return falhar('Digite a sua senha para confirmar.');
+    if(comSenha&&!s)return falhar('Digite a sua senha para confirmar.');
     ocupar(true);
-    const c=await sb.auth.signInWithPassword({email:S.conta.email,password:s});
-    if(c.error)return falhar(/Invalid login/i.test(c.error.message)?'Senha incorreta.':traduz(c.error));
+    if(comSenha){
+      const c=await sb.auth.signInWithPassword({email:S.conta.email,password:s});
+      if(c.error)return falhar(/Invalid login/i.test(c.error.message)?'Senha incorreta.':traduz(c.error));
+    }
     const r=await sb.rpc('assinar',{p_id:id,p_cpf:cpf});
     if(r.error)return falhar(traduz(r.error));
     await recarregarPeticoes();trocar('assinatura',{id,etapa:3})},
@@ -831,8 +851,20 @@ const F={
     if(soDigitos(tel).length<10)return falhar('Digite o celular com DDD.');
     if(!val('s-dist'))return falhar('Informe a distribuidora que aparece na fatura.');
     if(!val('s-valor'))return falhar('Informe o valor médio da fatura.');
+    const arq=document.getElementById('s-fatura')?.files?.[0];
+    if(arq&&arq.size>10*1024*1024)return falhar('A fatura tem mais de 10 MB. Envie um arquivo menor ou uma foto.');
     ocupar(true);
-    await solicitar('migracao_energia','EN',{telefone:tel,unidade:val('s-unid'),distribuidora:val('s-dist'),valor_fatura:val('s-valor')},'Energia com Desconto')},
+    const dados={telefone:tel,unidade:val('s-unid'),distribuidora:val('s-dist'),valor_fatura:val('s-valor'),fatura_anexada:!!arq},extra={};
+    if(arq){
+      const caminho=S.conta.id+'/'+Date.now()+'-'+arq.name.toLowerCase().replace(/[^a-z0-9.]+/g,'-').slice(-60);
+      const up=await sb.storage.from('faturas').upload(caminho,arq,{contentType:arq.type||'application/pdf'});
+      if(up.error)return falhar('Não foi possível enviar a fatura: '+traduz(up.error)+' Tente de novo ou envie o pedido sem o arquivo.');
+      dados.fatura_arquivo=caminho;
+      // link temporário (30 dias) para a equipe abrir a fatura pelo Office
+      const lk=await sb.storage.from('faturas').createSignedUrl(caminho,30*24*3600);
+      if(lk.data&&lk.data.signedUrl)extra.fatura_link=lk.data.signedUrl;
+    }
+    await solicitar('migracao_energia','EN',dados,'Energia com Desconto',extra)},
   async conta(){const t=atual().tipo||'PF',doc=val('k-doc'),dg=soDigitos(doc),nm=val('k-nome');
     if(t==='PF'?!cpfOk(doc):dg.length!==14)return falhar(t==='PF'?'CPF inválido. Confira os números.':'Digite o CNPJ com 14 números.');
     if(nm.length<3)return falhar(t==='PF'?'Digite o seu nome completo.':'Digite a razão social.');
@@ -879,6 +911,18 @@ function ativo(){clearTimeout(tInativo);if(S.conta)tInativo=setTimeout(async()=>
 (async function(){
   desenhar();
   if(!sb)return;
+  // volta do Google ou da Apple com erro: mostra na tela de entrada e limpa o endereço
+  const volta=new URLSearchParams(location.search+'&'+location.hash.replace(/^#/,''));
+  if(volta.get('error')){
+    S.pilha=[{v:'abertura'},{v:'login',motivo:'Não foi possível entrar com a conta escolhida. Tente de novo ou use e-mail e senha.'}];desenhar();
+    try{history.replaceState(null,'',location.pathname)}catch(_){}
+  }
+  // mostra os botões só dos logins sociais que estão ligados no Supabase
+  fetch(CFG.url+'/auth/v1/settings',{headers:{apikey:CFG.anonKey}}).then(r=>r.ok?r.json():null).then(j=>{
+    const e=(j&&j.external)||{};
+    S.provedores=['google','apple'].filter(p=>e[p]===true);
+    if(S.provedores.length&&['login','cadastro'].includes(atual().v)&&!document.querySelector('#tela input:focus'))desenhar();
+  }).catch(()=>{});
   try{
     const r=await sb.auth.getSession();
     if(r.data&&r.data.session){await entrarNaArea(false);ativo()}
