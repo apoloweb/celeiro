@@ -1,0 +1,4 @@
+# Regras de publicação do projeto do app na Vercel (Root Directory = app).
+# Este arquivo existe para que o projeto do app não herde o .vercelignore da raiz,
+# que exclui a pasta app do site institucional.
+LEIA-ME.md
