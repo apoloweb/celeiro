@@ -1,0 +1,6 @@
+{
+  "redirects": [
+    { "source": "/office", "destination": "https://office.celeiroadministradora.com.br/", "permanent": false },
+    { "source": "/office/:caminho*", "destination": "https://office.celeiroadministradora.com.br/:caminho*", "permanent": false }
+  ]
+}
