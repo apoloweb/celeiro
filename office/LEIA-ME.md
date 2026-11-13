@@ -17,9 +17,9 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | Trocar a própria senha | Pronto |
 | Habilitação de módulos por perfil e por organização | Pronto |
 | Auditoria: registro de todas as ações, consulta com filtros, exportação | Pronto |
-| Workflow: tarefas em lista e em quadro, responsável, envolvidos, prazo, comentários, confidenciais | Pronto |
+| Workflow: tarefas em lista e em quadro, responsável, envolvidos, prazo, comentários com @, anexos, confidenciais | Pronto |
 | Botão "Nova tarefa" em todas as telas, guardando a tela de origem | Pronto |
-| Dashboard: tarefas vencidas, urgentes, suas e não lidas, gráfico de 15 dias e pendências | Pronto (arrecadação, inadimplentes e energia sem dados até o Financeiro existir) |
+| Dashboard: tarefas vencidas, urgentes, suas e não lidas, gráfico de 15 dias e pendências | Pronto (arrecadação e inadimplentes vêm do Financeiro; energia sem dados) |
 | Cadastro de pessoas físicas: dados pessoais, contatos, endereço, profissional e financeiro | Pronto |
 | Cadastro de pessoas jurídicas: empresa, quadro de sócios (QSA), representante e responsável financeiro | Pronto |
 | Financeiro, Investimentos, Conexão MCP, Conteúdo | Aparecem no menu quando habilitados, com aviso da fase em que serão construídos |
@@ -36,6 +36,8 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | `indicacao/index.html` | Página pública do link de indicação (registro de interesse, sem login) |
 | `verificar/index.html` | Página pública onde a pessoa digita o código de verificação |
 | `supabase/functions/enviar-verificacao/index.ts` | Função do servidor que envia o código por e-mail (Resend) e WhatsApp (Z-API) |
+| `supabase/functions/financeiro-integracao/index.ts` | Função do servidor que leva boleto, Pix e nota fiscal ao provedor e recebe o aviso de pagamento (provedor ainda a escolher) |
+| `supabase/functions/avisar-mencao/index.ts` | Função do servidor que envia o e-mail a quem foi marcado com @ em um comentário (Resend) |
 | `assets/` | Logo e favicon |
 
 ## Configuração (uma vez)
@@ -105,6 +107,18 @@ O Corporativo master cria apenas operadores da própria organização.
 - **Quem altera:** qualquer pessoa que vê a tarefa pode editar, mover e comentar. Excluir é só para quem criou, o Master e o Corporativo master da organização.
 - **Quem pode ser marcado:** pessoas com o módulo Workflow, da mesma organização da tarefa. Só a equipe Celeiro marca pessoas da Celeiro em tarefas de clientes.
 
+- **Marcar com @ no comentário.** Digite `@` e o começo do nome: aparece a lista de quem pode ser marcado. Quem é
+  marcado passa a ser envolvido na tarefa (por isso enxerga também as confidenciais) e vê o selo "@ Marcaram você"
+  até abrir a tarefa. Ela também recebe um **e-mail** com quem marcou, a tarefa, o comentário e o botão para
+  abrir o Workflow (função `avisar-mencao`, que usa a mesma chave da Resend da verificação de contatos). Cada
+  pessoa é avisada uma vez por comentário; quem marca a si mesmo não recebe.
+- **Anexos.** Na criação da tarefa, escolha os arquivos no campo Anexos: eles sobem quando a tarefa é criada.
+  Em uma tarefa já criada, escolha os arquivos e clique em Anexar. Aceita PDF, imagem, Word, Excel,
+  PowerPoint, CSV e TXT, até 10 MB cada e 30 por tarefa. Quem vê a tarefa vê e baixa os anexos; excluir é para quem
+  enviou, quem criou a tarefa, o Master e o Corporativo master da organização. Os arquivos ficam no Storage do
+  Supabase, em um bucket privado (`workflow-anexos`) criado pelo `supabase.sql`; o download usa um link que vale
+  1 minuto. O registro (quem enviou, nome, tipo, tamanho) fica na tabela `workflow_anexos` e na Auditoria.
+
 Para os clientes usarem, habilite o módulo Workflow para os perfis deles em **Módulos e permissões**.
 
 ## Cadastro
@@ -171,11 +185,40 @@ Balancete e Plano de contas. Todos (menos o plano) têm pesquisa por período, c
 - **Segurança**: as tabelas do Financeiro não são lidas direto pelo navegador; tudo passa por operações que
   conferem o módulo, o segundo fator e a organização. Tudo vai para a Auditoria.
 
-Limites desta versão: sem boleto nem Pix (a fatura é o documento de cobrança; a instituição financeira ainda
-não foi escolhida); sem nota fiscal; sem baixa parcial, juros, multa ou desconto; sem parcelamento nem títulos
+### Cobranças (boleto e Pix) e nota fiscal
+
+Tudo está pronto, menos a escolha da API (banco, gateway de pagamento e emissor de notas).
+
+- **Boleto e Pix:** em Contas a receber, botão **Cobrar** no título em aberto. **Nota fiscal de serviço:** na
+  fatura, botão **Pedir nota fiscal** (usa os dados fiscais do emitente).
+- **Cobranças e notas** (menu interno): mostra se a API está ligada, o andamento de cada pedido, os botões de
+  copiar linha digitável e Pix copia e cola, abrir PDF/XML, enviar de novo e cancelar, e o formulário dos
+  **dados fiscais do emitente** (CNPJ, inscrição municipal, código do serviço, alíquota de ISS).
+- **Enquanto a API não é definida**, cada pedido fica guardado como "Aguardando a API" e nada é enviado ao
+  cliente. Quando a API for ligada, o botão "Enviar agora" emite os pedidos guardados.
+- **Baixa automática:** quando o provedor avisa que a cobrança foi paga, o título é baixado sozinho na conta
+  de banco, com registro na Auditoria.
+- **Para ligar a API:** publicar a função `financeiro-integracao` (com "Verify JWT" desligado), escrever o
+  adaptador do provedor escolhido dentro dela (o formato está no topo do arquivo) e criar os segredos
+  `FIN_COBRANCA_PROVEDOR`, `FIN_NOTA_PROVEDOR` e `FIN_WEBHOOK_SEGREDO`, além das chaves do provedor. O endereço
+  do aviso de pagamento é `.../functions/v1/financeiro-integracao?aviso=<provedor>`. Existe um provedor
+  `simulado`, só para ensaiar o fluxo: ele não gera cobrança nem nota de verdade.
+
+### Ligação com Investimentos
+
+- Cada **aporte** gera um lançamento: entrada em banco contra a conta "Recursos de investidores" (passivo).
+- Cada **comissão** gera uma conta a pagar ao indicador, com vencimento 30 dias depois do aporte. Pagar no
+  Financeiro marca a comissão como paga em Investimentos, e o contrário também.
+- Cada **retorno distribuído** gera um lançamento de saída de banco em "Remuneração de investidores".
+- Cancelar o aporte ou excluir o retorno desfaz o lançamento. No Financeiro esses itens aparecem marcados como
+  vindos de Investimentos e não são alterados nem excluídos por lá.
+- As contas novas são criadas sozinhas no plano (primeiro código livre). O dinheiro entra e sai pela conta
+  "Banco conta movimento"; a tela de aporte ainda não deixa escolher outra conta.
+
+Limites desta versão: boleto, Pix e nota fiscal dependem da API a escolher (acima); sem baixa parcial, juros, multa ou desconto; sem parcelamento nem títulos
 recorrentes; sem conciliação bancária; sem encerramento de exercício; pagar aceita só categorias de custo e
-despesa (compra de imobilizado e empréstimos entram por lançamento manual). O Dashboard geral do sistema ainda
-não lê os números do Financeiro, e o MCP ainda não tem ferramentas do Financeiro. Os demonstrativos são
+despesa (compra de imobilizado e empréstimos entram por lançamento manual). O MCP ainda não tem ferramentas
+do Financeiro. Cobrança emitida cujo título é baixado à mão continua viva no provedor até ser cancelada. Os demonstrativos são
 gerenciais: não substituem a escrituração feita pela contabilidade.
 
 ## Endereço
@@ -259,8 +302,8 @@ Menus internos: Dashboard, Projetos, Investidores, Retorno esperado × real, Ind
 Pontos de atenção: (1) divulgar captação de investimentos ao público pode exigir registro ou dispensa na CVM;
 a página pública foi feita só como registro de interesse, sem taxas nem promessa de retorno, mas o uso dos links
 deve ser validado com o jurídico; (2) a página pública recolhe dados pessoais: incluir no aviso de privacidade;
-(3) a comissão não vira conta a pagar no Financeiro, e o aporte não vira lançamento contábil: os dois módulos
-ainda não conversam; (4) o retorno real é lançado por projeto, não por investidor; (5) o banco usa o horário
+(3) aporte, comissão e retorno entram sozinhos no Financeiro (ver "Ligação com Investimentos"); o tratamento
+contábil adotado (aporte como passivo, retorno como despesa) deve ser confirmado com a contabilidade; (4) o retorno real é lançado por projeto, não por investidor; (5) o banco usa o horário
 universal: entre 21h e meia-noite de Brasília, "hoje" no banco já é o dia seguinte (afeta só o que conta como
 vencido ou futuro nessas três horas).
 
@@ -314,7 +357,8 @@ falta o teste com um assistente real depois de publicado.
 - Primeira linha: tarefas vencidas, urgentes, sob sua responsabilidade e não lidas, cada uma com "Ver tudo" que abre a lista já filtrada.
 - Segunda linha: tarefas em aberto, concluídas em 15 dias, usuários ativos e organizações.
 - Gráfico de tarefas criadas e concluídas por dia nos últimos 15 dias, e a lista de pendências com responsável e prazo.
-- Arrecadação, inadimplentes e economia de energia aparecem como "Sem dados": dependem do módulo Financeiro e de uma fonte de dados de energia, que ainda não existem.
+- **Arrecadação** mostra o que foi recebido no mês corrente e quanto ainda está a receber; **Inadimplentes** mostra o valor e a quantidade de contas a receber vencidas. Os dois vêm do Financeiro (livros da Celeiro para a equipe, da própria organização para o cliente) e aparecem para quem tem o módulo Financeiro.
+- **Economia de energia** continua "Sem dados": falta definir a fonte.
 
 ## Como a segurança funciona
 
@@ -345,8 +389,9 @@ falta o teste com um assistente real depois de publicado.
 - **Acesso criado sem vínculo.** Se a criação do acesso der certo e o vínculo ao perfil falhar, o e-mail fica criado sem perfil (não entra no sistema). Conclua por "Vincular acesso existente".
 - **Perda do celular.** Apague o autenticador da pessoa no painel (Authentication > Users > usuário > Factors). Ela cadastra de novo no acesso seguinte.
 - **Redefinição de senha por e-mail.** A tela existe, mas depende do envio de e-mails do Supabase estar configurado. Não foi testada.
-- **Workflow sem times e sem @.** O responsável é uma pessoa; ainda não há "time" como responsável, nem menção com @ no texto. Marcar alguém é feito pela lista de Envolvidos.
-- **Workflow sem aviso por e-mail.** Prazos e marcações aparecem só dentro do sistema (filtros e Dashboard).
+- **Workflow sem times.** O responsável é uma pessoa; ainda não há "time" como responsável.
+- **Anexos de tarefa excluída.** Ao excluir uma tarefa pela tela, os arquivos são apagados antes. Se a tarefa for apagada por outro caminho, os arquivos ficam no Storage sem registro.
+- **Avisos do Workflow.** Só a marcação com @ gera e-mail. Prazos, mudança de responsável e inclusão como envolvido pela lista aparecem só dentro do sistema. Não há aviso por WhatsApp.
 - **Tarefa ligada a um registro.** Hoje a tarefa guarda o módulo e a tela de origem. A ligação a um registro específico (um cadastro, uma fatura) entra quando esses módulos existirem.
 - **Cadastro sem arquivos.** O envio de documentos (RG, contrato social) ainda não existe.
 - **Cadastro sem validação oficial.** CPF e CNPJ são conferidos pelos dígitos. A consulta de CNPJ e de CEP usa bases públicas gratuitas (BrasilAPI e ViaCEP), que podem ficar fora do ar; a consulta contratada à Receita (CPF, situação) não foi feita.

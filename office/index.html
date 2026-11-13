@@ -150,6 +150,16 @@ tr.grupo-l th{background:var(--nevoa);font-size:13px;font-weight:600;padding:8px
 .linha-conf{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .coment{padding:10px 12px;border-radius:8px;background:var(--nevoa);font-size:14px;margin-bottom:8px}
 .coment p{margin-top:4px;white-space:pre-wrap;word-break:break-word}
+.mencao{font-weight:600;color:var(--verde);background:#E4F1EA;border-radius:4px;padding:0 3px}
+.mencao-base{position:relative;flex-wrap:wrap}
+.mencao-lista{position:absolute;left:0;right:0;bottom:100%;margin:0 0 4px;padding:4px;list-style:none;background:#fff;border:1px solid var(--linha);border-radius:8px;box-shadow:0 6px 18px rgba(15,61,46,.14);z-index:5;max-height:220px;overflow:auto}
+.mencao-lista li{padding:9px 10px;border-radius:6px;font-size:14px;cursor:pointer}
+.mencao-lista li[aria-selected=true],.mencao-lista li:hover{background:var(--nevoa)}
+.anexos{list-style:none;margin:0 0 8px;padding:0}
+.anexos li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 12px;border-radius:8px;background:var(--nevoa);font-size:14px;margin-bottom:6px}
+.anexos li .apoio{flex:1 1 auto}
+button.link{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--verde);text-decoration:underline;cursor:pointer;text-align:left;word-break:break-word}
+#t-arquivo{flex:1 1 200px;min-width:0;font-size:14px}
 .grade-d{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
 .cartao-d{background:var(--branco);border:1px solid var(--linha);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:6px;min-height:150px}
 .cartao-d.baixo{min-height:110px}
@@ -187,6 +197,9 @@ tr.grupo td,tr.grupo th{font-weight:600;background:var(--nevoa)}
 tr.total td{font-weight:700;border-top:2px solid var(--verde)}
 .pilha{display:flex;flex-direction:column;gap:20px}
 .fin-acoes{display:flex;flex-wrap:wrap;gap:6px}
+.opcao{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:15px}
+.opcao input{width:18px;height:18px;margin:0}
+.lista-simples{margin:8px 0;padding-left:18px;font-size:14px;line-height:1.7}
 .fin-faixa{display:flex;flex-direction:column;gap:6px}
 .fin-faixa-topo{display:flex;justify-content:space-between;gap:12px;font-size:14px}
 .fin-faixa-barra{height:8px;border-radius:4px;background:var(--nevoa);overflow:hidden}
@@ -1074,6 +1087,7 @@ function desenhaWorkflow(){
 
 function wfSelos(t){
   return (t.nao_lida?'<span class="selo novo">Nova</span>':'')+
+    (t.mencionado?'<span class="selo novo">@ Marcaram você</span>':'')+
     (t.prioridade==='urgente'&&wfAberta(t)?'<span class="selo urgente">Urgente</span>':'')+
     (t.confidencial?'<span class="selo">Confidencial</span>':'')+
     (ehEquipe()?'<span class="selo claro">'+esc(t.organizacao||'Celeiro')+'</span>':'');
@@ -1097,7 +1111,7 @@ function desenhaWfResultado(){
           return '<article class="cartao-t" draggable="true" data-tarefa="'+esc(t.id)+'">'+
             '<button type="button" class="titulo-t" data-abrir="'+esc(t.id)+'"><span class="codigo">'+esc(t.codigo)+'</span> '+esc(t.titulo)+'</button>'+
             '<div class="chips">'+wfSelos(t)+'</div>'+
-            '<p class="meta">'+esc(wfResponsaveis(t)||'Sem responsável')+'</p><p class="meta">'+wfPrazoHtml(t)+(t.comentarios?' · '+t.comentarios+(t.comentarios===1?' comentário':' comentários'):'')+'</p>'+
+            '<p class="meta">'+esc(wfResponsaveis(t)||'Sem responsável')+'</p><p class="meta">'+wfPrazoHtml(t)+(t.comentarios?' · '+t.comentarios+(t.comentarios===1?' comentário':' comentários'):'')+(Number(t.anexos)?' · '+t.anexos+(Number(t.anexos)===1?' anexo':' anexos'):'')+'</p>'+
             '<div class="mover">'+(i>0?'<button type="button" class="botao claro pequeno" data-mover="'+esc(t.id)+'" data-para="'+WF_STATUS[i-1][0]+'" aria-label="Mover '+esc(t.codigo)+' para '+esc(WF_STATUS[i-1][1])+'">← '+esc(WF_STATUS[i-1][1])+'</button>':'')+
               (i<WF_STATUS.length-1?'<button type="button" class="botao claro pequeno" data-mover="'+esc(t.id)+'" data-para="'+WF_STATUS[i+1][0]+'" aria-label="Mover '+esc(t.codigo)+' para '+esc(WF_STATUS[i+1][1])+'">'+esc(WF_STATUS[i+1][1])+' →</button>':'')+'</div>'+
           '</article>';
@@ -1191,11 +1205,18 @@ async function abrirTarefa(t,ctx){
     (novo?(ctx.origem?'<p class="apoio" style="font-size:13px">Criada a partir da tela: '+esc(ctx.origem)+'</p>':''):
       '<p class="apoio" style="font-size:13px">Criada por '+esc(t.criado_por_nome||'—')+' em '+esc(dataHora(t.criado_em).data)+(t.origem_rotulo?', a partir da tela '+esc(t.origem_rotulo):'')+'.</p>'+
       '<div class="campo"><span class="rotulo">Comentários</span><div id="t-coments"><p class="apoio">Carregando…</p></div>'+
-      '<div class="junto"><label class="oculto-visual" for="t-coment">Novo comentário</label><input id="t-coment" type="text" maxlength="2000" placeholder="Escreva um comentário"><button type="button" class="botao claro pequeno" id="t-comentar">Comentar</button></div></div>')+
+      '<div class="junto mencao-base"><label class="oculto-visual" for="t-coment">Novo comentário</label><input id="t-coment" type="text" maxlength="2000" placeholder="Escreva um comentário. Use @ para marcar alguém" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="t-sug" aria-autocomplete="list"><button type="button" class="botao claro pequeno" id="t-comentar">Comentar</button>'+
+        '<ul class="mencao-lista oculto" id="t-sug" role="listbox" aria-label="Pessoas para marcar"></ul></div></div>'+
+      '<div class="campo"><span class="rotulo">Anexos</span><div id="t-anexos"><p class="apoio">Carregando…</p></div>'+
+        '<div class="junto"><label class="oculto-visual" for="t-arquivo">Escolher arquivos</label><input id="t-arquivo" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.odt,.ods"><button type="button" class="botao claro pequeno" id="t-anexar">Anexar</button></div>'+
+        '<p class="meta">PDF, imagem, Word, Excel, PowerPoint, CSV ou TXT, até 10 MB cada. Quem vê a tarefa vê os anexos.</p></div>')+
+      (novo?'<div class="campo"><label for="t-arquivo">Anexos (opcional)</label><input id="t-arquivo" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.odt,.ods">'+
+        '<p class="meta">PDF, imagem, Word, Excel, PowerPoint, CSV ou TXT, até 10 MB cada. Os arquivos são enviados ao criar a tarefa.</p></div>':'')+
     '</div>'+
     '<div class="dlg-rodape"><button class="botao" type="submit">'+(novo?'Criar tarefa':'Salvar')+'</button>'+
       (!novo&&t.pode_excluir?'<button type="button" class="botao claro" id="t-excluir">Excluir</button>':'')+'</div></form>';
 
+  var marcaveis=[],anexosTarefa=[];
   var f=$('#f-tarefa',d),inPrazo=$('#t-prazo',d),selResp=$('#t-resp',d),boxEnv=$('#t-env',d),selOrg=$('#t-org',d);
   function fechar(){try{d.close();}catch(err){}d.remove();}
   $('#t-fechar',d).onclick=fechar;
@@ -1221,6 +1242,7 @@ async function abrirTarefa(t,ctx){
     var r=await sb.rpc('workflow_pessoas',{p_org:orgSel});
     var pessoas=r.error?[]:(r.data||[]);
     if(r.error)aviso(msgErro(r.error),true);
+    marcaveis=pessoas.slice();
     var atuais=novo?[]:t.participantes;
     atuais.forEach(function(p){if(!pessoas.some(function(x){return x.user_id===p.user_id;}))pessoas.push({user_id:p.user_id,nome:p.nome});});
     var respAtual=novo?a.user_id:((atuais.filter(function(p){return p.papel==='responsavel';})[0]||{}).user_id||'');
@@ -1234,30 +1256,116 @@ async function abrirTarefa(t,ctx){
   if(selOrg&&novo){selOrg.onchange=montaPessoas;}
   await montaPessoas();
 
+  function comMencoes(c){
+    var h=esc(c.texto);
+    (c.mencoes||[]).slice().sort(function(x,y){return y.nome.length-x.nome.length;}).forEach(function(m){h=h.split(esc('@'+m.nome)).join('<span class="mencao">@'+esc(m.nome)+'</span>');});
+    return h;
+  }
+  function tamanhoTxt(b){b=Number(b);return b>=1048576?(b/1048576).toFixed(1).replace('.',',')+' MB':Math.max(1,Math.round(b/1024))+' KB';}
   async function carregaComentarios(){
-    var r=await sb.rpc('workflow_detalhe',{p_id:t.id}),alvo=$('#t-coments',d);
+    var r=await sb.rpc('workflow_detalhe',{p_id:t.id}),alvo=$('#t-coments',d),alvoA=$('#t-anexos',d);
     if(!alvo)return;
-    if(r.error){alvo.innerHTML='<p class="erro">'+esc(msgErro(r.error))+'</p>';return;}
-    var cs=(r.data&&r.data.comentarios)||[];
-    alvo.innerHTML=cs.length?cs.map(function(c){var dh=dataHora(c.criado_em);return '<div class="coment"><strong>'+esc(c.nome)+'</strong> <span class="apoio">'+esc(dh.data)+' '+esc(dh.hora.slice(0,5))+'</span><p>'+esc(c.texto)+'</p></div>';}).join(''):'<p class="apoio">Nenhum comentário ainda.</p>';
+    if(r.error){alvo.innerHTML='<p class="erro">'+esc(msgErro(r.error))+'</p>';alvoA.innerHTML='';return;}
+    var cs=(r.data&&r.data.comentarios)||[],as=(r.data&&r.data.anexos)||[];
+    anexosTarefa=as;
+    alvo.innerHTML=cs.length?cs.map(function(c){var dh=dataHora(c.criado_em);return '<div class="coment"><strong>'+esc(c.nome)+'</strong> <span class="apoio">'+esc(dh.data)+' '+esc(dh.hora.slice(0,5))+'</span><p>'+comMencoes(c)+'</p></div>';}).join(''):'<p class="apoio">Nenhum comentário ainda.</p>';
+    alvoA.innerHTML=as.length?'<ul class="anexos">'+as.map(function(x){var dh=dataHora(x.criado_em);
+      return '<li><button type="button" class="link" data-baixar-anexo="'+esc(x.id)+'">'+esc(x.nome)+'</button><span class="apoio">'+esc(tamanhoTxt(x.tamanho))+' · '+esc(x.por)+' · '+esc(dh.data)+'</span>'+
+        (x.pode_excluir?'<button type="button" class="botao sutil pequeno" data-excluir-anexo="'+esc(x.id)+'">Excluir</button>':'')+'</li>';}).join('')+'</ul>':'<p class="apoio">Nenhum anexo ainda.</p>';
+    function achar(id){return as.filter(function(x){return x.id===id;})[0];}
+    $$('[data-baixar-anexo]',alvoA).forEach(function(b){b.onclick=async function(){
+      var x=achar(b.getAttribute('data-baixar-anexo'));
+      var u=await sb.storage.from('workflow-anexos').createSignedUrl(x.caminho,60,{download:x.nome});
+      if(u.error||!u.data||!u.data.signedUrl){aviso('Não foi possível abrir o arquivo: '+((u.error&&u.error.message)||'tente de novo'),true);return;}
+      evento('Baixou o anexo '+x.nome+' da tarefa '+t.codigo,'Workflow');
+      var l=document.createElement('a');l.href=u.data.signedUrl;l.download=x.nome;l.rel='noopener';document.body.appendChild(l);l.click();l.remove();
+    };});
+    $$('[data-excluir-anexo]',alvoA).forEach(function(b){b.onclick=async function(){
+      if(b.getAttribute('data-certeza')!=='1'){b.setAttribute('data-certeza','1');b.textContent='Confirmar exclusão';return;}
+      var x=achar(b.getAttribute('data-excluir-anexo'));ocupar(b,true);
+      var rm=await sb.storage.from('workflow-anexos').remove([x.caminho]);
+      if(rm.error){ocupar(b,false);aviso('Não foi possível apagar o arquivo: '+rm.error.message,true);return;}
+      var r2=await sb.rpc('workflow_anexo_excluir',{p_id:x.id});
+      if(r2.error){ocupar(b,false);aviso(msgErro(r2.error),true);return;}
+      t.anexos=Math.max(0,(Number(t.anexos)||0)-1);aviso('Anexo excluído.');carregaComentarios();
+    };});
+  }
+  async function anexar(arq,tarefaId){
+    if(arq.size>10485760)return arq.name+': passa de 10 MB';
+    if(!arq.size)return arq.name+': arquivo vazio';
+    var r=await sb.rpc('workflow_anexo_registrar',{p_tarefa:tarefaId,p_nome:arq.name,p_tipo:arq.type||'',p_tamanho:arq.size});
+    if(r.error)return arq.name+': '+msgErro(r.error);
+    var up=await sb.storage.from('workflow-anexos').upload(r.data.caminho,arq,{contentType:arq.type||'application/octet-stream',upsert:false});
+    if(up.error){await sb.rpc('workflow_anexo_excluir',{p_id:r.data.id});return arq.name+': '+(up.error.message||'falha no envio');}
+    var c=await sb.rpc('workflow_anexo_confirmar',{p_id:r.data.id});
+    if(c.error){await sb.storage.from('workflow-anexos').remove([r.data.caminho]);await sb.rpc('workflow_anexo_excluir',{p_id:r.data.id});return arq.name+': '+msgErro(c.error);}
+    return '';
+  }
+  function sugere(){
+    var c=$('#t-coment',d),lista=$('#t-sug',d),antes=c.value.slice(0,c.selectionStart),m=/(^|\s)@([^@]{0,40})$/.exec(antes);
+    var achados=m?marcaveis.filter(function(p){return p.user_id!==a.user_id&&p.nome.toLowerCase().indexOf(m[2].toLowerCase())===0;}).slice(0,6):[];
+    if(!achados.length){lista.classList.add('oculto');lista.innerHTML='';c.setAttribute('aria-expanded','false');return;}
+    lista.innerHTML=achados.map(function(p,i){return '<li role="option" id="t-sug-'+i+'" data-marcar="'+esc(p.user_id)+'" aria-selected="'+(i===0?'true':'false')+'">'+esc(p.nome)+'</li>';}).join('');
+    lista.classList.remove('oculto');c.setAttribute('aria-expanded','true');
+    $$('[data-marcar]',lista).forEach(function(li){li.onmousedown=function(ev){ev.preventDefault();marca(li.getAttribute('data-marcar'),m[2].length);};});
+  }
+  function marca(id,tam){
+    var c=$('#t-coment',d),p=marcaveis.filter(function(x){return x.user_id===id;})[0],fim=c.selectionStart,ini=fim-tam;
+    c.value=c.value.slice(0,ini)+p.nome+' '+c.value.slice(fim);
+    var pos=ini+p.nome.length+1;c.focus();c.setSelectionRange(pos,pos);sugere();
   }
   if(!novo){
     carregaComentarios();
     evento('Abriu a tarefa '+t.codigo,'Workflow');
     if(t.nao_lida){sb.rpc('workflow_marcar_lida',{p_id:t.id}).then(function(){t.nao_lida=false;});}
+    var inC=$('#t-coment',d);
+    inC.oninput=sugere;inC.onclick=sugere;inC.onblur=function(){setTimeout(function(){var l=$('#t-sug',d);if(l){l.classList.add('oculto');inC.setAttribute('aria-expanded','false');}},150);};
+    inC.onkeydown=function(ev){
+      var lista=$('#t-sug',d),itens=$$('[data-marcar]',lista);
+      if(lista.classList.contains('oculto')||!itens.length){if(ev.key==='Enter'){ev.preventDefault();$('#t-comentar',d).click();}return;}
+      var i=itens.findIndex(function(x){return x.getAttribute('aria-selected')==='true';});
+      if(ev.key==='ArrowDown'||ev.key==='ArrowUp'){ev.preventDefault();var j=(i+(ev.key==='ArrowDown'?1:itens.length-1))%itens.length;itens.forEach(function(x,k){x.setAttribute('aria-selected',k===j?'true':'false');});inC.setAttribute('aria-activedescendant',itens[j].id);}
+      else if(ev.key==='Enter'||ev.key==='Tab'){ev.preventDefault();var m=/(^|\s)@([^@]{0,40})$/.exec(inC.value.slice(0,inC.selectionStart));marca(itens[Math.max(0,i)].getAttribute('data-marcar'),m?m[2].length:0);}
+      else if(ev.key==='Escape'){ev.stopPropagation();lista.classList.add('oculto');inC.setAttribute('aria-expanded','false');}
+    };
     $('#t-comentar',d).onclick=async function(){
       var c=$('#t-coment',d),txt=c.value.trim();
       if(!txt)return;
+      var marcados=marcaveis.filter(function(p){return txt.indexOf('@'+p.nome)>=0;}).map(function(p){return p.user_id;});
       ocupar(this,true);
-      var r=await sb.rpc('workflow_comentar',{p_id:t.id,p_texto:txt});
+      var r=await sb.rpc('workflow_comentar',{p_id:t.id,p_texto:txt,p_mencoes:marcados});
       ocupar(this,false);
       if(r.error){aviso(msgErro(r.error),true);return;}
       c.value='';t.comentarios=(t.comentarios||0)+1;carregaComentarios();
+      if(marcados.length){
+        var av=await sb.functions.invoke('avisar-mencao',{body:{comentario_id:r.data}}),ad=av.data||{},n1=marcados.length===1;
+        if(av.error){aviso('Comentário publicado, mas o e-mail de aviso não saiu: '+(await erroFuncao(av.error)),true);}
+        else if(ad.situacao==='enviado'){aviso(n1?'Comentário publicado. A pessoa marcada foi avisada por e-mail.':'Comentário publicado. As pessoas marcadas foram avisadas por e-mail.');}
+        else if(ad.situacao==='ninguem'){aviso('Comentário publicado. '+(n1?'A pessoa marcada passa a acompanhar a tarefa.':'As pessoas marcadas passam a acompanhar a tarefa.'));}
+        else if(ad.situacao==='nao_configurado'){aviso('Comentário publicado. O aviso por e-mail ainda não está configurado no servidor.',true);}
+        else{aviso('Comentário publicado, mas '+ad.falhas+(ad.falhas===1?' e-mail de aviso não saiu.':' e-mails de aviso não saíram.'),true);}
+        marcados.forEach(function(id){
+          var cb=boxEnv.querySelector('input[value="'+id+'"]'),pes=marcaveis.filter(function(x){return x.user_id===id;})[0];
+          if(!t.participantes.some(function(x){return x.user_id===id;})){t.participantes.push({user_id:id,nome:pes.nome,papel:'envolvido'});if(cb)cb.checked=true;}
+        });}
+    };
+    $('#t-anexar',d).onclick=async function(){
+      var inp=$('#t-arquivo',d),arqs=Array.prototype.slice.call(inp.files||[]);
+      if(!arqs.length){aviso('Escolha um ou mais arquivos.',true);inp.focus();return;}
+      ocupar(this,true);
+      var erros=[],ok=0;
+      for(var i=0;i<arqs.length;i++){var e1=await anexar(arqs[i],t.id);if(e1){erros.push(e1);}else{ok++;}}
+      ocupar(this,false);inp.value='';
+      t.anexos=(Number(t.anexos)||0)+ok;
+      if(erros.length){aviso((ok?ok+(ok===1?' arquivo anexado. ':' arquivos anexados. '):'')+'Não enviado: '+erros.join('; '),true);}
+      else{aviso(ok===1?'Arquivo anexado.':ok+' arquivos anexados.');}
+      carregaComentarios();
     };
     if($('#t-excluir',d)){
       $('#t-excluir',d).onclick=async function(){
         if(this.getAttribute('data-certeza')!=='1'){this.setAttribute('data-certeza','1');this.textContent='Confirmar exclusão';return;}
         ocupar(this,true);
+        if(anexosTarefa.length){await sb.storage.from('workflow-anexos').remove(anexosTarefa.map(function(x){return x.caminho;}));}
         var r=await sb.rpc('workflow_excluir',{p_id:t.id});
         if(r.error){ocupar(this,false);aviso(msgErro(r.error),true);return;}
         fechar();aviso(t.codigo+' excluída.');recarregaTelaDeTarefas();
@@ -1280,8 +1388,11 @@ async function abrirTarefa(t,ctx){
       p_confidencial:$('#t-conf',d).getAttribute('aria-checked')==='true',
       p_responsaveis:resp,p_envolvidos:env,p_origem_rotulo:novo?(ctx.origem||''):(t.origem_rotulo||'')});
     if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    var arqs=novo?Array.prototype.slice.call(($('#t-arquivo',d)||{}).files||[]):[],errosA=[];
+    for(var i=0;i<arqs.length;i++){var eA=await anexar(arqs[i],r.data);if(eA)errosA.push(eA);}
     fechar();
-    aviso(novo?'Tarefa criada.':'Tarefa salva.');
+    if(errosA.length){aviso('Tarefa criada, mas '+(errosA.length===1?'um anexo não foi enviado: ':'alguns anexos não foram enviados: ')+errosA.join('; ')+'. Abra a tarefa para anexar de novo.',true);}
+    else{aviso(novo?(arqs.length?'Tarefa criada com '+arqs.length+(arqs.length===1?' anexo.':' anexos.'):'Tarefa criada.'):'Tarefa salva.');}
     recarregaTelaDeTarefas();
   };
   if(typeof d.showModal==='function'){d.showModal();}else{d.setAttribute('open','');}
@@ -1458,7 +1569,7 @@ async function telaMcp(){
 
 /* ---------- Financeiro ---------- */
 var FIN={aba:'dashboard',org:'',ini:'',fim:'',plano:[],planoDe:null,orgs:null,pessoas:null,pessoasDe:null,campo:'vencimento',status:'todos'};
-var FIN_ABAS=[['dashboard','Dashboard'],['receber','Contas a receber'],['pagar','Contas a pagar'],['projetado','Fluxo projetado'],['realizado','Fluxo realizado'],['dre','DRE'],['balanco','Balanço'],['balancete','Balancete'],['plano','Plano de contas']];
+var FIN_ABAS=[['dashboard','Dashboard'],['receber','Contas a receber'],['pagar','Contas a pagar'],['projetado','Fluxo projetado'],['realizado','Fluxo realizado'],['dre','DRE'],['balanco','Balanço'],['balancete','Balancete'],['cobrancas','Cobranças e notas'],['plano','Plano de contas']];
 var FIN_TIPOS=[['ativo','Ativo'],['passivo','Passivo'],['patrimonio','Patrimônio líquido'],['receita','Receita'],['custo','Custo'],['despesa','Despesa']];
 var FIN_FORMAS=[['','Não informada'],['pix','Pix'],['boleto','Boleto'],['transferencia','Transferência'],['cartao','Cartão'],['dinheiro','Dinheiro'],['outro','Outro']];
 function moeda(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
@@ -1575,7 +1686,7 @@ async function finDesenha(){
   $('#fin-filtro button[type=submit]').classList.toggle('oculto',semPeriodo);
   $('#fin-fim-r').textContent=soData?'Posição em':'Até';
   c.innerHTML='<p class="apoio">Carregando…</p>';
-  var fn={dashboard:finDashboard,receber:finTitulos,pagar:finTitulos,projetado:finProjetado,realizado:finRealizado,dre:finDre,balanco:finBalanco,balancete:finBalancete,plano:finPlano}[FIN.aba];
+  var fn={dashboard:finDashboard,receber:finTitulos,pagar:finTitulos,projetado:finProjetado,realizado:finRealizado,dre:finDre,balanco:finBalanco,balancete:finBalancete,cobrancas:finCobrancas,plano:finPlano}[FIN.aba];
   try{await fn(c,FIN.aba);}catch(e){c.innerHTML='<p class="erro" role="alert">'+esc(msgErro(e))+'</p>';}
 }
 async function finRpc(fn,args){var r=await sb.rpc(fn,args);if(r.error)throw r.error;return r.data;}
@@ -1629,11 +1740,11 @@ async function finTitulos(c,tipo){
         var ac='';
         if(t.fatura_id)ac+='<button class="botao claro pequeno" type="button" data-ver-fatura="'+esc(t.fatura_id)+'">Ver fatura</button>';
         if(t.status==='aberto'){
-          ac='<button class="botao pequeno" type="button" data-baixar="'+esc(t.id)+'">'+(rec?'Receber':'Pagar')+'</button>'+ac;
-          if(!t.fatura_id)ac+='<button class="botao claro pequeno" type="button" data-editar-titulo="'+esc(t.id)+'">Editar</button><button class="botao sutil pequeno" type="button" data-cancelar-titulo="'+esc(t.id)+'">Cancelar</button>';
+          ac='<button class="botao pequeno" type="button" data-baixar="'+esc(t.id)+'">'+(rec?'Receber':'Pagar')+'</button>'+(rec?'<button class="botao claro pequeno" type="button" data-cobrar="'+esc(t.id)+'">Cobrar</button>':'')+ac;
+          if(!t.fatura_id&&!t.origem)ac+='<button class="botao claro pequeno" type="button" data-editar-titulo="'+esc(t.id)+'">Editar</button><button class="botao sutil pequeno" type="button" data-cancelar-titulo="'+esc(t.id)+'">Cancelar</button>';
         }else if(t.status==='pago'){ac+='<button class="botao sutil pequeno" type="button" data-estornar="'+esc(t.id)+'">Estornar</button>';}
-        return '<tr><td>'+esc(t.descricao)+'<span class="sub">'+esc(t.codigo+(t.pessoa_nome?' · '+t.pessoa_nome:'')+(t.fatura?' · '+t.fatura:''))+'</span></td><td>'+esc(t.conta||'')+'</td>'+
-          '<td>'+esc(dataBr(t.vencimento))+'<span class="sub">competência '+esc(dataBr(t.emissao))+'</span></td><td class="num">'+esc(moeda(t.valor))+'</td><td>'+finSituacao(t)+(t.status==='pago'&&t.conta_caixa?'<span class="sub">'+esc(t.conta_caixa)+'</span>':'')+'</td><td><div class="fin-acoes">'+ac+'</div></td></tr>';
+        return '<tr><td>'+esc(t.descricao)+'<span class="sub">'+esc(t.codigo+(t.pessoa_nome?' · '+t.pessoa_nome:'')+(t.fatura?' · '+t.fatura:'')+(t.origem==='investimentos'?' · veio de Investimentos':''))+'</span></td><td>'+esc(t.conta||'')+'</td>'+
+          '<td>'+esc(dataBr(t.vencimento))+'<span class="sub">competência '+esc(dataBr(t.emissao))+'</span></td><td class="num">'+esc(moeda(t.valor))+'</td><td>'+finSituacao(t)+(t.status==='pago'&&t.conta_caixa?'<span class="sub">'+esc(t.conta_caixa)+'</span>':'')+(t.cobrancas||[]).map(function(k){return '<span class="sub">'+(k.meio==='pix'?'Pix':'Boleto')+': '+esc((FIN_COB_ST[k.status]||k.status).toLowerCase())+'</span>';}).join('')+'</td><td><div class="fin-acoes">'+ac+'</div></td></tr>';
       }).join('')||'<tr><td colspan="6" class="vazio">Nenhum título neste período.</td></tr>')+'</tbody></table></div>';
   $('#fin-campo').value=FIN.campo;$('#fin-status').value=FIN.status;
   $('#fin-campo').onchange=function(){FIN.campo=this.value;finDesenha();};
@@ -1642,6 +1753,7 @@ async function finTitulos(c,tipo){
   if(rec){$('#fin-fatura').onclick=finDlgFatura;}
   var achar=function(id){return lista.filter(function(t){return t.id===id;})[0];};
   $$('[data-baixar]',c).forEach(function(b){b.onclick=function(){finDlgBaixa(achar(b.getAttribute('data-baixar')));};});
+  $$('[data-cobrar]',c).forEach(function(b){b.onclick=function(){finDlgCobranca(achar(b.getAttribute('data-cobrar')));};});
   $$('[data-editar-titulo]',c).forEach(function(b){b.onclick=function(){finDlgTitulo(tipo,achar(b.getAttribute('data-editar-titulo')));};});
   $$('[data-ver-fatura]',c).forEach(function(b){b.onclick=function(){finVerFatura(b.getAttribute('data-ver-fatura'));};});
   function confirma(b,rotulo,fn,arg,ok){
@@ -1694,6 +1806,118 @@ async function finDlgTitulo(tipo,t){
   };
   $('#ft-desc',d).focus();
 }
+/* ---------- Financeiro: cobranças (boleto e Pix) e notas fiscais ---------- */
+var FIN_COB_ST={aguardando:'Aguardando a API',emitida:'Emitida',paga:'Paga',cancelada:'Cancelada',falhou:'Falhou'};
+function finCobSelo(st){return '<span class="'+(st==='emitida'||st==='paga'?'situacao':st==='falhou'?'selo urgente':st==='cancelada'?'situacao off':'selo claro')+'">'+esc(FIN_COB_ST[st]||st)+'</span>';}
+async function finIntegra(corpo){
+  var r=await sb.functions.invoke('financeiro-integracao',{body:corpo});
+  if(r.error)return {erro:await erroFuncao(r.error)};
+  return r.data||{};
+}
+function finIntegraTexto(x,oque){
+  if(x.erro)return {t:oque+' registrada, mas não enviada: '+x.erro,ruim:true};
+  if(x.situacao==='emitida')return {t:oque+' emitida.'};
+  if(x.situacao==='falhou')return {t:'O provedor recusou: '+(x.mensagem||'sem detalhe')+'. O pedido ficou guardado; corrija e tente de novo.',ruim:true};
+  return {t:oque+' registrada. Ela será emitida quando a API for definida; até lá fica aguardando em Cobranças e notas.'};
+}
+function finDlgCobranca(t){
+  var vivas={};(t.cobrancas||[]).forEach(function(c){if(c.status==='aguardando'||c.status==='emitida')vivas[c.meio]=c;});
+  var d=finDlg('Cobrar '+t.codigo,
+    '<p class="apoio">'+esc(t.descricao)+(t.pessoa_nome?' · '+esc(t.pessoa_nome):'')+'<br><strong>'+esc(moeda(t.valor))+'</strong> · vencimento '+esc(dataBr(t.vencimento))+'</p>'+
+    '<fieldset class="campo" style="border:0;padding:0;margin:0"><legend class="rotulo" style="padding:0;margin-bottom:6px;font-size:14px;font-weight:500">Como cobrar</legend>'+
+      '<label class="opcao"><input type="radio" name="fc-meio" value="boleto"'+(vivas.boleto?' disabled':' checked')+'> Boleto'+(vivas.boleto?' (já pedido)':'')+'</label>'+
+      '<label class="opcao"><input type="radio" name="fc-meio" value="pix"'+(vivas.pix?' disabled':vivas.boleto?' checked':'')+'> Pix'+(vivas.pix?' (já pedido)':'')+'</label></fieldset>'+
+    '<p class="meta">Quando o pagamento for confirmado pelo banco, o título é baixado sozinho.</p>',
+    vivas.boleto&&vivas.pix?'':'<button class="botao" type="submit">Gerar cobrança</button>');
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var m=$('input[name=fc-meio]:checked',d),b=$('button[type=submit]',d);
+    if(!m){aviso('Escolha boleto ou Pix.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('fin_cobranca_solicitar',{p_titulo:t.id,p_meio:m.value});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    var x=finIntegraTexto(await finIntegra({acao:'emitir',tipo:'cobranca',id:r.data.id}),'Cobrança');
+    d.fechar();aviso(x.t,x.ruim);finDesenha();
+  };
+}
+async function finDlgNota(f,aoFim){
+  var e;
+  try{e=await finRpc('fin_emitente_ver',{p_org:finOrg()});}catch(err){aviso(msgErro(err),true);return;}
+  var d=finDlg('Nota fiscal da '+f.codigo,
+    '<p class="apoio">'+esc(f.cliente_nome)+' · <strong>'+esc(moeda(f.total))+'</strong></p>'+
+    '<div class="campo"><label for="fn-desc">Descrição do serviço</label><textarea id="fn-desc" rows="3" maxlength="500" required>'+esc(e.descricao_servico||(f.itens||[]).map(function(i){return i.descricao;}).join('; '))+'</textarea></div>'+
+    '<div class="grade"><div class="campo"><label for="fn-cod">Código do serviço</label><input id="fn-cod" type="text" maxlength="20" value="'+esc(e.codigo_servico||'')+'" required></div>'+
+      '<div class="campo"><label for="fn-aliq">Alíquota de ISS (%)</label><input id="fn-aliq" type="text" inputmode="decimal" value="'+esc(e.aliquota_iss==null?'':String(e.aliquota_iss).replace('.',','))+'" required></div></div>'+
+    '<p class="meta">Os dados do emitente vêm de Cobranças e notas.</p>',
+    '<button class="botao" type="submit">Pedir nota fiscal</button>');
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d);ocupar(b,true);
+    var r=await sb.rpc('fin_nota_solicitar',{p_fatura:f.id,p_dados:{descricao_servico:$('#fn-desc',d).value,codigo_servico:$('#fn-cod',d).value,aliquota_iss:$('#fn-aliq',d).value}});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    var x=finIntegraTexto(await finIntegra({acao:'emitir',tipo:'nota',id:r.data.id}),'Nota fiscal');
+    d.fechar();aviso(x.t,x.ruim);if(aoFim)aoFim();
+  };
+}
+async function finCobrancas(c){
+  var rs=await Promise.all([finRpc('fin_cobrancas_notas',finPeriodo()),finIntegra({acao:'situacao'})]);
+  var x=rs[0],sit=rs[1],e=x.emitente||{};
+  function api(rotulo,s){return '<li><strong>'+rotulo+':</strong> '+(sit.erro?'não foi possível consultar ('+esc(sit.erro)+')':s&&s.pronto?'ligada ('+esc(s.provedor)+')':'ainda não definida')+'</li>';}
+  function copia(valor,rotulo){return valor?'<button class="botao claro pequeno" type="button" data-copiar="'+esc(valor)+'">Copiar '+rotulo+'</button>':'';}
+  function abrir(url,rotulo){return /^https:\/\//.test(url||'')?'<a class="botao claro pequeno" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+rotulo+'</a>':'';}
+  function acoes(tipo,r){
+    var a='';
+    if(r.status==='aguardando'||r.status==='falhou')a+='<button class="botao pequeno" type="button" data-reenviar="'+tipo+':'+esc(r.id)+'">Enviar agora</button><button class="botao sutil pequeno" type="button" data-cancelar-ped="'+tipo+':'+esc(r.id)+'">Cancelar</button>';
+    if(r.status==='emitida')a+='<button class="botao sutil pequeno" type="button" data-cancelar-emi="'+tipo+':'+esc(r.id)+'">Cancelar</button>';
+    return a;
+  }
+  c.innerHTML='<div class="cabeca"><div><h2>Cobranças e notas fiscais</h2><p class="apoio">Boletos e Pix nascem em Contas a receber, no botão Cobrar. Notas fiscais nascem na fatura. Aqui fica o andamento de tudo o que foi pedido de '+esc(finPeriodoTexto())+'.</p></div></div>'+
+    '<div class="painel" id="fin-api"><h2>Conexão com banco e prefeitura</h2><ul class="lista-simples">'+api('Boleto e Pix',sit.cobranca)+api('Nota fiscal de serviço',sit.nota)+'</ul>'+
+      ((sit.cobranca&&sit.cobranca.pronto)&&(sit.nota&&sit.nota.pronto)?'':'<p class="apoio">Enquanto a API não é definida, os pedidos ficam guardados como “Aguardando a API” e nada é enviado ao cliente.</p>')+'</div>'+
+    '<h2 class="titulo-s">Cobranças</h2><div class="rolagem"><table id="fin-cobrancas"><thead><tr><th scope="col">Pedido em</th><th scope="col">Título</th><th scope="col">Meio</th><th scope="col">Vencimento</th><th scope="col" class="num">Valor</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead><tbody>'+
+      ((x.cobrancas||[]).map(function(r){var t=r.titulo||{};
+        return '<tr><td>'+esc(dataBr(String(r.criado_em).slice(0,10)))+'</td><td>'+esc(t.descricao||'')+'<span class="sub">'+esc((t.codigo||'')+(t.pessoa_nome?' · '+t.pessoa_nome:''))+'</span></td><td>'+(r.meio==='pix'?'Pix':'Boleto')+'</td><td>'+esc(dataBr(r.vencimento))+'</td><td class="num">'+esc(moeda(r.valor))+'</td>'+
+          '<td>'+finCobSelo(r.status)+(r.mensagem?'<span class="sub">'+esc(r.mensagem)+'</span>':'')+'</td><td><div class="fin-acoes">'+copia(r.linha_digitavel,'linha digitável')+copia(r.pix_copia_cola,'Pix copia e cola')+abrir(r.url,'Abrir')+acoes('cobranca',r)+'</div></td></tr>';
+      }).join('')||'<tr><td colspan="7" class="vazio">Nenhuma cobrança pedida neste período.</td></tr>')+'</tbody></table></div>'+
+    '<h2 class="titulo-s">Notas fiscais</h2><div class="rolagem"><table id="fin-notas"><thead><tr><th scope="col">Pedido em</th><th scope="col">Fatura</th><th scope="col">Serviço</th><th scope="col" class="num">Valor</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead><tbody>'+
+      ((x.notas||[]).map(function(r){var f=r.fatura||{};
+        return '<tr><td>'+esc(dataBr(String(r.criado_em).slice(0,10)))+'</td><td>'+esc(f.codigo||'')+'<span class="sub">'+esc(f.cliente_nome||'')+'</span></td><td>'+esc(r.descricao_servico)+'<span class="sub">código '+esc(r.codigo_servico)+' · ISS '+esc(String(r.aliquota_iss).replace('.',','))+'%</span></td><td class="num">'+esc(moeda(r.valor))+'</td>'+
+          '<td>'+finCobSelo(r.status)+(r.numero?'<span class="sub">nº '+esc(r.numero)+'</span>':'')+(r.mensagem?'<span class="sub">'+esc(r.mensagem)+'</span>':'')+'</td><td><div class="fin-acoes">'+abrir(r.url_pdf,'PDF')+abrir(r.url_xml,'XML')+acoes('nota',r)+'</div></td></tr>';
+      }).join('')||'<tr><td colspan="6" class="vazio">Nenhuma nota fiscal pedida neste período.</td></tr>')+'</tbody></table></div>'+
+    '<form class="painel" id="f-emitente" novalidate><h2>Dados fiscais do emitente</h2><p class="apoio">Usados nos boletos e nas notas fiscais. CNPJ e inscrição municipal são obrigatórios para pedir nota.</p>'+
+      '<div class="grade"><div class="campo"><label for="fe-razao">Razão social</label><input id="fe-razao" type="text" maxlength="200" value="'+esc(e.razao_social||'')+'"></div>'+
+        '<div class="campo"><label for="fe-cnpj">CNPJ</label><input id="fe-cnpj" type="text" inputmode="numeric" maxlength="18" value="'+esc(e.cnpj?formataCnpj(e.cnpj):'')+'"></div>'+
+        '<div class="campo"><label for="fe-im">Inscrição municipal</label><input id="fe-im" type="text" maxlength="30" value="'+esc(e.inscricao_municipal||'')+'"></div></div>'+
+      '<div class="grade"><div class="campo"><label for="fe-mun">Município</label><input id="fe-mun" type="text" maxlength="80" value="'+esc(e.municipio||'')+'"></div>'+
+        '<div class="campo" style="flex:0 1 90px"><label for="fe-uf">UF</label><input id="fe-uf" type="text" maxlength="2" value="'+esc(e.uf||'')+'"></div>'+
+        '<div class="campo"><label for="fe-regime">Regime tributário</label><select id="fe-regime"><option value="">Não informado</option><option value="simples">Simples Nacional</option><option value="mei">MEI</option><option value="presumido">Lucro presumido</option><option value="real">Lucro real</option></select></div></div>'+
+      '<div class="grade"><div class="campo"><label for="fe-cod">Código do serviço padrão</label><input id="fe-cod" type="text" maxlength="20" value="'+esc(e.codigo_servico||'')+'"></div>'+
+        '<div class="campo"><label for="fe-aliq">Alíquota de ISS padrão (%)</label><input id="fe-aliq" type="text" inputmode="decimal" value="'+esc(e.aliquota_iss==null?'':String(e.aliquota_iss).replace('.',','))+'"></div></div>'+
+      '<div class="campo"><label for="fe-desc">Descrição padrão do serviço (opcional)</label><input id="fe-desc" type="text" maxlength="500" value="'+esc(e.descricao_servico||'')+'"></div>'+
+      '<div class="campo"><label for="fe-inst">Instruções no boleto (opcional)</label><input id="fe-inst" type="text" maxlength="300" value="'+esc(e.instrucoes||'')+'"></div>'+
+      '<div class="acoes"><button class="botao" type="submit">Salvar dados do emitente</button></div></form>';
+  $('#fe-regime').value=e.regime||'';
+  $('#f-emitente').onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('#f-emitente button[type=submit]');ocupar(b,true);
+    var r=await sb.rpc('fin_emitente_salvar',{p_org:finOrg(),p_dados:{razao_social:$('#fe-razao').value,cnpj:$('#fe-cnpj').value,inscricao_municipal:$('#fe-im').value,municipio:$('#fe-mun').value,uf:$('#fe-uf').value,regime:$('#fe-regime').value,codigo_servico:$('#fe-cod').value,aliquota_iss:$('#fe-aliq').value,descricao_servico:$('#fe-desc').value,instrucoes:$('#fe-inst').value}});
+    ocupar(b,false);
+    if(r.error){aviso(msgErro(r.error),true);return;}
+    aviso('Dados do emitente salvos.');
+  };
+  $$('[data-copiar]',c).forEach(function(b){b.onclick=function(){mcpCopiar(b.getAttribute('data-copiar'),'Código');};});
+  function par(b,attr){var p=b.getAttribute(attr).split(':');return {tipo:p[0],id:p[1]};}
+  $$('[data-reenviar]',c).forEach(function(b){b.onclick=async function(){var p=par(b,'data-reenviar');ocupar(b,true);var y=finIntegraTexto(await finIntegra({acao:'emitir',tipo:p.tipo,id:p.id}),p.tipo==='nota'?'Nota fiscal':'Cobrança');aviso(y.t,y.ruim);finDesenha();};});
+  function confirma(b,fn){b.onclick=async function(){
+    if(b.getAttribute('data-confirma')!=='1'){b.setAttribute('data-confirma','1');b.textContent='Confirmar cancelamento';setTimeout(function(){if(b.isConnected){b.removeAttribute('data-confirma');b.textContent='Cancelar';}},5000);return;}
+    ocupar(b,true);var erro=await fn();
+    if(erro){ocupar(b,false);aviso(erro,true);return;}
+    aviso('Cancelado.');finDesenha();
+  };}
+  $$('[data-cancelar-ped]',c).forEach(function(b){var p=par(b,'data-cancelar-ped');confirma(b,async function(){var r=await sb.rpc(p.tipo==='nota'?'fin_nota_cancelar':'fin_cobranca_cancelar',{p_id:p.id});return r.error?msgErro(r.error):'';});});
+  $$('[data-cancelar-emi]',c).forEach(function(b){var p=par(b,'data-cancelar-emi');confirma(b,async function(){var y=await finIntegra({acao:'cancelar',tipo:p.tipo,id:p.id});return y.erro||'';});});
+}
+
 function finDlgBaixa(t){
   var rec=t.tipo==='receber';
   var d=finDlg((rec?'Receber ':'Pagar ')+t.codigo,
@@ -1790,8 +2014,9 @@ var FIN_FATURA_CSS='body{font-family:Inter,Arial,sans-serif;color:#0F3D2E;margin
 function finMostraFatura(f){
   var t=f.titulo||{},aberta=f.status==='emitida';
   var d=finDlg('Fatura '+f.codigo,finFaturaHtml(f)+
-    '<p class="meta">Título em contas a receber: '+esc(t.codigo||'—')+' · '+(t.status==='pago'?'recebido em '+esc(dataBr(t.pago_em)):t.status==='cancelado'?'cancelado':'em aberto')+'</p>',
-    '<button class="botao" type="button" id="fv-imprimir">Imprimir ou salvar em PDF</button>'+(aberta?'<button class="botao sutil" type="button" id="fv-cancelar">Cancelar fatura</button>':''),true);
+    '<p class="meta">Título em contas a receber: '+esc(t.codigo||'—')+' · '+(t.status==='pago'?'recebido em '+esc(dataBr(t.pago_em)):t.status==='cancelado'?'cancelado':'em aberto')+'</p>'+
+    '<p class="meta" id="fv-nota-st">Nota fiscal: '+(f.nota?esc((FIN_COB_ST[f.nota.status]||f.nota.status).toLowerCase())+(f.nota.numero?' · nº '+esc(f.nota.numero):'')+(f.nota.mensagem?' · '+esc(f.nota.mensagem):''):'não pedida')+'</p>',
+    '<button class="botao" type="button" id="fv-imprimir">Imprimir ou salvar em PDF</button>'+(aberta&&(!f.nota||f.nota.status==='falhou')?'<button class="botao claro" type="button" id="fv-nota">Pedir nota fiscal</button>':'')+(aberta?'<button class="botao sutil" type="button" id="fv-cancelar">Cancelar fatura</button>':''),true);
   $('#fv-imprimir',d).onclick=function(){
     var w=window.open('','_blank');
     if(!w){aviso('O navegador bloqueou a janela de impressão. Permita pop-ups para este site.',true);return;}
@@ -1799,6 +2024,8 @@ function finMostraFatura(f){
     w.document.close();w.focus();setTimeout(function(){w.print();},200);
     evento('Imprimiu a fatura '+f.codigo,'Financeiro');
   };
+  var bn=$('#fv-nota',d);
+  if(bn){bn.onclick=function(){d.fechar();finDlgNota(f,function(){finVerFatura(f.id);});};}
   var bc=$('#fv-cancelar',d);
   if(bc){bc.onclick=async function(){
     if(bc.getAttribute('data-confirma')!=='1'){bc.setAttribute('data-confirma','1');bc.textContent='Confirmar cancelamento da fatura';return;}
@@ -1903,7 +2130,7 @@ async function finBalancete(c){
       '<tr class="total"><td>Total do período</td><td></td><td class="num">'+esc(moeda(td))+'</td><td class="num">'+esc(moeda(tc))+'</td><td class="num">'+(Math.abs(td-tc)<0.005?'Fechado':'Diferença '+esc(moeda(td-tc)))+'</td></tr></tbody></table></div>'+
     '<h2>Lançamentos manuais do período</h2><p class="apoio">Use para saldo inicial, capital, transferência entre contas e ajustes. Contas a pagar e a receber geram seus lançamentos sozinhas.</p>'+
     '<div class="rolagem"><table><thead><tr><th scope="col">Data</th><th scope="col">Histórico</th><th scope="col">Débito</th><th scope="col">Crédito</th><th scope="col" class="num">Valor</th><th scope="col">Ação</th></tr></thead><tbody>'+
-      ((b.lancamentos||[]).map(function(l){return '<tr><td>'+esc(dataBr(l.data))+'</td><td>'+esc(l.historico)+'</td><td>'+esc(l.debito)+'</td><td>'+esc(l.credito)+'</td><td class="num">'+esc(moeda(l.valor))+'</td><td><button class="botao sutil pequeno" type="button" data-excluir-lanc="'+esc(l.id)+'">Excluir</button></td></tr>';}).join('')||'<tr><td colspan="6" class="vazio">Nenhum lançamento manual no período.</td></tr>')+'</tbody></table></div>';
+      ((b.lancamentos||[]).map(function(l){return '<tr><td>'+esc(dataBr(l.data))+'</td><td>'+esc(l.historico)+'</td><td>'+esc(l.debito)+'</td><td>'+esc(l.credito)+'</td><td class="num">'+esc(moeda(l.valor))+'</td><td>'+(l.origem==='investimentos'?'<span class="selo claro">Investimentos</span>':'<button class="botao sutil pequeno" type="button" data-excluir-lanc="'+esc(l.id)+'">Excluir</button>')+'</td></tr>';}).join('')||'<tr><td colspan="6" class="vazio">Nenhum lançamento manual no período.</td></tr>')+'</tbody></table></div>';
   $('#fin-lanc').onclick=finDlgLancamento;
   $$('[data-excluir-lanc]',c).forEach(function(b){
     b.onclick=async function(){
@@ -2321,12 +2548,12 @@ async function invComissoes(c){
     }).join('');
   }
   var cab='<tr><th scope="col">Data do aporte</th><th scope="col">Projeto</th><th scope="col">Investidor</th><th scope="col" class="num">Valor do aporte</th><th scope="col" class="num">%</th><th scope="col" class="num">Comissão</th><th scope="col">Situação</th>';
-  c.innerHTML='<div class="cabeca"><div><h2>Relatório de comissões</h2><p class="apoio">Comissões dos indicadores sobre os aportes de '+esc(invPeriodoTexto())+', agrupadas por indicador.</p></div>'+
+  c.innerHTML='<div class="cabeca"><div><h2>Relatório de comissões</h2><p class="apoio">Comissões dos indicadores sobre os aportes de '+esc(invPeriodoTexto())+', agrupadas por indicador. Cada comissão é também uma conta a pagar no Financeiro: pagar aqui ou lá dá no mesmo.</p></div>'+
       '<div class="acoes"><button class="botao claro" type="button" id="inv-com-imprimir"'+(l.length?'':' disabled')+'>Imprimir ou salvar em PDF</button></div></div>'+
     '<div class="grade-d">'+finCartao('Comissões do período',moeda(tot),ordem.length+(ordem.length===1?' indicador':' indicadores'))+finCartao('Pagas',moeda(paga))+finCartao('A pagar',moeda(tot-paga),'',tot-paga>0?'neg':'')+'</div>'+
     '<div class="rolagem"><table id="inv-comissoes"><thead>'+cab+'<th scope="col">Ação</th></tr></thead><tbody>'+(corpo(false)||'<tr><td colspan="8" class="vazio">Nenhuma comissão no período.</td></tr>')+
       (l.length?'<tr class="total"><td colspan="5">Total do período</td><td class="num">'+esc(moeda(tot))+'</td><td colspan="2">'+esc(moeda(tot-paga))+' a pagar</td></tr>':'')+'</tbody></table></div>';
-  $$('[data-pagar]',c).forEach(function(b){b.onclick=async function(){ocupar(b,true);var r=await sb.rpc('inv_comissao_pagar',{p_aporte:b.getAttribute('data-pagar'),p_data:hojeIso()});if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}aviso('Comissão marcada como paga hoje.');invDesenha();};});
+  $$('[data-pagar]',c).forEach(function(b){b.onclick=async function(){ocupar(b,true);var r=await sb.rpc('inv_comissao_pagar',{p_aporte:b.getAttribute('data-pagar'),p_data:hojeIso()});if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}aviso('Comissão marcada como paga hoje. A conta a pagar foi baixada no Financeiro.');invDesenha();};});
   $$('[data-despagar]',c).forEach(function(b){invConfirma(b,'Confirmar',async function(){await invRpc('inv_comissao_pagar',{p_aporte:b.getAttribute('data-despagar'),p_data:null});aviso('Pagamento desfeito.');invDesenha();});});
   $('#inv-com-imprimir').onclick=function(){
     var w=window.open('','_blank');
@@ -2344,11 +2571,17 @@ async function telaDashboard(){
   var rs=await Promise.all([
     temWf?sb.rpc('workflow_listar'):Promise.resolve({data:[],error:null}),
     sb.from('usuarios').select('user_id,ativo'),
-    sb.from('organizacoes').select('id,ativo')
+    sb.from('organizacoes').select('id,ativo'),
+    temModulo('financeiro')?sb.rpc('fin_dashboard',{p_org:ehEquipe()?null:a.organizacao_id,p_ini:finMes(new Date())[0],p_fim:finMes(new Date())[1]}):Promise.resolve({data:null,error:null})
   ]);
   if(rs[0].error){falhaTela('Dashboard',rs[0].error);return;}
   if(temWf){WF.tarefas=rs[0].data||[];}
   var ts=temWf?WF.tarefas:[],usuarios=rs[1].error?[]:(rs[1].data||[]),orgs=rs[2].error?[]:(rs[2].data||[]);
+  var fin=rs[3].error?null:rs[3].data;
+  function cartaoFin(titulo,valor,sub,alerta){
+    if(!fin)return '<div class="cartao-d baixo apagado"><div class="cartao-d-topo"><span>'+titulo+'</span></div><p class="numero">Sem dados</p><p class="apoio">'+(temModulo('financeiro')?'Não foi possível ler o Financeiro agora':'Módulo Financeiro não habilitado para você')+'</p></div>';
+    return '<div class="cartao-d baixo" data-cartao-fin="'+titulo+'"><div class="cartao-d-topo"><span>'+titulo+'</span><a href="#financeiro">Abrir →</a></div><p class="numero'+(alerta?' neg':'')+'">'+esc(valor)+'</p><p class="apoio">'+esc(sub)+'</p></div>';
+  }
   function n(f){return ts.filter(f).length;}
   function texto(q,um,varios,zero){return q===0?zero:(q+' '+(q===1?um:varios));}
   var abertas=ts.filter(wfAberta);
@@ -2410,8 +2643,8 @@ async function telaDashboard(){
     '</div>'+
     '<h2 class="titulo-s">Financeiro e energia</h2>'+
     '<div class="grade-d">'+
-      '<div class="cartao-d baixo apagado"><div class="cartao-d-topo"><span>Arrecadação</span></div><p class="numero">Sem dados</p><p class="apoio">Depende do módulo Financeiro (fase 3)</p></div>'+
-      '<div class="cartao-d baixo apagado"><div class="cartao-d-topo"><span>Inadimplentes</span></div><p class="numero">Sem dados</p><p class="apoio">Depende do módulo Financeiro (fase 3)</p></div>'+
+      cartaoFin('Arrecadação',fin?moeda(fin.recebido):'',fin?'Recebido neste mês · '+moeda(fin.receber_aberto)+' ainda a receber':'')+
+      cartaoFin('Inadimplentes',fin?moeda(fin.receber_vencido):'',fin?(Number(fin.receber_vencido_qtd)?fin.receber_vencido_qtd+(Number(fin.receber_vencido_qtd)===1?' conta vencida':' contas vencidas')+' a receber':'Nenhuma conta a receber vencida'):'',fin&&Number(fin.receber_vencido)>0)+
       '<div class="cartao-d baixo apagado"><div class="cartao-d-topo"><span>Economia de energia</span></div><p class="numero">Sem dados</p><p class="apoio">Fonte dos dados ainda não definida</p></div>'+
     '</div>');
   $$('[data-ir-aba]').forEach(function(l){l.onclick=function(){WF.aba=l.getAttribute('data-ir-aba');WF.busca='';};});

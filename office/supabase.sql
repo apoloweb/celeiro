@@ -940,6 +940,34 @@ create table if not exists public.workflow_leituras (
   primary key (tarefa_id, user_id)
 );
 
+-- Pessoas marcadas com @ em um comentário
+create table if not exists public.workflow_mencoes (
+  comentario_id uuid not null references public.workflow_comentarios(id) on delete cascade,
+  user_id       uuid not null references public.usuarios(user_id) on delete cascade,
+  primary key (comentario_id, user_id)
+);
+create index if not exists workflow_mencoes_user on public.workflow_mencoes (user_id);
+-- Quando o e-mail de aviso da marcação saiu (nulo = ainda não avisado)
+alter table public.workflow_mencoes add column if not exists avisado_em timestamptz;
+
+-- Arquivos anexados a uma tarefa. O arquivo fica no Storage (bucket privado
+-- "workflow-anexos"); aqui fica o registro: quem enviou, nome, tipo e tamanho.
+create table if not exists public.workflow_anexos (
+  id        uuid primary key default gen_random_uuid(),
+  tarefa_id uuid not null references public.workflow_tarefas(id) on delete cascade,
+  user_id   uuid references public.usuarios(user_id) on delete set null,
+  nome      text not null check (char_length(nome) between 1 and 200),
+  tipo      text not null default '' check (char_length(tipo) <= 120),
+  tamanho   bigint not null check (tamanho > 0 and tamanho <= 10485760),
+  caminho   text not null unique,
+  enviado   boolean not null default false,
+  criado_em timestamptz not null default now()
+);
+create index if not exists workflow_anexos_tarefa on public.workflow_anexos (tarefa_id);
+
+alter table public.workflow_mencoes enable row level security;
+alter table public.workflow_anexos  enable row level security;
+
 create unique index if not exists workflow_tarefas_numero on public.workflow_tarefas (numero);
 create index if not exists workflow_tarefas_org        on public.workflow_tarefas (organizacao_id);
 create index if not exists workflow_participantes_user on public.workflow_participantes (user_id);
@@ -1028,6 +1056,43 @@ begin
 end;
 $$;
 
+-- Quem pode excluir um anexo: quem enviou, quem criou a tarefa, o Master ou o
+-- Corporativo master da organização
+create or replace function public.workflow_anexo_pode_excluir(p_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.workflow_anexos x
+    join public.workflow_tarefas t on t.id = x.tarefa_id
+    where x.id = p_id and public.workflow_pode_ver(t.id)
+      and coalesce(x.user_id = (select auth.uid()) or t.criado_por = (select auth.uid())
+            or public.meu_perfil() = 'master'
+            or (public.meu_perfil() = 'corp_master' and t.organizacao_id = public.minha_org()), false));
+$$;
+
+-- Regra de acesso aos arquivos no Storage, usada pelas políticas do bucket
+-- p_acao: ler | enviar | excluir
+create or replace function public.workflow_anexo_acesso(p_caminho text, p_acao text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.workflow_anexos x
+    where x.caminho = p_caminho
+      and case p_acao
+            when 'ler' then x.enviado and public.workflow_pode_ver(x.tarefa_id)
+            when 'enviar' then not x.enviado and x.user_id = (select auth.uid()) and public.workflow_pode_ver(x.tarefa_id)
+            when 'excluir' then public.workflow_anexo_pode_excluir(x.id)
+            else false end);
+$$;
+
 -- Tarefas que o usuário atual enxerga, com participantes, comentários e "não lida"
 create or replace function public.workflow_listar()
 returns jsonb
@@ -1065,6 +1130,11 @@ as $$
         join public.usuarios u on u.user_id = p.user_id
         where p.tarefa_id = t.id), '[]'::jsonb),
       'comentarios', (select count(*) from public.workflow_comentarios k where k.tarefa_id = t.id),
+      'anexos', (select count(*) from public.workflow_anexos x where x.tarefa_id = t.id and x.enviado),
+      'mencionado', exists (select 1 from public.workflow_mencoes m
+                            join public.workflow_comentarios k on k.id = m.comentario_id
+                            where k.tarefa_id = t.id and m.user_id = (select auth.uid())
+                              and k.criado_em > coalesce(l.lido_em, '-infinity'::timestamptz)),
       'nao_lida', coalesce(t.atualizado_por <> (select auth.uid()), false)
                   and coalesce(l.lido_em < t.atualizado_em, true),
       'pode_excluir', coalesce(
@@ -1096,11 +1166,23 @@ begin
     'id', p_id,
     'comentarios', coalesce((
       select jsonb_agg(jsonb_build_object(
-        'id', k.id, 'nome', coalesce(u.nome, 'Usuário removido'), 'texto', k.texto, 'criado_em', k.criado_em)
+        'id', k.id, 'nome', coalesce(u.nome, 'Usuário removido'), 'texto', k.texto, 'criado_em', k.criado_em,
+        'mencoes', coalesce((select jsonb_agg(jsonb_build_object('user_id', mu.user_id, 'nome', mu.nome) order by mu.nome)
+                             from public.workflow_mencoes m join public.usuarios mu on mu.user_id = m.user_id
+                             where m.comentario_id = k.id), '[]'::jsonb))
         order by k.criado_em)
       from public.workflow_comentarios k
       left join public.usuarios u on u.user_id = k.user_id
-      where k.tarefa_id = p_id), '[]'::jsonb)
+      where k.tarefa_id = p_id), '[]'::jsonb),
+    'anexos', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', x.id, 'nome', x.nome, 'tipo', x.tipo, 'tamanho', x.tamanho, 'caminho', x.caminho,
+        'por', coalesce(u.nome, 'Usuário removido'), 'criado_em', x.criado_em,
+        'pode_excluir', public.workflow_anexo_pode_excluir(x.id))
+        order by x.criado_em)
+      from public.workflow_anexos x
+      left join public.usuarios u on u.user_id = x.user_id
+      where x.tarefa_id = p_id and x.enviado), '[]'::jsonb)
   );
 end;
 $$;
@@ -1246,12 +1328,18 @@ end;
 $$;
 
 -- Acrescenta um comentário
-create or replace function public.workflow_comentar(p_id uuid, p_texto text)
-returns void
+drop function if exists public.workflow_comentar(uuid, text);
+drop function if exists public.workflow_comentar(uuid, text, uuid[]);
+create or replace function public.workflow_comentar(p_id uuid, p_texto text, p_mencoes uuid[] default null)
+returns uuid
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_org uuid;
+  v_k   uuid;
+  v_m   uuid;
 begin
   if not public.workflow_pode_ver(p_id) then
     raise exception 'Tarefa não encontrada';
@@ -1259,14 +1347,172 @@ begin
   if char_length(trim(coalesce(p_texto, ''))) = 0 then
     raise exception 'Escreva o comentário';
   end if;
+  if coalesce(array_length(p_mencoes, 1), 0) > 20 then
+    raise exception 'Marque no máximo 20 pessoas por comentário';
+  end if;
+  select organizacao_id into v_org from public.workflow_tarefas where id = p_id;
   insert into public.workflow_comentarios (tarefa_id, user_id, texto)
-  values (p_id, (select auth.uid()), left(trim(p_texto), 2000));
+  values (p_id, (select auth.uid()), left(trim(p_texto), 2000))
+  returning id into v_k;
+  -- Quem foi marcado com @ passa a acompanhar a tarefa como envolvido
+  for v_m in select distinct m from unnest(coalesce(p_mencoes, '{}'::uuid[])) m where m is not null loop
+    if not public.workflow_pessoa_ok(v_m, v_org) then
+      raise exception 'Uma das pessoas marcadas não pode ser incluída nesta tarefa';
+    end if;
+    insert into public.workflow_mencoes (comentario_id, user_id) values (v_k, v_m);
+    insert into public.workflow_participantes (tarefa_id, user_id, papel) values (p_id, v_m, 'envolvido')
+    on conflict (tarefa_id, user_id) do nothing;
+  end loop;
   update public.workflow_tarefas
      set atualizado_em = now(), atualizado_por = (select auth.uid())
    where id = p_id;
   insert into public.workflow_leituras (tarefa_id, user_id, lido_em)
   values (p_id, (select auth.uid()), now())
   on conflict (tarefa_id, user_id) do update set lido_em = excluded.lido_em;
+  return v_k;
+end;
+$$;
+
+-- Aviso por e-mail a quem foi marcado. Quem dispara é a função "avisar-mencao",
+-- chamada pela tela logo depois do comentário.
+-- O usuário atual escreveu este comentário? (só o autor dispara o aviso)
+create or replace function public.workflow_mencao_pode(p_comentario uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.workflow_comentarios k
+    where k.id = p_comentario and k.user_id = (select auth.uid()) and public.workflow_pode_ver(k.tarefa_id));
+$$;
+
+-- O que vai no e-mail e para quem (só quem ainda não foi avisado). Só a função de servidor chama.
+create or replace function public.workflow_mencao_dados(p_comentario uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'codigo', 'WF-' || lpad(t.numero::text, 4, '0'), 'titulo', t.titulo,
+    'autor', coalesce(a.nome, 'Alguém'), 'texto', k.texto,
+    'empresa', coalesce(o.nome, 'Celeiro Administradora'),
+    'destinatarios', coalesce((
+      select jsonb_agg(jsonb_build_object('user_id', u.user_id, 'nome', u.nome, 'email', u.email) order by u.nome)
+      from public.workflow_mencoes m join public.usuarios u on u.user_id = m.user_id
+      where m.comentario_id = k.id and m.avisado_em is null and u.ativo
+        and u.user_id is distinct from k.user_id and coalesce(u.email, '') <> ''), '[]'::jsonb))
+  from public.workflow_comentarios k
+  join public.workflow_tarefas t on t.id = k.tarefa_id
+  left join public.usuarios a on a.user_id = k.user_id
+  left join public.organizacoes o on o.id = t.organizacao_id
+  where k.id = p_comentario;
+$$;
+
+-- Marca que o aviso saiu. Só a função de servidor chama.
+create or replace function public.workflow_mencao_avisada(p_comentario uuid, p_user uuid)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  update public.workflow_mencoes set avisado_em = now()
+   where comentario_id = p_comentario and user_id = p_user and avisado_em is null;
+$$;
+
+-- Anexos. O envio tem três passos: registrar (reserva o caminho), enviar o
+-- arquivo ao Storage nesse caminho e confirmar. Só anexos confirmados aparecem.
+create or replace function public.workflow_anexo_registrar(p_tarefa uuid, p_nome text, p_tipo text, p_tamanho bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_nome text := left(trim(regexp_replace(coalesce(p_nome, ''), '[\\/[:cntrl:]]', '', 'g')), 200);
+  v_ext  text;
+  v_id   uuid := gen_random_uuid();
+  v_cam  text;
+begin
+  if not public.workflow_pode_ver(p_tarefa) then
+    raise exception 'Tarefa não encontrada';
+  end if;
+  v_ext := lower(substring(v_nome from '\.([A-Za-z0-9]{1,5})$'));
+  if char_length(v_nome) = 0 or v_ext is null
+     or v_ext not in ('pdf','png','jpg','jpeg','webp','gif','doc','docx','xls','xlsx','csv','txt','ppt','pptx','odt','ods') then
+    raise exception 'Tipo de arquivo não aceito. Envie PDF, imagem, Word, Excel, PowerPoint, CSV ou TXT';
+  end if;
+  if p_tamanho is null or p_tamanho <= 0 then
+    raise exception 'Arquivo vazio';
+  end if;
+  if p_tamanho > 10485760 then
+    raise exception 'O arquivo passa de 10 MB';
+  end if;
+  -- reservas abandonadas (envio que não terminou) deixam de contar depois de 1 hora
+  delete from public.workflow_anexos where tarefa_id = p_tarefa and not enviado and criado_em < now() - interval '1 hour';
+  if (select count(*) from public.workflow_anexos where tarefa_id = p_tarefa) >= 30 then
+    raise exception 'Esta tarefa já tem 30 anexos';
+  end if;
+  v_cam := p_tarefa::text || '/' || v_id::text || '.' || v_ext;
+  insert into public.workflow_anexos (id, tarefa_id, user_id, nome, tipo, tamanho, caminho)
+  values (v_id, p_tarefa, (select auth.uid()), v_nome, left(coalesce(p_tipo, ''), 120), p_tamanho, v_cam);
+  return jsonb_build_object('id', v_id, 'caminho', v_cam);
+end;
+$$;
+
+create or replace function public.workflow_anexo_confirmar(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_x  public.workflow_anexos%rowtype;
+  v_ok boolean := true;
+begin
+  select * into v_x from public.workflow_anexos where id = p_id;
+  if v_x.id is null or v_x.user_id is distinct from (select auth.uid()) or not public.workflow_pode_ver(v_x.tarefa_id) then
+    raise exception 'Anexo não encontrado';
+  end if;
+  if v_x.enviado then
+    return;
+  end if;
+  if to_regclass('storage.objects') is not null then
+    execute 'select exists (select 1 from storage.objects where bucket_id = ''workflow-anexos'' and name = $1)'
+      into v_ok using v_x.caminho;
+  end if;
+  if not v_ok then
+    raise exception 'O arquivo não chegou. Tente enviar de novo';
+  end if;
+  update public.workflow_anexos set enviado = true where id = p_id;
+  update public.workflow_tarefas set atualizado_em = now(), atualizado_por = (select auth.uid()) where id = v_x.tarefa_id;
+  insert into public.workflow_leituras (tarefa_id, user_id, lido_em)
+  values (v_x.tarefa_id, (select auth.uid()), now())
+  on conflict (tarefa_id, user_id) do update set lido_em = excluded.lido_em;
+end;
+$$;
+
+-- Remove o registro do anexo. O arquivo é apagado do Storage pela tela, antes desta chamada.
+create or replace function public.workflow_anexo_excluir(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_x public.workflow_anexos%rowtype;
+begin
+  select * into v_x from public.workflow_anexos where id = p_id;
+  if v_x.id is null or not public.workflow_pode_ver(v_x.tarefa_id) then
+    raise exception 'Anexo não encontrado';
+  end if;
+  if not (public.workflow_anexo_pode_excluir(p_id) or (not v_x.enviado and v_x.user_id = (select auth.uid()))) then
+    raise exception 'Só quem enviou o arquivo, quem criou a tarefa ou o responsável da organização pode excluir';
+  end if;
+  delete from public.workflow_anexos where id = p_id;
 end;
 $$;
 
@@ -1304,6 +1550,11 @@ create trigger auditar_workflow_participantes
   after insert or update or delete on public.workflow_participantes
   for each row execute function public.auditar('Workflow');
 
+drop trigger if exists auditar_workflow_anexos on public.workflow_anexos;
+create trigger auditar_workflow_anexos
+  after insert or update or delete on public.workflow_anexos
+  for each row execute function public.auditar('Workflow');
+
 drop trigger if exists auditar_workflow_comentarios on public.workflow_comentarios;
 create trigger auditar_workflow_comentarios
   after insert or update or delete on public.workflow_comentarios
@@ -1325,7 +1576,13 @@ revoke all on function public.workflow_detalhe(uuid)         from public, anon;
 revoke all on function public.workflow_marcar_lida(uuid)     from public, anon;
 revoke all on function public.workflow_salvar(uuid, text, text, uuid, text, date, text, text, text, boolean, uuid[], uuid[], text) from public, anon;
 revoke all on function public.workflow_mover(uuid, text)     from public, anon;
-revoke all on function public.workflow_comentar(uuid, text)  from public, anon;
+revoke all on function public.workflow_comentar(uuid, text, uuid[]) from public, anon;
+revoke all on public.workflow_mencoes, public.workflow_anexos from anon, authenticated;
+revoke all on function public.workflow_anexo_pode_excluir(uuid)  from public, anon;
+revoke all on function public.workflow_anexo_acesso(text, text)  from public, anon;
+revoke all on function public.workflow_anexo_registrar(uuid, text, text, bigint) from public, anon;
+revoke all on function public.workflow_anexo_confirmar(uuid)     from public, anon;
+revoke all on function public.workflow_anexo_excluir(uuid)       from public, anon;
 revoke all on function public.workflow_excluir(uuid)         from public, anon;
 
 grant execute on function public.workflow_escopo_ok(uuid)      to authenticated;
@@ -1336,7 +1593,18 @@ grant execute on function public.workflow_detalhe(uuid)        to authenticated;
 grant execute on function public.workflow_marcar_lida(uuid)    to authenticated;
 grant execute on function public.workflow_salvar(uuid, text, text, uuid, text, date, text, text, text, boolean, uuid[], uuid[], text) to authenticated;
 grant execute on function public.workflow_mover(uuid, text)    to authenticated;
-grant execute on function public.workflow_comentar(uuid, text) to authenticated;
+grant execute on function public.workflow_comentar(uuid, text, uuid[]) to authenticated;
+revoke all on function public.workflow_mencao_pode(uuid) from public, anon;
+grant execute on function public.workflow_mencao_pode(uuid) to authenticated;
+revoke all on function public.workflow_mencao_dados(uuid) from public, anon, authenticated;
+revoke all on function public.workflow_mencao_avisada(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.workflow_mencao_dados(uuid) to service_role;
+grant execute on function public.workflow_mencao_avisada(uuid, uuid) to service_role;
+grant execute on function public.workflow_anexo_pode_excluir(uuid) to authenticated;
+grant execute on function public.workflow_anexo_acesso(text, text) to authenticated;
+grant execute on function public.workflow_anexo_registrar(uuid, text, text, bigint) to authenticated;
+grant execute on function public.workflow_anexo_confirmar(uuid)    to authenticated;
+grant execute on function public.workflow_anexo_excluir(uuid)      to authenticated;
 grant execute on function public.workflow_excluir(uuid)        to authenticated;
 
 drop policy if exists "workflow_tarefas leitura" on public.workflow_tarefas;
@@ -1353,6 +1621,38 @@ drop policy if exists "workflow_comentarios leitura" on public.workflow_comentar
 create policy "workflow_comentarios leitura" on public.workflow_comentarios
   for select to authenticated
   using (public.workflow_pode_ver(tarefa_id));
+
+-- Bucket privado dos anexos e as regras de quem lê, envia e apaga arquivos.
+-- (Só roda onde existe o Storage do Supabase.)
+do $$
+begin
+  if to_regclass('storage.buckets') is null or to_regclass('storage.objects') is null then
+    raise notice 'Storage não encontrado: o bucket de anexos não foi criado.';
+    return;
+  end if;
+  execute $sql$
+    insert into storage.buckets (id, name, public, file_size_limit)
+    values ('workflow-anexos', 'workflow-anexos', false, 10485760)
+    on conflict (id) do update set public = false, file_size_limit = 10485760
+  $sql$;
+  execute 'drop policy if exists "workflow anexos ler" on storage.objects';
+  execute 'drop policy if exists "workflow anexos enviar" on storage.objects';
+  execute 'drop policy if exists "workflow anexos excluir" on storage.objects';
+  execute $sql$
+    create policy "workflow anexos ler" on storage.objects for select to authenticated
+      using (bucket_id = 'workflow-anexos' and public.workflow_anexo_acesso(name, 'ler'))
+  $sql$;
+  execute $sql$
+    create policy "workflow anexos enviar" on storage.objects for insert to authenticated
+      with check (bucket_id = 'workflow-anexos' and public.workflow_anexo_acesso(name, 'enviar'))
+  $sql$;
+  execute $sql$
+    create policy "workflow anexos excluir" on storage.objects for delete to authenticated
+      using (bucket_id = 'workflow-anexos'
+             and (public.workflow_anexo_acesso(name, 'excluir')
+                  or (owner_id = (select auth.uid())::text and not public.workflow_anexo_acesso(name, 'ler'))))
+  $sql$;
+end $$;
 
 drop policy if exists "workflow_leituras leitura" on public.workflow_leituras;
 create policy "workflow_leituras leitura" on public.workflow_leituras
@@ -2895,6 +3195,84 @@ create table if not exists public.fin_lancamentos (
 );
 create index if not exists fin_lancamentos_org on public.fin_lancamentos (organizacao_id, data);
 
+-- Cobranças (boleto e Pix), notas fiscais e dados do emitente
+create table if not exists public.fin_emitentes (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  dados          jsonb not null default '{}'::jsonb,
+  atualizado_em  timestamptz not null default now()
+);
+create unique index if not exists fin_emitentes_org
+  on public.fin_emitentes (coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid));
+
+create table if not exists public.fin_cobrancas (
+  id              uuid primary key default gen_random_uuid(),
+  organizacao_id  uuid references public.organizacoes(id) on delete cascade,
+  titulo_id       uuid not null references public.fin_titulos(id),
+  meio            text not null check (meio in ('boleto','pix')),
+  status          text not null default 'aguardando' check (status in ('aguardando','emitida','paga','cancelada','falhou')),
+  valor           numeric(14,2) not null check (valor > 0),
+  vencimento      date not null,
+  provedor        text not null default '',
+  provedor_id     text not null default '',
+  linha_digitavel text not null default '',
+  pix_copia_cola  text not null default '',
+  url             text not null default '',
+  mensagem        text not null default '',
+  criado_por      uuid,
+  criado_em       timestamptz not null default now(),
+  atualizado_em   timestamptz not null default now()
+);
+create unique index if not exists fin_cobrancas_viva on public.fin_cobrancas (titulo_id, meio) where status in ('aguardando','emitida');
+create index if not exists fin_cobrancas_org on public.fin_cobrancas (organizacao_id, criado_em desc);
+create index if not exists fin_cobrancas_provedor on public.fin_cobrancas (provedor, provedor_id);
+
+create table if not exists public.fin_notas (
+  id                 uuid primary key default gen_random_uuid(),
+  organizacao_id     uuid references public.organizacoes(id) on delete cascade,
+  fatura_id          uuid not null references public.fin_faturas(id),
+  status             text not null default 'aguardando' check (status in ('aguardando','emitida','cancelada','falhou')),
+  valor              numeric(14,2) not null check (valor > 0),
+  descricao_servico  text not null,
+  codigo_servico     text not null default '',
+  aliquota_iss       numeric(5,2) not null default 0,
+  numero             text not null default '',
+  codigo_verificacao text not null default '',
+  url_pdf            text not null default '',
+  url_xml            text not null default '',
+  provedor           text not null default '',
+  provedor_id        text not null default '',
+  mensagem           text not null default '',
+  criado_por         uuid,
+  criado_em          timestamptz not null default now(),
+  atualizado_em      timestamptz not null default now()
+);
+create unique index if not exists fin_notas_viva on public.fin_notas (fatura_id) where status in ('aguardando','emitida');
+create index if not exists fin_notas_org on public.fin_notas (organizacao_id, criado_em desc);
+
+alter table public.fin_emitentes enable row level security;
+alter table public.fin_cobrancas enable row level security;
+alter table public.fin_notas     enable row level security;
+
+drop trigger if exists auditar_fin_emitentes on public.fin_emitentes;
+create trigger auditar_fin_emitentes after insert or update or delete on public.fin_emitentes
+  for each row execute function public.auditar('Financeiro');
+drop trigger if exists auditar_fin_cobrancas on public.fin_cobrancas;
+create trigger auditar_fin_cobrancas after insert or update or delete on public.fin_cobrancas
+  for each row execute function public.auditar('Financeiro');
+drop trigger if exists auditar_fin_notas on public.fin_notas;
+create trigger auditar_fin_notas after insert or update or delete on public.fin_notas
+  for each row execute function public.auditar('Financeiro');
+
+-- Origem: títulos e lançamentos criados por outro módulo não são alterados no Financeiro
+alter table public.fin_titulos     add column if not exists origem text not null default '' check (origem in ('', 'investimentos'));
+alter table public.fin_lancamentos add column if not exists origem text not null default '' check (origem in ('', 'investimentos'));
+
+-- Papéis de conta usados pela integração com Investimentos
+alter table public.fin_contas drop constraint if exists fin_contas_papel_check;
+alter table public.fin_contas add constraint fin_contas_papel_check
+  check (papel in ('clientes','fornecedores','investidores','comissoes','remuneracao'));
+
 alter table public.fin_contas      enable row level security;
 alter table public.fin_faturas     enable row level security;
 alter table public.fin_titulos     enable row level security;
@@ -2985,6 +3363,62 @@ begin
   perform public.grava_auditoria('Criou o plano de contas padrão', 'Financeiro', 'fin_contas', null,
     jsonb_build_object('organizacao_id', p_org), 'banco');
 end;
+$$;
+
+-- Conta com um papel fixo (investidores, comissões, remuneração). Cria na primeira vez,
+-- no primeiro código livre do grupo. Uso interno.
+create or replace function public.fin_conta_papel(p_org uuid, p_papel text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_id      uuid;
+  v_prefixo text;
+  v_nome    text;
+  v_tipo    text;
+  v_n       int := 1;
+begin
+  perform public.fin_preparar(p_org);
+  select c.id into v_id from public.fin_contas c
+   where c.organizacao_id is not distinct from p_org and c.papel = p_papel
+   order by c.criado_em limit 1;
+  if v_id is not null then
+    return v_id;
+  end if;
+  if p_papel = 'investidores' then
+    v_prefixo := '2.1'; v_nome := 'Recursos de investidores'; v_tipo := 'passivo';
+  elsif p_papel = 'comissoes' then
+    v_prefixo := '6'; v_nome := 'Comissões de indicação'; v_tipo := 'despesa';
+  elsif p_papel = 'remuneracao' then
+    v_prefixo := '6'; v_nome := 'Remuneração de investidores'; v_tipo := 'despesa';
+  else
+    raise exception 'Papel de conta inválido';
+  end if;
+  while exists (select 1 from public.fin_contas c
+                where c.organizacao_id is not distinct from p_org and c.codigo = v_prefixo || '.' || v_n) loop
+    v_n := v_n + 1;
+  end loop;
+  insert into public.fin_contas (organizacao_id, codigo, nome, tipo, papel)
+  values (p_org, v_prefixo || '.' || v_n, v_nome, v_tipo, p_papel)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Conta de caixa ou banco usada quando ninguém escolhe (prefere Banco conta movimento). Uso interno.
+create or replace function public.fin_caixa_padrao(p_org uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select c.id from public.fin_contas c
+   where c.organizacao_id is not distinct from p_org and c.caixa and c.ativo
+   order by (c.codigo = '1.1.2') desc, string_to_array(c.codigo, '.')::int[]
+   limit 1;
 $$;
 
 -- Ordena códigos como 1.2.10 depois de 1.2.9
@@ -3213,7 +3647,11 @@ as $$
     'emissao', t.emissao, 'vencimento', t.vencimento, 'valor', t.valor, 'status', t.status,
     'pago_em', t.pago_em, 'conta_caixa_id', t.conta_caixa_id,
     'conta_caixa', (select c.nome from public.fin_contas c where c.id = t.conta_caixa_id),
-    'forma', t.forma, 'fatura_id', t.fatura_id,
+    'forma', t.forma, 'fatura_id', t.fatura_id, 'origem', t.origem,
+    'cobrancas', coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'meio', c.meio, 'status', c.status,
+                   'linha_digitavel', c.linha_digitavel, 'pix_copia_cola', c.pix_copia_cola, 'url', c.url, 'mensagem', c.mensagem)
+                   order by c.criado_em)
+                 from public.fin_cobrancas c where c.titulo_id = t.id and c.status in ('aguardando','emitida','paga','falhou')), '[]'::jsonb),
     'fatura', (select 'FAT-' || lpad(f.numero::text, 6, '0') from public.fin_faturas f where f.id = t.fatura_id),
     'observacoes', t.observacoes);
 $$;
@@ -3290,6 +3728,9 @@ begin
     end if;
     if v_t.fatura_id is not null then
       raise exception 'Este título veio de uma fatura. Para mudar, cancele a fatura e emita outra';
+    end if;
+    if v_t.origem = 'investimentos' then
+      raise exception 'Este título é a comissão de um aporte. Para mudar, altere em Investimentos';
     end if;
     v_tipo := v_t.tipo;
   end if;
@@ -3422,6 +3863,9 @@ begin
   if v_t.fatura_id is not null then
     raise exception 'Este título veio de uma fatura. Cancele a fatura';
   end if;
+  if v_t.origem = 'investimentos' then
+    raise exception 'Este título é a comissão de um aporte. Ele é cancelado junto com o aporte, em Investimentos';
+  end if;
   update public.fin_titulos set status = 'cancelado', atualizado_em = now() where id = p_id;
 end;
 $$;
@@ -3444,6 +3888,9 @@ as $$
     'emitente', coalesce((select jsonb_build_object('nome', o.nome, 'cnpj', o.cnpj)
                           from public.organizacoes o where o.id = f.organizacao_id),
                          jsonb_build_object('nome', 'Celeiro Administradora', 'cnpj', '')),
+    'nota', (select jsonb_build_object('id', n.id, 'status', n.status, 'numero', n.numero, 'url_pdf', n.url_pdf, 'mensagem', n.mensagem)
+             from public.fin_notas n where n.fatura_id = f.id and n.status <> 'cancelada'
+             order by n.criado_em desc limit 1),
     'titulo', (select jsonb_build_object('id', t.id, 'codigo', 'CR-' || lpad(t.numero::text, 6, '0'),
                         'status', t.status, 'pago_em', t.pago_em)
                from public.fin_titulos t where t.fatura_id = f.id));
@@ -3642,6 +4089,9 @@ begin
   if not public.fin_escopo_ok(v_org) then
     raise exception 'Lançamento não encontrado';
   end if;
+  if (select origem from public.fin_lancamentos where id = p_id) = 'investimentos' then
+    raise exception 'Este lançamento veio de Investimentos. Para desfazer, cancele o aporte ou exclua o retorno lá';
+  end if;
   delete from public.fin_lancamentos where id = p_id;
 end;
 $$;
@@ -3678,7 +4128,7 @@ begin
       where c.organizacao_id is not distinct from p_org), '[]'::jsonb),
     'lancamentos', coalesce((
       select jsonb_agg(jsonb_build_object(
-        'id', l.id, 'data', l.data, 'historico', l.historico, 'valor', l.valor,
+        'id', l.id, 'data', l.data, 'historico', l.historico, 'valor', l.valor, 'origem', l.origem,
         'debito', (select c.codigo || ' ' || c.nome from public.fin_contas c where c.id = l.conta_debito),
         'credito', (select c.codigo || ' ' || c.nome from public.fin_contas c where c.id = l.conta_credito))
         order by l.data desc, l.criado_em desc)
@@ -3782,10 +4232,492 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------
+-- Cobrança (boleto e Pix) e nota fiscal de serviço
+--   O sistema guarda o pedido, o resultado e o histórico. Quem conversa com o
+--   banco ou com a prefeitura é a função "financeiro-integracao", por meio de
+--   um provedor (API) ainda a escolher. Sem provedor, o pedido fica aguardando.
+--   - Cobrança nasce de um título a receber em aberto.
+--   - Nota fiscal nasce de uma fatura emitida.
+--   - Quando o provedor avisa que a cobrança foi paga, o título é baixado sozinho.
+-- ---------------------------------------------------------------------
+
+-- Dados do emitente usados em boletos, Pix e notas (um por organização; nulo = Celeiro)
+create or replace function public.fin_emitente_ver(p_org uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  return coalesce((select e.dados from public.fin_emitentes e where e.organizacao_id is not distinct from p_org), '{}'::jsonb);
+end;
+$$;
+
+create or replace function public.fin_emitente_salvar(p_org uuid, p_dados jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d    jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_cnpj text := regexp_replace(coalesce(v_d ->> 'cnpj', ''), '\D', '', 'g');
+  v_aliq numeric;
+  v_novo jsonb;
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  if v_cnpj <> '' and not public.cnpj_valido(v_cnpj) then
+    raise exception 'CNPJ do emitente inválido';
+  end if;
+  begin
+    v_aliq := nullif(replace(coalesce(v_d ->> 'aliquota_iss', ''), ',', '.'), '')::numeric;
+  exception when others then
+    raise exception 'Alíquota de ISS inválida';
+  end;
+  if v_aliq is not null and (v_aliq < 0 or v_aliq > 10) then
+    raise exception 'Alíquota de ISS deve ficar entre 0 e 10%%';
+  end if;
+  if coalesce(v_d ->> 'regime', '') not in ('', 'simples', 'presumido', 'real', 'mei') then
+    raise exception 'Regime tributário inválido';
+  end if;
+  v_novo := jsonb_build_object(
+    'razao_social', public.fin_texto(v_d, 'razao_social', 200), 'cnpj', v_cnpj,
+    'inscricao_municipal', public.fin_texto(v_d, 'inscricao_municipal', 30),
+    'municipio', public.fin_texto(v_d, 'municipio', 80), 'uf', upper(public.fin_texto(v_d, 'uf', 2)),
+    'regime', coalesce(v_d ->> 'regime', ''), 'codigo_servico', public.fin_texto(v_d, 'codigo_servico', 20),
+    'aliquota_iss', v_aliq, 'descricao_servico', public.fin_texto(v_d, 'descricao_servico', 500),
+    'instrucoes', public.fin_texto(v_d, 'instrucoes', 300));
+  if exists (select 1 from public.fin_emitentes where organizacao_id is not distinct from p_org) then
+    update public.fin_emitentes set dados = v_novo, atualizado_em = now() where organizacao_id is not distinct from p_org;
+  else
+    insert into public.fin_emitentes (organizacao_id, dados) values (p_org, v_novo);
+  end if;
+  return v_novo;
+end;
+$$;
+
+-- Uma cobrança em formato de tela (uso interno)
+create or replace function public.fin_cobranca_json(c public.fin_cobrancas)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'id', c.id, 'meio', c.meio, 'status', c.status, 'valor', c.valor, 'vencimento', c.vencimento,
+    'provedor', c.provedor, 'linha_digitavel', c.linha_digitavel, 'pix_copia_cola', c.pix_copia_cola,
+    'url', c.url, 'mensagem', c.mensagem, 'criado_em', c.criado_em, 'titulo_id', c.titulo_id,
+    'titulo', (select jsonb_build_object('codigo', 'CR-' || lpad(t.numero::text, 6, '0'), 'descricao', t.descricao,
+                        'pessoa_nome', t.pessoa_nome, 'status', t.status)
+               from public.fin_titulos t where t.id = c.titulo_id));
+$$;
+
+create or replace function public.fin_nota_json(n public.fin_notas)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'id', n.id, 'status', n.status, 'valor', n.valor, 'descricao_servico', n.descricao_servico,
+    'codigo_servico', n.codigo_servico, 'aliquota_iss', n.aliquota_iss, 'numero', n.numero,
+    'codigo_verificacao', n.codigo_verificacao, 'url_pdf', n.url_pdf, 'url_xml', n.url_xml,
+    'provedor', n.provedor, 'mensagem', n.mensagem, 'criado_em', n.criado_em, 'fatura_id', n.fatura_id,
+    'fatura', (select jsonb_build_object('codigo', 'FAT-' || lpad(f.numero::text, 6, '0'), 'cliente_nome', f.cliente_nome,
+                        'status', f.status)
+               from public.fin_faturas f where f.id = n.fatura_id));
+$$;
+
+-- Pede um boleto ou um Pix para um título a receber em aberto.
+-- Se já houver um pedido vivo do mesmo meio, devolve o mesmo.
+create or replace function public.fin_cobranca_solicitar(p_titulo uuid, p_meio text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_t public.fin_titulos%rowtype;
+  v_c public.fin_cobrancas%rowtype;
+begin
+  select * into v_t from public.fin_titulos where id = p_titulo;
+  if v_t.id is null or not public.fin_escopo_ok(v_t.organizacao_id) then
+    raise exception 'Título não encontrado';
+  end if;
+  if v_t.tipo <> 'receber' or v_t.status <> 'aberto' then
+    raise exception 'Só títulos a receber em aberto podem ser cobrados';
+  end if;
+  if p_meio is null or p_meio not in ('boleto', 'pix') then
+    raise exception 'Escolha boleto ou Pix';
+  end if;
+  select * into v_c from public.fin_cobrancas
+   where titulo_id = p_titulo and meio = p_meio and status in ('aguardando', 'emitida');
+  if v_c.id is null then
+    update public.fin_cobrancas set status = 'cancelada', atualizado_em = now()
+     where titulo_id = p_titulo and meio = p_meio and status = 'falhou';
+    insert into public.fin_cobrancas (organizacao_id, titulo_id, meio, valor, vencimento, criado_por)
+    values (v_t.organizacao_id, v_t.id, p_meio, v_t.valor, greatest(v_t.vencimento, current_date), (select auth.uid()))
+    returning * into v_c;
+  end if;
+  return public.fin_cobranca_json(v_c);
+end;
+$$;
+
+-- Cancela um pedido que ainda não foi ao provedor (ou que falhou).
+-- Cobrança já emitida é cancelada pela função de integração, que avisa o provedor.
+create or replace function public.fin_cobranca_cancelar(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_c public.fin_cobrancas%rowtype;
+begin
+  select * into v_c from public.fin_cobrancas where id = p_id;
+  if v_c.id is null or not public.fin_escopo_ok(v_c.organizacao_id) then
+    raise exception 'Cobrança não encontrada';
+  end if;
+  if v_c.status not in ('aguardando', 'falhou') then
+    raise exception 'Esta cobrança não pode ser cancelada aqui';
+  end if;
+  update public.fin_cobrancas set status = 'cancelada', atualizado_em = now() where id = p_id;
+end;
+$$;
+
+-- Pede a nota fiscal de serviço de uma fatura emitida
+create or replace function public.fin_nota_solicitar(p_fatura uuid, p_dados jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d    jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_f    public.fin_faturas%rowtype;
+  v_n    public.fin_notas%rowtype;
+  v_e    jsonb;
+  v_desc text;
+  v_cod  text;
+  v_aliq numeric;
+begin
+  select * into v_f from public.fin_faturas where id = p_fatura;
+  if v_f.id is null or not public.fin_escopo_ok(v_f.organizacao_id) then
+    raise exception 'Fatura não encontrada';
+  end if;
+  if v_f.status <> 'emitida' then
+    raise exception 'Só faturas emitidas recebem nota fiscal';
+  end if;
+  select * into v_n from public.fin_notas where fatura_id = p_fatura and status in ('aguardando', 'emitida');
+  if v_n.id is not null then
+    return public.fin_nota_json(v_n);
+  end if;
+  v_e := coalesce((select dados from public.fin_emitentes where organizacao_id is not distinct from v_f.organizacao_id), '{}'::jsonb);
+  if coalesce(v_e ->> 'cnpj', '') = '' or coalesce(v_e ->> 'inscricao_municipal', '') = '' then
+    raise exception 'Preencha antes os dados fiscais do emitente (CNPJ e inscrição municipal), em Cobranças e notas';
+  end if;
+  v_desc := coalesce(nullif(public.fin_texto(v_d, 'descricao_servico', 500), ''), nullif(v_e ->> 'descricao_servico', ''),
+                     (select string_agg(i ->> 'descricao', '; ') from jsonb_array_elements(v_f.itens) i));
+  v_cod := coalesce(nullif(public.fin_texto(v_d, 'codigo_servico', 20), ''), v_e ->> 'codigo_servico', '');
+  begin
+    v_aliq := coalesce(nullif(replace(coalesce(v_d ->> 'aliquota_iss', ''), ',', '.'), '')::numeric, (v_e ->> 'aliquota_iss')::numeric);
+  exception when others then
+    raise exception 'Alíquota de ISS inválida';
+  end;
+  if coalesce(v_desc, '') = '' then
+    raise exception 'Descreva o serviço prestado';
+  end if;
+  if v_cod = '' then
+    raise exception 'Informe o código do serviço';
+  end if;
+  if v_aliq is null or v_aliq < 0 or v_aliq > 10 then
+    raise exception 'Informe a alíquota de ISS, entre 0 e 10%%';
+  end if;
+  update public.fin_notas set status = 'cancelada', atualizado_em = now() where fatura_id = p_fatura and status = 'falhou';
+  insert into public.fin_notas (organizacao_id, fatura_id, valor, descricao_servico, codigo_servico, aliquota_iss, criado_por)
+  values (v_f.organizacao_id, v_f.id, v_f.total, left(v_desc, 500), v_cod, v_aliq, (select auth.uid()))
+  returning * into v_n;
+  return public.fin_nota_json(v_n);
+end;
+$$;
+
+create or replace function public.fin_nota_cancelar(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_n public.fin_notas%rowtype;
+begin
+  select * into v_n from public.fin_notas where id = p_id;
+  if v_n.id is null or not public.fin_escopo_ok(v_n.organizacao_id) then
+    raise exception 'Nota não encontrada';
+  end if;
+  if v_n.status not in ('aguardando', 'falhou') then
+    raise exception 'Esta nota não pode ser cancelada aqui';
+  end if;
+  update public.fin_notas set status = 'cancelada', atualizado_em = now() where id = p_id;
+end;
+$$;
+
+-- Cobranças e notas pedidas no período, mais os dados do emitente
+create or replace function public.fin_cobrancas_notas(p_org uuid, p_ini date, p_fim date)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.fin_escopo_ok(p_org) then
+    raise exception 'Financeiro não disponível para você nesta organização';
+  end if;
+  perform public.fin_periodo_ok(p_ini, p_fim);
+  return jsonb_build_object(
+    'emitente', coalesce((select e.dados from public.fin_emitentes e where e.organizacao_id is not distinct from p_org), '{}'::jsonb),
+    'cobrancas', coalesce((select jsonb_agg(public.fin_cobranca_json(c) order by c.criado_em desc)
+       from public.fin_cobrancas c
+       where c.organizacao_id is not distinct from p_org
+         and (c.criado_em at time zone 'America/Sao_Paulo')::date between p_ini and p_fim), '[]'::jsonb),
+    'notas', coalesce((select jsonb_agg(public.fin_nota_json(n) order by n.criado_em desc)
+       from public.fin_notas n
+       where n.organizacao_id is not distinct from p_org
+         and (n.criado_em at time zone 'America/Sao_Paulo')::date between p_ini and p_fim), '[]'::jsonb));
+end;
+$$;
+
+-- Quem chama pode mandar esta cobrança ou nota ao provedor? (usada pela função de integração)
+create or replace function public.fin_integracao_pode(p_tipo text, p_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case p_tipo
+    when 'cobranca' then coalesce((select public.fin_escopo_ok(c.organizacao_id) from public.fin_cobrancas c where c.id = p_id), false)
+    when 'nota' then coalesce((select public.fin_escopo_ok(n.organizacao_id) from public.fin_notas n where n.id = p_id), false)
+    else false end;
+$$;
+
+-- Tudo o que o provedor precisa para emitir (só a função de integração chama)
+create or replace function public.fin_integracao_dados(p_tipo text, p_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_c   public.fin_cobrancas%rowtype;
+  v_n   public.fin_notas%rowtype;
+  v_t   public.fin_titulos%rowtype;
+  v_f   public.fin_faturas%rowtype;
+  v_org uuid;
+  v_pag jsonb;
+begin
+  if p_tipo = 'cobranca' then
+    select * into v_c from public.fin_cobrancas where id = p_id;
+    if v_c.id is null then return null; end if;
+    select * into v_t from public.fin_titulos where id = v_c.titulo_id;
+    v_org := v_c.organizacao_id;
+    if v_t.fatura_id is not null then
+      select * into v_f from public.fin_faturas where id = v_t.fatura_id;
+    end if;
+  elsif p_tipo = 'nota' then
+    select * into v_n from public.fin_notas where id = p_id;
+    if v_n.id is null then return null; end if;
+    select * into v_f from public.fin_faturas where id = v_n.fatura_id;
+    v_org := v_n.organizacao_id;
+  else
+    return null;
+  end if;
+  -- pagador/tomador: a fatura, se houver; senão a pessoa do Cadastro ligada ao título
+  if v_f.id is not null then
+    v_pag := jsonb_build_object('nome', v_f.cliente_nome, 'documento', v_f.cliente_documento,
+      'endereco', v_f.cliente_endereco, 'email', v_f.cliente_email);
+  elsif v_t.pessoa_tipo = 'pf' then
+    select jsonb_build_object('nome', f.nome_completo, 'documento', f.cpf, 'email', f.email,
+      'endereco', concat_ws(', ', nullif(f.logradouro, ''), nullif(f.numero, ''), nullif(f.bairro, ''),
+                            nullif(concat_ws('/', nullif(f.cidade, ''), nullif(f.uf, '')), '')))
+      into v_pag from public.cadastro_pf f where f.id = v_t.pessoa_id;
+  elsif v_t.pessoa_tipo = 'pj' then
+    select jsonb_build_object('nome', j.razao_social, 'documento', j.cnpj, 'email', j.email,
+      'endereco', concat_ws(', ', nullif(j.logradouro, ''), nullif(j.numero, ''), nullif(j.bairro, ''),
+                            nullif(concat_ws('/', nullif(j.cidade, ''), nullif(j.uf, '')), '')))
+      into v_pag from public.cadastro_pj j where j.id = v_t.pessoa_id;
+  end if;
+  return jsonb_build_object(
+    'tipo', p_tipo,
+    'emitente', coalesce((select e.dados from public.fin_emitentes e where e.organizacao_id is not distinct from v_org), '{}'::jsonb)
+                || jsonb_build_object('nome', coalesce((select o.nome from public.organizacoes o where o.id = v_org), 'Celeiro Administradora')),
+    'pagador', coalesce(v_pag, jsonb_build_object('nome', coalesce(v_t.pessoa_nome, ''), 'documento', '', 'endereco', '', 'email', '')),
+    'cobranca', case when p_tipo = 'cobranca' then jsonb_build_object('id', v_c.id, 'meio', v_c.meio, 'status', v_c.status,
+        'valor', v_c.valor, 'vencimento', v_c.vencimento, 'provedor', v_c.provedor, 'provedor_id', v_c.provedor_id,
+        'descricao', v_t.descricao, 'titulo', 'CR-' || lpad(v_t.numero::text, 6, '0'), 'titulo_status', v_t.status) end,
+    'nota', case when p_tipo = 'nota' then jsonb_build_object('id', v_n.id, 'status', v_n.status, 'valor', v_n.valor,
+        'descricao_servico', v_n.descricao_servico, 'codigo_servico', v_n.codigo_servico, 'aliquota_iss', v_n.aliquota_iss,
+        'provedor', v_n.provedor, 'provedor_id', v_n.provedor_id,
+        'fatura', 'FAT-' || lpad(v_f.numero::text, 6, '0'), 'emissao', v_f.emissao) end);
+end;
+$$;
+
+-- Grava a resposta do provedor (só a função de integração chama)
+create or replace function public.fin_integracao_registrar(p_tipo text, p_id uuid, p_dados jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d  jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_st text := v_d ->> 'status';
+begin
+  if p_tipo = 'cobranca' then
+    if v_st is null or v_st not in ('emitida', 'cancelada', 'falhou') then
+      raise exception 'Status inválido';
+    end if;
+    update public.fin_cobrancas
+       set status = v_st,
+           provedor = left(coalesce(v_d ->> 'provedor', provedor), 40),
+           provedor_id = left(coalesce(v_d ->> 'provedor_id', provedor_id), 120),
+           linha_digitavel = left(coalesce(v_d ->> 'linha_digitavel', linha_digitavel), 120),
+           pix_copia_cola = left(coalesce(v_d ->> 'pix_copia_cola', pix_copia_cola), 1000),
+           url = left(coalesce(v_d ->> 'url', url), 500),
+           mensagem = left(coalesce(v_d ->> 'mensagem', ''), 300), atualizado_em = now()
+     where id = p_id and status in ('aguardando', 'emitida', 'falhou');
+  elsif p_tipo = 'nota' then
+    if v_st is null or v_st not in ('emitida', 'cancelada', 'falhou') then
+      raise exception 'Status inválido';
+    end if;
+    update public.fin_notas
+       set status = v_st,
+           provedor = left(coalesce(v_d ->> 'provedor', provedor), 40),
+           provedor_id = left(coalesce(v_d ->> 'provedor_id', provedor_id), 120),
+           numero = left(coalesce(v_d ->> 'numero', numero), 40),
+           codigo_verificacao = left(coalesce(v_d ->> 'codigo_verificacao', codigo_verificacao), 80),
+           url_pdf = left(coalesce(v_d ->> 'url_pdf', url_pdf), 500),
+           url_xml = left(coalesce(v_d ->> 'url_xml', url_xml), 500),
+           mensagem = left(coalesce(v_d ->> 'mensagem', ''), 300), atualizado_em = now()
+     where id = p_id and status in ('aguardando', 'emitida', 'falhou');
+  else
+    raise exception 'Tipo inválido';
+  end if;
+  if not found then
+    raise exception 'Registro não encontrado ou já encerrado';
+  end if;
+end;
+$$;
+
+-- Aviso do provedor: a cobrança foi paga. Baixa o título sozinho (só a função de integração chama).
+create or replace function public.fin_cobranca_liquidar(p_provedor text, p_provedor_id text, p_data date, p_valor numeric)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_c     public.fin_cobrancas%rowtype;
+  v_t     public.fin_titulos%rowtype;
+  v_caixa uuid;
+  v_data  date := least(coalesce(p_data, current_date), current_date);
+begin
+  select * into v_c from public.fin_cobrancas
+   where provedor = p_provedor and provedor_id = p_provedor_id and provedor_id <> '' for update;
+  if v_c.id is null then
+    return jsonb_build_object('situacao', 'nao_encontrada');
+  end if;
+  if v_c.status = 'paga' then
+    return jsonb_build_object('situacao', 'ja_paga');
+  end if;
+  update public.fin_cobrancas
+     set status = 'paga', atualizado_em = now(),
+         mensagem = case when p_valor is not null and round(p_valor, 2) <> valor
+                         then 'Valor pago ' || round(p_valor, 2) || ' difere do cobrado. Confira.' else '' end
+   where id = v_c.id;
+  select * into v_t from public.fin_titulos where id = v_c.titulo_id for update;
+  if v_t.status = 'aberto' then
+    v_caixa := public.fin_caixa_padrao(v_c.organizacao_id);
+    if v_caixa is null then
+      update public.fin_cobrancas set mensagem = 'Paga, mas o título não foi baixado: não há conta de banco ativa.' where id = v_c.id;
+      return jsonb_build_object('situacao', 'paga_sem_baixa');
+    end if;
+    update public.fin_titulos
+       set status = 'pago', pago_em = v_data, conta_caixa_id = v_caixa, forma = v_c.meio, atualizado_em = now()
+     where id = v_t.id;
+    perform public.grava_auditoria('Baixou título por aviso de pagamento do provedor', 'Financeiro', 'fin_titulos', v_t.id::text,
+      jsonb_build_object('cobranca', v_c.id, 'meio', v_c.meio, 'provedor', p_provedor, 'valor_pago', p_valor), 'integracao');
+    return jsonb_build_object('situacao', 'baixado');
+  end if;
+  update public.fin_cobrancas set mensagem = 'Paga, mas o título já estava ' || v_t.status || '. Confira.' where id = v_c.id;
+  return jsonb_build_object('situacao', 'paga_titulo_' || v_t.status);
+end;
+$$;
+
+-- Título que deixa de estar em aberto: pedidos ainda não emitidos perdem o sentido
+create or replace function public.fin_titulo_cobrancas_sinc()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status <> 'aberto' and old.status = 'aberto' then
+    update public.fin_cobrancas set status = 'cancelada', atualizado_em = now(),
+           mensagem = 'O título foi ' || case when new.status = 'pago' then 'baixado' else 'cancelado' end || ' antes da emissão.'
+     where titulo_id = new.id and status in ('aguardando', 'falhou');
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists fin_titulo_cobrancas_sinc on public.fin_titulos;
+create trigger fin_titulo_cobrancas_sinc after update on public.fin_titulos
+  for each row execute function public.fin_titulo_cobrancas_sinc();
+
 revoke all on public.fin_contas, public.fin_faturas, public.fin_titulos, public.fin_lancamentos from anon, authenticated;
+revoke all on public.fin_emitentes, public.fin_cobrancas, public.fin_notas from anon, authenticated;
+revoke all on function public.fin_cobranca_json(public.fin_cobrancas) from public, anon, authenticated;
+revoke all on function public.fin_nota_json(public.fin_notas)     from public, anon, authenticated;
+revoke all on function public.fin_integracao_dados(text, uuid)    from public, anon, authenticated;
+revoke all on function public.fin_integracao_registrar(text, uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.fin_cobranca_liquidar(text, text, date, numeric) from public, anon, authenticated;
+revoke all on function public.fin_titulo_cobrancas_sinc()         from public, anon, authenticated;
+grant execute on function public.fin_integracao_dados(text, uuid)    to service_role;
+grant execute on function public.fin_integracao_registrar(text, uuid, jsonb) to service_role;
+grant execute on function public.fin_cobranca_liquidar(text, text, date, numeric) to service_role;
+revoke all on function public.fin_emitente_ver(uuid) from public, anon;
+grant execute on function public.fin_emitente_ver(uuid) to authenticated;
+revoke all on function public.fin_emitente_salvar(uuid, jsonb) from public, anon;
+grant execute on function public.fin_emitente_salvar(uuid, jsonb) to authenticated;
+revoke all on function public.fin_cobranca_solicitar(uuid, text) from public, anon;
+grant execute on function public.fin_cobranca_solicitar(uuid, text) to authenticated;
+revoke all on function public.fin_cobranca_cancelar(uuid) from public, anon;
+grant execute on function public.fin_cobranca_cancelar(uuid) to authenticated;
+revoke all on function public.fin_nota_solicitar(uuid, jsonb) from public, anon;
+grant execute on function public.fin_nota_solicitar(uuid, jsonb) to authenticated;
+revoke all on function public.fin_nota_cancelar(uuid) from public, anon;
+grant execute on function public.fin_nota_cancelar(uuid) to authenticated;
+revoke all on function public.fin_cobrancas_notas(uuid, date, date) from public, anon;
+grant execute on function public.fin_cobrancas_notas(uuid, date, date) to authenticated;
+revoke all on function public.fin_integracao_pode(text, uuid) from public, anon;
+grant execute on function public.fin_integracao_pode(text, uuid) to authenticated;
+
 
 revoke all on function public.fin_preparar(uuid)                 from public, anon, authenticated;
 revoke all on function public.fin_partidas(uuid)                 from public, anon, authenticated;
+revoke all on function public.fin_conta_papel(uuid, text)        from public, anon, authenticated;
+revoke all on function public.fin_caixa_padrao(uuid)             from public, anon, authenticated;
 revoke all on function public.fin_pessoa_ok(uuid, text, uuid)    from public, anon, authenticated;
 revoke all on function public.fin_titulo_json(public.fin_titulos) from public, anon, authenticated;
 revoke all on function public.fin_fatura_json(public.fin_faturas) from public, anon, authenticated;
@@ -3944,6 +4876,13 @@ create table if not exists public.inv_interesses (
 );
 create index if not exists inv_interesses_org on public.inv_interesses (organizacao_id, criado_em desc);
 create index if not exists inv_interesses_link on public.inv_interesses (link_id, criado_em);
+
+-- Ligação com o Financeiro: o aporte gera um lançamento (entrada em banco contra
+-- recursos de investidores) e a comissão gera uma conta a pagar; o retorno
+-- distribuído gera um lançamento de saída.
+alter table public.inv_aportes  add column if not exists lancamento_id      uuid references public.fin_lancamentos(id) on delete set null;
+alter table public.inv_aportes  add column if not exists titulo_comissao_id uuid references public.fin_titulos(id);
+alter table public.inv_retornos add column if not exists lancamento_id      uuid references public.fin_lancamentos(id) on delete set null;
 
 alter table public.inv_projetos    enable row level security;
 alter table public.inv_indicadores enable row level security;
@@ -4207,6 +5146,106 @@ end;
 $$;
 
 -- Vincula um investidor ao projeto (aporte)
+-- Leva um aporte para o Financeiro: lançamento do dinheiro que entrou e, se houver
+-- comissão, a conta a pagar ao indicador. Só cria o que ainda falta. Uso interno.
+create or replace function public.inv_fin_aporte(p_aporte uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_a     public.inv_aportes%rowtype;
+  v_proj  text;
+  v_ind   text;
+  v_caixa uuid;
+  v_id    uuid;
+begin
+  select * into v_a from public.inv_aportes where id = p_aporte;
+  if v_a.id is null or v_a.status <> 'ativo' then
+    return;
+  end if;
+  perform public.fin_preparar(v_a.organizacao_id);
+  v_caixa := public.fin_caixa_padrao(v_a.organizacao_id);
+  if v_caixa is null then
+    raise exception 'O Financeiro desta organização não tem conta de caixa ou banco ativa. Ative uma no plano de contas';
+  end if;
+  select nome into v_proj from public.inv_projetos where id = v_a.projeto_id;
+  if v_a.lancamento_id is null then
+    insert into public.fin_lancamentos (organizacao_id, data, historico, conta_debito, conta_credito, valor, criado_por, origem)
+    values (v_a.organizacao_id, v_a.data, left('Aporte de ' || v_a.investidor_nome || ' · ' || v_proj, 200),
+      v_caixa, public.fin_conta_papel(v_a.organizacao_id, 'investidores'), v_a.valor, (select auth.uid()), 'investimentos')
+    returning id into v_id;
+    update public.inv_aportes set lancamento_id = v_id where id = v_a.id;
+  end if;
+  if v_a.titulo_comissao_id is null and v_a.indicador_id is not null and v_a.comissao_valor > 0 then
+    select nome into v_ind from public.inv_indicadores where id = v_a.indicador_id;
+    insert into public.fin_titulos (organizacao_id, tipo, descricao, pessoa_nome, conta_id, emissao, vencimento, valor,
+      status, pago_em, conta_caixa_id, observacoes, criado_por, origem)
+    values (v_a.organizacao_id, 'pagar', left('Comissão de indicação · ' || v_proj, 200), left(coalesce(v_ind, ''), 200),
+      public.fin_conta_papel(v_a.organizacao_id, 'comissoes'), v_a.data, v_a.data + 30, v_a.comissao_valor,
+      case when v_a.comissao_paga_em is null then 'aberto' else 'pago' end, v_a.comissao_paga_em,
+      case when v_a.comissao_paga_em is null then null else v_caixa end,
+      left('Aporte de ' || v_a.investidor_nome || ' (' || v_a.comissao_percentual || '% de comissão)', 1000),
+      (select auth.uid()), 'investimentos')
+    returning id into v_id;
+    update public.inv_aportes set titulo_comissao_id = v_id where id = v_a.id;
+  end if;
+end;
+$$;
+
+-- Leva um retorno distribuído para o Financeiro (saída de banco). Uso interno.
+create or replace function public.inv_fin_retorno(p_retorno uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_r     public.inv_retornos%rowtype;
+  v_proj  text;
+  v_caixa uuid;
+  v_id    uuid;
+begin
+  select * into v_r from public.inv_retornos where id = p_retorno;
+  if v_r.id is null or v_r.lancamento_id is not null then
+    return;
+  end if;
+  perform public.fin_preparar(v_r.organizacao_id);
+  v_caixa := public.fin_caixa_padrao(v_r.organizacao_id);
+  if v_caixa is null then
+    raise exception 'O Financeiro desta organização não tem conta de caixa ou banco ativa. Ative uma no plano de contas';
+  end if;
+  select nome into v_proj from public.inv_projetos where id = v_r.projeto_id;
+  insert into public.fin_lancamentos (organizacao_id, data, historico, conta_debito, conta_credito, valor, criado_por, origem)
+  values (v_r.organizacao_id, v_r.data,
+    left('Retorno a investidores · ' || v_proj || case when v_r.descricao <> '' then ' · ' || v_r.descricao else '' end, 200),
+    public.fin_conta_papel(v_r.organizacao_id, 'remuneracao'), v_caixa, v_r.valor, (select auth.uid()), 'investimentos')
+  returning id into v_id;
+  update public.inv_retornos set lancamento_id = v_id where id = v_r.id;
+end;
+$$;
+
+-- A baixa (ou o estorno) da conta a pagar de uma comissão reflete no aporte
+create or replace function public.fin_titulo_comissao_sinc()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.inv_aportes
+     set comissao_paga_em = case when new.status = 'pago' then new.pago_em end
+   where titulo_comissao_id = new.id
+     and comissao_paga_em is distinct from case when new.status = 'pago' then new.pago_em end;
+  return new;
+end;
+$$;
+
+drop trigger if exists fin_titulo_comissao_sinc on public.fin_titulos;
+create trigger fin_titulo_comissao_sinc after update on public.fin_titulos
+  for each row when (new.origem = 'investimentos') execute function public.fin_titulo_comissao_sinc();
+
 create or replace function public.inv_aporte_salvar(p_projeto uuid, p_dados jsonb)
 returns uuid
 language plpgsql
@@ -4272,6 +5311,7 @@ begin
     v_ind, v_pct, round(round(v_valor, 2) * v_pct / 100, 2), left(coalesce(v_d ->> 'observacoes', ''), 1000),
     (select auth.uid()))
   returning id into v_id;
+  perform public.inv_fin_aporte(v_id);
   return v_id;
 end;
 $$;
@@ -4295,7 +5335,14 @@ begin
   if v_a.comissao_paga_em is not null then
     raise exception 'A comissão deste aporte já foi paga. Desfaça o pagamento antes de cancelar';
   end if;
-  update public.inv_aportes set status = 'cancelado' where id = p_id;
+  update public.inv_aportes set status = 'cancelado', lancamento_id = null where id = p_id;
+  if v_a.lancamento_id is not null then
+    delete from public.fin_lancamentos where id = v_a.lancamento_id;
+  end if;
+  if v_a.titulo_comissao_id is not null then
+    update public.fin_titulos set status = 'cancelado', atualizado_em = now()
+     where id = v_a.titulo_comissao_id and status = 'aberto';
+  end if;
 end;
 $$;
 
@@ -4326,6 +5373,7 @@ begin
   insert into public.inv_retornos (organizacao_id, projeto_id, data, valor, descricao, criado_por)
   values (v_org, p_projeto, p_data, round(p_valor, 2), left(trim(coalesce(p_descricao, '')), 200), (select auth.uid()))
   returning id into v_id;
+  perform public.inv_fin_retorno(v_id);
   return v_id;
 end;
 $$;
@@ -4338,6 +5386,7 @@ set search_path = ''
 as $$
 declare
   v_org uuid;
+  v_lan uuid;
 begin
   if not exists (select 1 from public.inv_retornos where id = p_id) then
     raise exception 'Retorno não encontrado';
@@ -4346,7 +5395,11 @@ begin
   if not public.inv_escopo_ok(v_org) then
     raise exception 'Retorno não encontrado';
   end if;
+  select lancamento_id into v_lan from public.inv_retornos where id = p_id;
   delete from public.inv_retornos where id = p_id;
+  if v_lan is not null then
+    delete from public.fin_lancamentos where id = v_lan;
+  end if;
 end;
 $$;
 
@@ -4644,7 +5697,23 @@ begin
   if p_data is not null and p_data > current_date then
     raise exception 'A data do pagamento não pode ser futura';
   end if;
-  update public.inv_aportes set comissao_paga_em = p_data where id = p_aporte and comissao_paga_em is distinct from p_data;
+  if v_a.titulo_comissao_id is null then
+    update public.inv_aportes set comissao_paga_em = p_data where id = p_aporte and comissao_paga_em is distinct from p_data;
+    return;
+  end if;
+  -- Com conta a pagar no Financeiro, o pagamento é a baixa do título (o aporte acompanha)
+  if p_data is null then
+    update public.fin_titulos
+       set status = 'aberto', pago_em = null, conta_caixa_id = null, forma = '', atualizado_em = now()
+     where id = v_a.titulo_comissao_id and status = 'pago';
+  else
+    if public.fin_caixa_padrao(v_a.organizacao_id) is null then
+      raise exception 'O Financeiro desta organização não tem conta de caixa ou banco ativa';
+    end if;
+    update public.fin_titulos
+       set status = 'pago', pago_em = p_data, conta_caixa_id = public.fin_caixa_padrao(v_a.organizacao_id), atualizado_em = now()
+     where id = v_a.titulo_comissao_id and status in ('aberto', 'pago') and pago_em is distinct from p_data;
+  end if;
 end;
 $$;
 
@@ -4786,6 +5855,32 @@ revoke all on public.inv_projetos, public.inv_indicadores, public.inv_links, pub
   public.inv_retornos, public.inv_interesses from anon, authenticated;
 
 revoke all on function public.inv_projeto_json(public.inv_projetos) from public, anon, authenticated;
+revoke all on function public.inv_fin_aporte(uuid)               from public, anon, authenticated;
+revoke all on function public.inv_fin_retorno(uuid)              from public, anon, authenticated;
+revoke all on function public.fin_titulo_comissao_sinc()         from public, anon, authenticated;
+
+-- Aportes e retornos anteriores a esta ligação entram no Financeiro agora (só o que falta)
+do $$
+declare
+  r record;
+begin
+  for r in select id from public.inv_aportes
+            where status = 'ativo' and (lancamento_id is null
+               or (titulo_comissao_id is null and indicador_id is not null and comissao_valor > 0)) loop
+    begin
+      perform public.inv_fin_aporte(r.id);
+    exception when others then
+      raise notice 'Aporte % não foi levado ao Financeiro: %', r.id, sqlerrm;
+    end;
+  end loop;
+  for r in select id from public.inv_retornos where lancamento_id is null loop
+    begin
+      perform public.inv_fin_retorno(r.id);
+    exception when others then
+      raise notice 'Retorno % não foi levado ao Financeiro: %', r.id, sqlerrm;
+    end;
+  end loop;
+end $$;
 
 revoke all on function public.inv_escopo_ok(uuid)                 from public, anon;
 revoke all on function public.inv_exige(uuid)                     from public, anon;
