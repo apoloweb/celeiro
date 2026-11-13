@@ -458,6 +458,29 @@ function telaBloqueio(titulo,texto){
   $('#b-sair').onclick=function(){sair(true);};
 }
 
+/* O usuário novo só entra depois de confirmar o e-mail pelo código */
+function telaEmailPendente(a){
+  pararInatividade();
+  publico('<div class="caixa"><h2>Confirme seu e-mail para entrar</h2>'+
+    '<p class="apoio">Enviamos um código de verificação para <strong>'+esc(a.email)+'</strong>. Abra o e-mail, clique em "Confirmar meu e-mail" e digite o código. Depois volte aqui.</p>'+
+    '<button class="botao" type="button" id="b-confirmei">Já confirmei, entrar</button>'+
+    '<button class="botao claro" type="button" id="b-reenviar">Reenviar o código</button>'+
+    '<button class="botao sutil" type="button" id="b-sair">Sair</button></div>');
+  $('#b-sair').onclick=function(){sair(true);};
+  $('#b-confirmei').onclick=async function(){
+    ocupar(this,true);
+    var r=await sb.rpc('meu_acesso');
+    if(!r.error&&r.data&&r.data.situacao==='email_pendente'){ocupar(this,false);aviso('O e-mail ainda não foi confirmado.',true);return;}
+    entrar();
+  };
+  $('#b-reenviar').onclick=async function(){
+    ocupar(this,true);
+    var x=await enviarVerificacao('usuario',a.user_id,['email']);
+    ocupar(this,false);
+    aviso(x.erro?'Não foi possível reenviar: '+x.erro:verifResumo(x),verifRuim(x));
+  };
+}
+
 /* ---------- entrada no sistema ---------- */
 async function entrar(){
   if(E.recuperando){telaNovaSenha();return;}
@@ -469,6 +492,7 @@ async function entrar(){
     if(n.data&&n.data.currentLevel==='aal2'){telaBloqueio('Sessão não reconhecida','Saia e entre de novo.');return;}
     await aposSenha();return;
   }
+  if(a.situacao==='email_pendente'){telaEmailPendente(a);return;}
   if(a.situacao==='sem_cadastro'){
     evento('Entrou sem perfil vinculado','Acesso');
     telaBloqueio('Acesso ainda não liberado','Seu e-mail e o autenticador estão corretos, mas o acesso ainda não foi vinculado a um perfil. Peça a um usuário Master ou ao responsável da sua organização.');
@@ -723,9 +747,10 @@ async function telaUsuarios(op){
       '<td>'+esc(PERFIS[u.perfil]||u.perfil)+'<span class="sub">'+esc(u.organizacao_id?(nomeOrg[u.organizacao_id]||'—'):'Celeiro')+'</span></td>'+
       '<td>'+(u.perfil==='master'?'—':esc(n?n.nome:'Padrão do perfil'))+'</td>'+
       '<td>'+(u.perfil==='master'?'<span class="chips"><span class="chipm">Todos os módulos</span></span>':(u.ativo?chipsModulos(m.modulos,m.bloqueados):'<span class="apoio">Sem acesso (inativo)</span>'))+'</td>'+
-      '<td><span class="situacao'+(u.ativo?'':' off')+'">'+(u.ativo?'Ativo':'Inativo')+'</span></td>'+
+      '<td>'+(u.ativo&&u.exige_verificacao&&!u.email_verificado_em?'<span class="selo claro">Aguardando confirmar o e-mail</span>':'<span class="situacao'+(u.ativo?'':' off')+'">'+(u.ativo?'Ativo':'Inativo')+'</span>')+'</td>'+
       '<td>'+(podeAlterar(u)?'<button class="botao claro pequeno" type="button" data-editar="'+esc(u.user_id)+'">Editar</button> '+
         (u.ativo&&(!u.email_verificado_em||(u.telefone&&!u.telefone_verificado_em))?'<button class="botao claro pequeno" type="button" data-verificar="'+esc(u.user_id)+'">Enviar verificação</button> ':'')+
+        (master&&u.ativo&&u.exige_verificacao&&!u.email_verificado_em?'<button class="botao sutil pequeno" type="button" data-liberar="'+esc(u.user_id)+'">Liberar sem confirmar</button> ':'')+
         (eu?'':'<button class="botao claro pequeno" type="button" data-situacao="'+esc(u.user_id)+'">'+(u.ativo?'Desativar':'Ativar')+'</button>'):'')+'</td></tr>';
   }).join('');
 
@@ -737,7 +762,7 @@ async function telaUsuarios(op){
   var tituloForm=ed?'Editar usuário':(vincular?'Vincular acesso existente':'Novo usuário');
   var criadoHtml=op.criado?'<div class="sucesso" role="status"><strong>Usuário criado: '+esc(op.criado.nome)+' ('+esc(op.criado.email)+').</strong><br>'+
     (op.criado.senha?'Senha inicial: <span class="senha-inicial">'+esc(op.criado.senha)+'</span><br>Anote agora: ela não será mostrada de novo. Passe à pessoa por um canal seguro. ':'')+
-    'No primeiro acesso a pessoa cadastra o próprio Google Authenticator e pode trocar a senha em "Trocar senha".'+(op.criado.verif?'<br>Verificação de contato: '+esc(op.criado.verif):'')+'</div>':'';
+    'No primeiro acesso a pessoa cadastra o próprio Google Authenticator e pode trocar a senha em "Trocar senha".'+(op.criado.verif?'<br>Verificação de contato: '+esc(op.criado.verif)+' A pessoa só consegue entrar depois de confirmar o e-mail.':'')+'</div>':'';
 
   /* ----- níveis ----- */
   var escopoNivel=edN?(edN.organizacao_id||''):(master?'':a.organizacao_id);
@@ -862,6 +887,13 @@ async function telaUsuarios(op){
     else{telaUsuarios({criado:{nome:nome,email:email,senha:senha,verif:verifResumo(vx)}});}
   };
   $$('[data-editar]').forEach(function(b){b.onclick=function(){telaUsuarios({editar:b.getAttribute('data-editar')});};});
+  $$('[data-liberar]').forEach(function(b){b.onclick=async function(){
+    if(b.getAttribute('data-confirma')!=='1'){b.setAttribute('data-confirma','1');b.textContent='Confirmar liberação';return;}
+    ocupar(b,true);
+    var x=await sb.rpc('usuario_exigir_verificacao',{p_user:b.getAttribute('data-liberar'),p_exige:false});
+    if(x.error){ocupar(b,false);aviso(msgErro(x.error),true);return;}
+    await telaUsuarios();aviso('Usuário liberado para entrar sem confirmar o e-mail.');
+  };});
   $$('[data-verificar]').forEach(function(b){b.onclick=async function(){
     var u=usuarios.filter(function(x){return x.user_id===b.getAttribute('data-verificar');})[0];if(!u)return;
     var canais=[];if(!u.email_verificado_em)canais.push('email');if(u.telefone&&!u.telefone_verificado_em)canais.push('whatsapp');

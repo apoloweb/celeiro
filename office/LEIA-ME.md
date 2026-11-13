@@ -219,9 +219,17 @@ Para publicar:
      na Z-API, com o número já conectado por QR code.
    Sem esses segredos, o canal responde "envio ainda não configurado" e nada é enviado.
 
+**Entrada só com o e-mail confirmado.** Usuário criado ou vinculado pelo sistema só entra depois de confirmar o
+e-mail. Até lá, depois da senha e do autenticador, ele vê a tela "Confirme seu e-mail para entrar", com os botões
+"Já confirmei, entrar" e "Reenviar o código", e o banco não entrega nenhum dado a ele. Na lista de Usuários a
+situação aparece como "Aguardando confirmar o e-mail". O Master pode usar "Liberar sem confirmar" (por exemplo,
+se o e-mail não chegar). Trocar o e-mail de um usuário que exige confirmação bloqueia a entrada até confirmar de
+novo. Quem já existia antes desta regra continua entrando normalmente, e usuários inseridos direto pelo SQL Editor
+(como o primeiro Master) não exigem confirmação. A confirmação do WhatsApp não bloqueia a entrada.
+
 Limites: só celular brasileiro (DDD + 9 dígitos); a Z-API não é a API oficial do WhatsApp, então o número
 conectado pode ser bloqueado pelo WhatsApp se houver muitos envios ou denúncias; o cadastro de empresa (PJ) não
-tem verificação própria, só a pessoa do representante; a verificação do usuário é informativa e não bloqueia o login.
+tem verificação própria, só a pessoa do representante.
 
 ## Investimentos
 

@@ -31,6 +31,13 @@ create table if not exists public.usuarios (
     (perfil in ('corp_master','corp_operador') and organizacao_id is not null)
   )
 );
+-- Contatos e verificação (seção 14). exige_verificacao: o usuário só entra depois de
+-- confirmar o e-mail. Vale para quem for criado pelo sistema daqui em diante; os que já
+-- existiam continuam entrando normalmente.
+alter table public.usuarios add column if not exists telefone text not null default '';
+alter table public.usuarios add column if not exists email_verificado_em timestamptz;
+alter table public.usuarios add column if not exists telefone_verificado_em timestamptz;
+alter table public.usuarios add column if not exists exige_verificacao boolean not null default false;
 
 -- Módulos do sistema
 create table if not exists public.modulos (
@@ -147,6 +154,7 @@ as $$
   left join public.organizacoes o on o.id = u.organizacao_id
   where u.user_id = (select auth.uid())
     and u.ativo
+    and (not u.exige_verificacao or u.email_verificado_em is not null)
     and (u.organizacao_id is null or o.ativo);
 $$;
 
@@ -162,6 +170,7 @@ as $$
   join public.organizacoes o on o.id = u.organizacao_id
   where u.user_id = (select auth.uid())
     and u.ativo
+    and (not u.exige_verificacao or u.email_verificado_em is not null)
     and o.ativo;
 $$;
 
@@ -457,6 +466,10 @@ begin
   end if;
   if not v_u.ativo or (v_u.organizacao_id is not null and not coalesce(v_org.ativo, false)) then
     return jsonb_build_object('situacao', 'inativo');
+  end if;
+  if v_u.exige_verificacao and v_u.email_verificado_em is null then
+    return jsonb_build_object('situacao', 'email_pendente', 'user_id', v_u.user_id,
+      'email', public.verificacao_mascara('email', lower(v_u.email)));
   end if;
   v_mods := to_jsonb(public.modulos_efetivos(v_u.user_id));
   return jsonb_build_object(
@@ -4898,11 +4911,12 @@ stable
 security definer
 set search_path = ''
 as $$
-  select public.aal2() and public.meu_perfil() is not null and case p_alvo_tipo
-    when 'cadastro_pf' then exists (
+  select public.aal2() and case p_alvo_tipo
+    when 'cadastro_pf' then public.meu_perfil() is not null and exists (
       select 1 from public.cadastro_pf f where f.id = p_alvo_id and public.cadastro_escopo_ok(f.organizacao_id))
+    -- a própria pessoa pode pedir o reenvio mesmo antes de ter o acesso liberado
     when 'usuario' then exists (
-      select 1 from public.usuarios u where u.user_id = p_alvo_id
+      select 1 from public.usuarios u where u.user_id = p_alvo_id and u.ativo
         and coalesce(u.user_id = (select auth.uid()) or public.eh_master()
                      or (public.meu_perfil() = 'corp_master' and u.organizacao_id = public.minha_org()), false))
     else false end;
@@ -5133,7 +5147,51 @@ drop trigger if exists cadastro_pf_contato_mudou on public.cadastro_pf;
 create trigger cadastro_pf_contato_mudou before update on public.cadastro_pf
   for each row execute function public.cadastro_pf_contato_mudou();
 
+-- Usuário criado por alguém logado no sistema só entra depois de confirmar o e-mail.
+-- (Inserções feitas direto no SQL Editor, como a do primeiro Master, não exigem.)
+create or replace function public.usuarios_exige_verificacao()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if (select auth.uid()) is not null then
+    new.exige_verificacao := true;
+    new.email_verificado_em := null;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists usuarios_exige_verificacao on public.usuarios;
+create trigger usuarios_exige_verificacao before insert on public.usuarios
+  for each row execute function public.usuarios_exige_verificacao();
+
+-- O Master pode liberar a entrada de um usuário sem a confirmação do e-mail (ou voltar a exigir)
+create or replace function public.usuario_exigir_verificacao(p_user uuid, p_exige boolean)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.eh_master() then
+    raise exception 'Só um usuário Master pode alterar esta exigência';
+  end if;
+  if p_user = (select auth.uid()) and coalesce(p_exige, false) then
+    raise exception 'Você não pode exigir a verificação do seu próprio acesso';
+  end if;
+  update public.usuarios set exige_verificacao = coalesce(p_exige, false)
+   where user_id = p_user and exige_verificacao is distinct from coalesce(p_exige, false);
+  if not found and not exists (select 1 from public.usuarios where user_id = p_user) then
+    raise exception 'Usuário não encontrado';
+  end if;
+end;
+$$;
+
 revoke all on public.verificacoes from anon, authenticated;
+revoke all on function public.usuarios_exige_verificacao() from public, anon, authenticated;
+revoke all on function public.usuario_exigir_verificacao(uuid, boolean) from public, anon;
+grant execute on function public.usuario_exigir_verificacao(uuid, boolean) to authenticated;
 
 revoke all on function public.verificacao_criar(uuid, text, uuid, text, text) from public, anon, authenticated;
 revoke all on function public.verificacao_envio(uuid, text)                  from public, anon, authenticated;
