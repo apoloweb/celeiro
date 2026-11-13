@@ -621,7 +621,7 @@ function entrar(u){
   desenhar();avisar('Você entrou como '+u.nome.split(' ')[0]);
 }
 const val=id=>(document.getElementById(id)?.value||'').trim();
-const falhar=m=>{S.erro=m;const f={};document.querySelectorAll('#tela input,#tela textarea,#tela select').forEach(e=>{if(e.type!=='file'&&e.type!=='checkbox')f[e.id]=e.value});desenhar();for(const k in f){const e=document.getElementById(k);if(e)e.value=f[k]}document.querySelector('.erro')?.scrollIntoView({block:'center'})};
+const falhar=m=>{S.erro=m;const f={};document.querySelectorAll('#tela input,#tela textarea,#tela select').forEach(e=>{if(e.id&&e.type!=='file')f[e.id]=e.type==='checkbox'?e.checked:e.value});desenhar();for(const k in f){const e=document.getElementById(k);if(!e)continue;if(e.type==='checkbox')e.checked=f[k];else e.value=f[k]}document.querySelector('.erro')?.scrollIntoView({block:'center'})};
 const emailOk=e=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
 /* ---------- Ações ---------- */
