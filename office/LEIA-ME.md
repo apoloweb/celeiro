@@ -115,8 +115,8 @@ O Corporativo master cria apenas operadores da própria organização.
 - **Anexos.** Na criação da tarefa, escolha os arquivos no campo Anexos: eles sobem quando a tarefa é criada.
   Em uma tarefa já criada, escolha os arquivos e clique em Anexar. Aceita PDF, imagem, Word, Excel,
   PowerPoint, CSV e TXT, até 10 MB cada e 30 por tarefa. Clicar no nome do anexo (ou em Ver) abre imagem, PDF e texto dentro do sistema, sem baixar; Word, Excel
-  e PowerPoint não abrem no navegador e continuam pelo botão Baixar. Quem vê a tarefa vê e baixa os anexos; excluir é para quem
-  enviou, quem criou a tarefa, o Master e o Corporativo master da organização. Os arquivos ficam no Storage do
+  e PowerPoint não abrem no navegador e continuam pelo botão Baixar. Quem vê a tarefa vê e baixa os anexos. Depois de anexado, o arquivo
+  não pode ser excluído pela tela (só sai junto com a tarefa, se ela for excluída). Os arquivos ficam no Storage do
   Supabase, em um bucket privado (`workflow-anexos`) criado pelo `supabase.sql`; o download usa um link que vale
   1 minuto. O registro (quem enviou, nome, tipo, tamanho) fica na tabela `workflow_anexos` e na Auditoria.
 

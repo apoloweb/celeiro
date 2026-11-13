@@ -1314,7 +1314,7 @@ async function abrirTarefa(t,ctx){
     alvoA.innerHTML=as.length?'<ul class="anexos">'+as.map(function(x){var dh=dataHora(x.criado_em);
       return '<li><button type="button" class="link" data-ver-anexo="'+esc(x.id)+'">'+esc(x.nome)+'</button><span class="apoio">'+esc(tamanhoTxt(x.tamanho))+' · '+esc(x.por)+' · '+esc(dh.data)+'</span>'+
         '<button type="button" class="botao claro pequeno" data-ver-anexo="'+esc(x.id)+'">Ver</button><button type="button" class="botao sutil pequeno" data-baixar-anexo="'+esc(x.id)+'">Baixar</button>'+
-        (x.pode_excluir?'<button type="button" class="botao sutil pequeno" data-excluir-anexo="'+esc(x.id)+'">Excluir</button>':'')+'</li>';}).join('')+'</ul>':'<p class="apoio">Nenhum anexo ainda.</p>';
+        '</li>';}).join('')+'</ul>':'<p class="apoio">Nenhum anexo ainda.</p>';
     function achar(id){return as.filter(function(x){return x.id===id;})[0];}
     async function baixarAnexo(x){
       var u=await sb.storage.from('workflow-anexos').createSignedUrl(x.caminho,60,{download:x.nome});
