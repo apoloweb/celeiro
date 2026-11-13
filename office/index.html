@@ -519,7 +519,7 @@ function ehMaster(){return !!E.acesso&&E.acesso.perfil==='master';}
 function ehCorpMaster(){return !!E.acesso&&E.acesso.perfil==='corp_master';}
 
 function montarCasca(){
-  var a=E.acesso,itens='<a href="#inicio" data-rota="inicio">Início</a>';
+  var a=E.acesso,itens='';
   E.modulos.forEach(function(m){
     if(m.codigo==='auditoria'||!temModulo(m.codigo))return;
     if(PRONTOS[m.codigo]){itens+='<a href="#'+esc(m.codigo)+'" data-rota="'+esc(m.codigo)+'">'+esc(m.nome)+'</a>';return;}
@@ -562,14 +562,24 @@ var ROTAS={
   app:{titulo:'Aplicativo',modulo:'Aplicativo',fn:telaApp,pode:function(){return temModulo('app');},semGrupo:true}
 };
 
+/* Primeira tela de cada pessoa: Dashboard, senão o primeiro módulo disponível.
+   A página inicial antiga só aparece para quem não tem nenhuma tela para abrir. */
+function rotaPadrao(){
+  if(temModulo('dashboard'))return 'dashboard';
+  var m=E.modulos.filter(function(x){return PRONTOS[x.codigo]&&ROTAS[x.codigo]&&temModulo(x.codigo);})[0];
+  if(m)return m.codigo;
+  if(ROTAS.usuarios.pode())return 'usuarios';
+  return 'inicio';
+}
 function rota(){
   if(!E.acesso||!$('#tela'))return;
-  var h=(location.hash||'#inicio').slice(1),r=ROTAS[h],mod=null;
+  var h=(location.hash||'#').slice(1)||rotaPadrao(),r=ROTAS[h],mod=null;
+  if(h==='inicio'){h=rotaPadrao();r=ROTAS[h];}
   if(!r&&h.indexOf('m-')===0){
     mod=E.modulos.filter(function(m){return m.codigo===h.slice(2);})[0];
     if(mod&&temModulo(mod.codigo)&&!PRONTOS[mod.codigo]){r={titulo:mod.nome,modulo:mod.nome,fn:function(){telaPrevista(mod);},pode:function(){return true;}};}
   }
-  if(!r||!r.pode()){h='inicio';r=ROTAS.inicio;}
+  if(!r||!r.pode()){h=rotaPadrao();r=ROTAS[h];}
   $$('.lateral a').forEach(function(l){if(l.getAttribute('data-rota')===h)l.setAttribute('aria-current','page');else l.removeAttribute('aria-current');});
   $('#trilha').textContent=(h==='inicio'||mod||r.semGrupo?'':'Administração / ')+r.titulo;
   document.title=r.titulo+' · Celeiro Office';
