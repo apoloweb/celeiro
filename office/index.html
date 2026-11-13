@@ -789,7 +789,7 @@ async function telaUsuarios(op){
       '<div class="grade">'+
       '<div class="campo"><label for="u-nome">Nome</label><input id="u-nome" type="text" maxlength="120" value="'+esc(ed?ed.nome:'')+'" required></div>'+
       '<div class="campo"><label for="u-email">E-mail</label><input id="u-email" type="email" autocomplete="off" value="'+esc(ed?ed.email:'')+'" required></div>'+
-      (ed?'':'<div class="campo"><label for="u-fone">WhatsApp (opcional)</label><input id="u-fone" type="tel" inputmode="tel" autocomplete="off" maxlength="20" placeholder="(11) 99999-9999"></div>')+
+      (ed?'':'<div class="campo"><label for="u-fone">WhatsApp (opcional)</label><input id="u-fone" type="text" inputmode="tel" autocomplete="off" maxlength="20" placeholder="(11) 99999-9999"></div>')+
       (ed||vincular?'':'<div class="campo"><label for="u-senha">Senha inicial (mínimo 10 caracteres)</label><div class="junto"><input id="u-senha" type="text" autocomplete="off" maxlength="72" required><button class="botao claro pequeno" type="button" id="b-gerar">Gerar</button></div></div>')+
       '</div><div class="grade">'+
       '<div class="campo"><label for="u-perfil">Perfil</label><select id="u-perfil"'+(ed&&ed.user_id===a.user_id?' disabled':'')+'>'+optPerfil+'</select></div>'+
