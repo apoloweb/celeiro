@@ -44,7 +44,7 @@ button,input,select{font-family:inherit;font-size:15px;color:var(--verde)}
 /* formulários */
 .campo{display:flex;flex-direction:column;gap:8px}
 .campo label,.campo .rotulo{font-size:14px;font-weight:500}
-input[type=text],input[type=email],input[type=password],input[type=date],select{height:48px;padding:0 14px;border:1px solid var(--borda);border-radius:8px;background:var(--branco);width:100%}
+input[type=text],input[type=email],input[type=password],input[type=date],input[type=month],select{height:48px;padding:0 14px;border:1px solid var(--borda);border-radius:8px;background:var(--branco);width:100%}
 input.codigo{font-size:24px;font-weight:600;letter-spacing:.35em;text-align:center;height:60px}
 .botao{height:48px;padding:0 22px;border:0;border-radius:8px;background:var(--verde);color:var(--nevoa);font-weight:600;cursor:pointer}
 .botao:hover{background:var(--verde2)}
@@ -250,7 +250,7 @@ var app=document.getElementById('app');
 var elAviso=document.getElementById('aviso');
 
 var PERFIS={master:'Master',gerencial:'Gerencial',corp_master:'Corporativo master',corp_operador:'Corporativo operador'};
-var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true,mcp:true,financeiro:true,investimentos:true};
+var PRONTOS={auditoria:true,workflow:true,dashboard:true,app:true,cadastro:true,mcp:true,financeiro:true,investimentos:true,energia:true};
 var INATIVIDADE_MS=15*60*1000;
 var MAX_TENTATIVAS=5;
 var E={acesso:null,modulos:[],recuperando:/type=recovery/.test(hashInicial),novoLogin:false,tentativas:0,relogio:null,avisoRelogio:null};
@@ -605,7 +605,8 @@ var ROTAS={
   financeiro:{titulo:'Financeiro',modulo:'Financeiro',fn:telaFinanceiro,pode:function(){return temModulo('financeiro');},semGrupo:true},
   investimentos:{titulo:'Investimentos',modulo:'Investimentos',fn:telaInvestimentos,pode:function(){return temModulo('investimentos');},semGrupo:true},
   mcp:{titulo:'Conexão MCP',modulo:'Conexão MCP',fn:telaMcp,pode:function(){return temModulo('mcp');},semGrupo:true},
-  app:{titulo:'Aplicativo',modulo:'Aplicativo',fn:telaApp,pode:function(){return temModulo('app');},semGrupo:true}
+  app:{titulo:'Aplicativo',modulo:'Aplicativo',fn:telaApp,pode:function(){return temModulo('app');},semGrupo:true},
+  energia:{titulo:'Energia',modulo:'Energia',fn:telaEnergia,pode:function(){return temModulo('energia');},semGrupo:true}
 };
 
 /* Primeira tela de cada pessoa: Dashboard, senão o primeiro módulo disponível.
@@ -652,7 +653,7 @@ function telaInicio(){
   });
   tela('<div class="cabeca"><div><h1>Olá, '+esc(a.nome)+'</h1><p class="apoio">Perfil '+esc(PERFIS[a.perfil])+(a.organizacao?' · '+esc(a.organizacao):'')+'. Estes são os módulos habilitados para você.</p></div></div>'+
     (c?'<div class="cartoes">'+c+'</div>':'<p class="painel">Nenhum módulo foi habilitado para o seu perfil ainda.</p>')+
-    '<p class="nota">Já construídos: acesso, perfis, módulos, níveis de permissão, auditoria, Workflow e Dashboard. Os demais módulos aparecem aqui conforme forem construídos.</p>');
+    '<p class="nota">Já construídos: acesso, perfis, módulos, níveis de permissão, auditoria, Workflow, Dashboard, Cadastro e Energia. Os demais módulos aparecem aqui conforme forem construídos.</p>');
 }
 
 function telaPrevista(m){
@@ -2738,12 +2739,14 @@ async function telaDashboard(){
     temWf?sb.rpc('workflow_listar'):Promise.resolve({data:[],error:null}),
     sb.from('usuarios').select('user_id,ativo'),
     sb.from('organizacoes').select('id,ativo'),
-    temModulo('financeiro')?sb.rpc('fin_dashboard',{p_org:ehEquipe()?null:a.organizacao_id,p_ini:finMes(new Date())[0],p_fim:finMes(new Date())[1]}):Promise.resolve({data:null,error:null})
+    temModulo('financeiro')?sb.rpc('fin_dashboard',{p_org:ehEquipe()?null:a.organizacao_id,p_ini:finMes(new Date())[0],p_fim:finMes(new Date())[1]}):Promise.resolve({data:null,error:null}),
+    temModulo('energia')?sb.rpc('energia_resumo'):Promise.resolve({data:null,error:null})
   ]);
   if(rs[0].error){falhaTela('Dashboard',rs[0].error);return;}
   if(temWf){WF.tarefas=rs[0].data||[];}
   var ts=temWf?WF.tarefas:[],usuarios=rs[1].error?[]:(rs[1].data||[]),orgs=rs[2].error?[]:(rs[2].data||[]);
-  var fin=rs[3].error?null:rs[3].data;
+  var fin=rs[3].error?null:rs[3].data,en=rs[4].error?null:rs[4].data;
+  var enPct=en&&Number(en.referencia_12m)>0?Number(en.economia_12m)/Number(en.referencia_12m)*100:null;
   function cartaoFin(titulo,valor,sub,alerta){
     if(!fin)return '<div class="cartao-d baixo apagado"><div class="cartao-d-topo"><span>'+titulo+'</span></div><p class="numero">Sem dados</p><p class="apoio">'+(temModulo('financeiro')?'Não foi possível ler o Financeiro agora':'Módulo Financeiro não habilitado para você')+'</p></div>';
     return '<div class="cartao-d baixo" data-cartao-fin="'+titulo+'"><div class="cartao-d-topo"><span>'+titulo+'</span><a href="#financeiro">Abrir →</a></div><p class="numero'+(alerta?' neg':'')+'">'+esc(valor)+'</p><p class="apoio">'+esc(sub)+'</p></div>';
@@ -2811,7 +2814,8 @@ async function telaDashboard(){
     '<div class="grade-d">'+
       cartaoFin('Arrecadação',fin?moeda(fin.recebido):'',fin?'Recebido neste mês · '+moeda(fin.receber_aberto)+' ainda a receber':'')+
       cartaoFin('Inadimplentes',fin?moeda(fin.receber_vencido):'',fin?(Number(fin.receber_vencido_qtd)?fin.receber_vencido_qtd+(Number(fin.receber_vencido_qtd)===1?' conta vencida':' contas vencidas')+' a receber':'Nenhuma conta a receber vencida'):'',fin&&Number(fin.receber_vencido)>0)+
-      '<div class="cartao-d baixo apagado"><div class="cartao-d-topo"><span>Economia de energia</span></div><p class="numero">Sem dados</p><p class="apoio">Fonte dos dados ainda não definida</p></div>'+
+      (en?'<div class="cartao-d baixo"><div class="cartao-d-topo"><span>Economia de energia</span><a href="#energia">Ver energia →</a></div><p class="numero">'+esc(fmtMoeda(en.economia_12m||0))+'</p><p class="apoio">'+(enPct===null?'nenhuma apuração nos últimos 12 meses':esc(enNum(enPct,1))+'% sobre o custo no cativo · 12 meses')+'</p></div>':
+        '<div class="cartao-d baixo apagado"><div class="cartao-d-topo"><span>Economia de energia</span></div><p class="numero">Sem dados</p><p class="apoio">'+(temModulo('energia')?'Rode o supabase-energia.sql no banco':'Depende do módulo Energia')+'</p></div>')+
     '</div>');
   $$('[data-ir-aba]').forEach(function(l){l.onclick=function(){WF.aba=l.getAttribute('data-ir-aba');WF.busca='';};});
   $$('[data-abrir-d]').forEach(function(b){b.onclick=function(){var t=ts.filter(function(x){return x.id===b.getAttribute('data-abrir-d');})[0];if(t)abrirTarefa(t);};});
@@ -3318,6 +3322,587 @@ function editarPj(j){
       if(g.error){aviso('Empresa salva, mas o quadro societário não foi gravado: '+msgErro(g.error),true);verPj(r.data,'representantes');return;}
     }
     aviso(novo?'Pessoa jurídica cadastrada.':'Cadastro salvo.');verPj(r.data,qsaNovo&&qsaNovo.length?'representantes':'empresa');
+  };
+}
+
+/* ---------- Energia: unidades consumidoras, contratos, apuração mensal e funil de migração ---------- */
+var EN={aba:'geral',busca:'',competencia:'',testes:false,resumo:null,unidades:[],contratos:[],vinculos:[],apuracoes:[],migracoes:[],pf:[],pj:[],orgs:[],equipe:[]};
+var EN_AMBIENTES=[['cativo','Cativo (distribuidora)'],['em_migracao','Em migração'],['livre','Mercado livre'],['gd','Geração distribuída']];
+var EN_SUBGRUPOS={A:['A1','A2','A3','A3a','A4','AS'],B:['B1','B2','B3','B4']};
+var EN_MODALIDADES=[['azul','Azul'],['verde','Verde'],['convencional','Convencional'],['branca','Branca']];
+var EN_CT_STATUS=[['rascunho','Rascunho'],['assinado','Assinado'],['vigente','Vigente'],['encerrado','Encerrado'],['cancelado','Cancelado']];
+var EN_PRODUTOS=[['acl','Mercado livre (ACL)'],['gd','Geração distribuída (GD)']];
+var EN_SUBMERCADOS=[['SE/CO','Sudeste/Centro-Oeste'],['S','Sul'],['NE','Nordeste'],['N','Norte']];
+var EN_FONTES=[['convencional','Convencional'],['incentivada_50','Incentivada 50%'],['incentivada_100','Incentivada 100%'],['solar','Solar'],['eolica','Eólica'],['hidrica','Hídrica'],['biomassa','Biomassa']];
+var EN_INDICES=[['IPCA','IPCA'],['IGP-M','IGP-M'],['nenhum','Sem reajuste']];
+var EN_FATURAS=[['a_emitir','A emitir'],['emitida','Emitida'],['paga','Paga'],['vencida','Vencida'],['cancelada','Cancelada']];
+var EN_ETAPAS=[['lead','Lead'],['analise','Análise da fatura'],['proposta','Proposta enviada'],['contrato','Contrato assinado'],['denuncia','Denúncia na distribuidora'],['ccee','Adesão à CCEE'],['migrada','Migrada'],['perdida','Perdida']];
+
+function enNum(v,casas){if(v===null||v===undefined||v==='')return '';return Number(v).toLocaleString('pt-BR',{minimumFractionDigits:casas||0,maximumFractionDigits:casas==null?2:casas});}
+/* número digitado em português: "1.234,56", "60.000" ou "12,5" viram "1234.56", "60000" e "12.5" */
+function enLeNum(v){
+  var t=String(v==null?'':v).replace(/[^\d,.]/g,'');
+  if(t.indexOf(',')>=0)return t.replace(/\./g,'').replace(',','.');
+  if(/^\d{1,3}(\.\d{3})+$/.test(t))return t.replace(/\./g,'');
+  return t;
+}
+function enCod(prefixo,n){return prefixo+'-'+('000'+n).slice(-4);}
+function enMes(iso){if(!iso)return '';var p=String(iso).slice(0,7).split('-');var m=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(p[1])-1];return m+'/'+p[0];}
+function enDias(iso){return Math.round((new Date(iso+'T00:00:00')-new Date(hojeIso()+'T00:00:00'))/86400000);}
+function enPf(id){return EN.pf.filter(function(x){return x.id===id;})[0];}
+function enPj(id){return EN.pj.filter(function(x){return x.id===id;})[0];}
+function enPessoa(pf,pj){
+  if(pf){var p=enPf(pf);return p?p.nome_completo:'Pessoa física';}
+  if(pj){var j=enPj(pj);return j?(j.nome_fantasia||j.razao_social):'Pessoa jurídica';}
+  return '—';
+}
+function enUnidade(id){return EN.unidades.filter(function(x){return x.id===id;})[0];}
+function enNomeUnidade(u){return u?(u.apelido||('Instalação '+u.codigo_instalacao)):'—';}
+function enContrato(id){return EN.contratos.filter(function(x){return x.id===id;})[0];}
+function enParte(c){return c.tipo==='compra'?c.contraparte:enPessoa(c.cliente_pf_id,c.cliente_pj_id);}
+function enOrg(id){if(!id)return 'Celeiro';var o=EN.orgs.filter(function(x){return x.id===id;})[0];return o?o.nome:'—';}
+function enUnidadesDoContrato(cid){return EN.vinculos.filter(function(v){return v.contrato_id===cid;}).map(function(v){return enUnidade(v.unidade_id);}).filter(Boolean);}
+function enContratosDaUnidade(uid){return EN.vinculos.filter(function(v){return v.unidade_id===uid;}).map(function(v){return enContrato(v.contrato_id);}).filter(Boolean);}
+function enVencendo(c){return (c.status==='vigente'||c.status==='assinado')&&enDias(c.fim)>=0&&enDias(c.fim)<=90;}
+function enSituacaoContrato(c){
+  var cls=c.status==='vigente'?'situacao':(c.status==='rascunho'||c.status==='assinado'?'selo claro':'situacao off');
+  return '<span class="'+cls+'">'+esc(rotuloDe(EN_CT_STATUS,c.status))+'</span>';
+}
+function enSeletorOrg(id,org,novo){
+  if(!ehEquipe())return '';
+  return '<div class="campo" style="max-width:420px"><label for="'+id+'">De quem é</label><select id="'+id+'"'+(novo?'':' disabled')+'><option value="">Celeiro</option>'+
+    EN.orgs.filter(function(o){return o.ativo||o.id===org;}).map(function(o){return '<option value="'+esc(o.id)+'"'+(o.id===org?' selected':'')+'>'+esc(o.nome)+'</option>';}).join('')+'</select></div>';
+}
+function enOrgEscolhida(id){return ehEquipe()?($('#'+id)?($('#'+id).value||null):null):E.acesso.organizacao_id;}
+function enOpcoesPessoa(org,pf,pj){
+  var ops='<option value="">Escolha no Cadastro</option>';
+  var pjs=EN.pj.filter(function(j){return (j.organizacao_id||null)===(org||null)&&(j.situacao==='ativo'||j.id===pj);});
+  var pfs=EN.pf.filter(function(p){return (p.organizacao_id||null)===(org||null)&&(p.situacao==='ativo'||p.id===pf);});
+  if(pjs.length)ops+='<optgroup label="Pessoas jurídicas">'+pjs.map(function(j){return '<option value="pj:'+esc(j.id)+'"'+(j.id===pj?' selected':'')+'>'+esc(j.razao_social)+' · '+esc(formataCnpj(j.cnpj))+'</option>';}).join('')+'</optgroup>';
+  if(pfs.length)ops+='<optgroup label="Pessoas físicas">'+pfs.map(function(p){return '<option value="pf:'+esc(p.id)+'"'+(p.id===pf?' selected':'')+'>'+esc(p.nome_completo)+' · '+esc(fmtCpf(p.cpf))+'</option>';}).join('')+'</optgroup>';
+  return ops;
+}
+function enLePessoa(v,pfKey,pjKey,d){d[pfKey]='';d[pjKey]='';if(v.indexOf('pf:')===0)d[pfKey]=v.slice(3);if(v.indexOf('pj:')===0)d[pjKey]=v.slice(3);}
+function enDialogo(id,titulo,corpo,rodape){
+  var velho=$('#'+id);if(velho)velho.remove();
+  var d=document.createElement('dialog');d.id=id;d.className='dlg';d.setAttribute('aria-labelledby',id+'-t');
+  d.innerHTML='<form novalidate><div class="dlg-topo"><h2 id="'+id+'-t">'+esc(titulo)+'</h2><button type="button" class="botao claro pequeno" data-fechar>Fechar</button></div>'+
+    '<div class="dlg-corpo">'+corpo+'</div><div class="dlg-rodape">'+rodape+'</div></form>';
+  document.body.appendChild(d);
+  d.fechar=function(){try{d.close();}catch(err){}d.remove();};
+  $('[data-fechar]',d).onclick=d.fechar;
+  d.addEventListener('cancel',function(ev){ev.preventDefault();d.fechar();});
+  d.showModal();
+  return d;
+}
+
+async function carregaEnergia(){
+  var eq=ehEquipe();
+  var rs=await Promise.all([
+    sb.rpc('energia_resumo'),
+    sb.from('energia_unidades').select('*').order('criado_em'),
+    sb.from('energia_contratos').select('*').order('numero',{ascending:false}),
+    sb.from('energia_contrato_unidades').select('*'),
+    sb.from('energia_apuracoes').select('*').order('competencia',{ascending:false}).limit(1000),
+    eq?sb.from('energia_migracoes').select('*').order('criado_em',{ascending:false}):Promise.resolve({data:[],error:null}),
+    sb.rpc('energia_pessoas'),
+    eq?sb.from('organizacoes').select('*').order('nome'):Promise.resolve({data:[],error:null}),
+    eq?sb.from('usuarios').select('user_id,nome,perfil,ativo').order('nome'):Promise.resolve({data:[],error:null})
+  ]);
+  for(var i=0;i<7;i++){if(rs[i].error)throw rs[i].error;}
+  EN.resumo=rs[0].data||{};EN.unidades=rs[1].data||[];EN.contratos=rs[2].data||[];EN.vinculos=rs[3].data||[];
+  EN.apuracoes=rs[4].data||[];EN.migracoes=rs[5].data||[];
+  EN.pf=(rs[6].data&&rs[6].data.pf)||[];EN.pj=(rs[6].data&&rs[6].data.pj)||[];EN.orgs=rs[7].error?[]:(rs[7].data||[]);
+  EN.equipe=(rs[8].error?[]:(rs[8].data||[])).filter(function(u){return u.ativo&&(u.perfil==='master'||u.perfil==='gerencial');});
+}
+async function telaEnergia(){
+  carregando('Energia');
+  try{await carregaEnergia();}catch(e){falhaTela('Energia',e);return;}
+  desenhaEnergia();
+}
+async function recarregaEnergia(aba){
+  try{await carregaEnergia();}catch(e){aviso(msgErro(e),true);}
+  if(aba)EN.aba=aba;
+  desenhaEnergia();
+}
+function desenhaEnergia(){
+  var eq=ehEquipe();
+  if(EN.aba==='migracao'&&!eq)EN.aba='geral';
+  var abas=[['geral','Visão geral',null],['unidades','Unidades',EN.unidades.filter(function(u){return u.situacao==='ativo';}).length],['contratos','Contratos',EN.contratos.length],['apuracao','Apuração mensal',null]];
+  if(eq)abas.push(['migracao','Migração',EN.migracoes.filter(function(m){return !m.teste&&m.etapa!=='migrada'&&m.etapa!=='perdida';}).length]);
+  var botao={unidades:'Nova unidade',contratos:'Novo contrato',apuracao:'Lançar apuração',migracao:'Novo pedido'}[EN.aba];
+  tela('<div class="cabeca"><div><h1>Energia</h1><p class="apoio">Comercialização de energia: unidades consumidoras, contratos, apuração da economia de cada mês'+(eq?' e o funil de migração para o mercado livre':'')+'.</p></div>'+
+      (botao?'<button class="botao" type="button" id="en-novo">'+botao+'</button>':'')+'</div>'+
+    '<div class="segmento" role="group" aria-label="Partes do módulo Energia">'+abas.map(function(a){
+      return '<button type="button" class="aba" data-en-aba="'+a[0]+'" aria-pressed="'+(EN.aba===a[0]?'true':'false')+'">'+a[1]+(a[2]!==null?' <span class="conta">'+a[2]+'</span>':'')+'</button>';}).join('')+'</div>'+
+    '<div id="en-corpo"></div>');
+  $$('[data-en-aba]').forEach(function(b){b.onclick=function(){EN.aba=b.getAttribute('data-en-aba');EN.busca='';desenhaEnergia();};});
+  if($('#en-novo'))$('#en-novo').onclick=function(){
+    if(EN.aba==='unidades')editarUnidade(null);
+    else if(EN.aba==='contratos')editarContrato(null);
+    else if(EN.aba==='apuracao')lancarApuracao(null,null);
+    else if(EN.aba==='migracao')editarMigracao(null);
+  };
+  ({geral:enGeral,unidades:enUnidades,contratos:enContratos,apuracao:enApuracao,migracao:enMigracao})[EN.aba]();
+}
+
+/* ----- visão geral ----- */
+function enGeral(){
+  var r=EN.resumo||{},amb=r.por_ambiente||{},eq=ehEquipe();
+  var pct=Number(r.referencia_12m)>0?(Number(r.economia_12m)/Number(r.referencia_12m)*100):null;
+  function cartao(t,v,s){return '<div class="cartao-d baixo"><div class="cartao-d-topo"><span>'+esc(t)+'</span></div><p class="numero">'+esc(v)+'</p><p class="apoio">'+esc(s)+'</p></div>';}
+  var meses=[],mapa={};(r.meses||[]).forEach(function(m){mapa[String(m.competencia).slice(0,7)]=m;});
+  var d=new Date();d.setDate(1);
+  for(var i=11;i>=0;i--){var x=new Date(d.getFullYear(),d.getMonth()-i,1);var k=x.getFullYear()+'-'+('0'+(x.getMonth()+1)).slice(-2);meses.push({k:k,v:mapa[k]?Number(mapa[k].economia):0,tem:!!mapa[k]});}
+  var maxV=Math.max.apply(null,meses.map(function(m){return Math.abs(m.v);}).concat([1]));
+  var L=64,T=12,W=640,H=230,AW=W-L-8,AH=H-T-30,passo=AW/12,svg='';
+  for(var g=0;g<=4;g++){var y=T+AH-(AH*g/4);svg+='<line x1="'+L+'" y1="'+y+'" x2="'+(W-8)+'" y2="'+y+'" stroke="#D5DED9" stroke-width="1"/><text x="'+(L-8)+'" y="'+(y+4)+'" text-anchor="end" font-size="11" fill="#44564E">'+esc(enNum(maxV*g/4,0))+'</text>';}
+  meses.forEach(function(m,k){
+    var x=L+k*passo,h=AH*Math.max(0,m.v)/maxV,bw=Math.max(6,passo-14);
+    if(m.v>0)svg+='<rect x="'+(x+7)+'" y="'+(T+AH-h)+'" width="'+bw+'" height="'+h+'" rx="2" fill="#0F3D2E"><title>'+esc(enMes(m.k))+': '+esc(fmtMoeda(m.v))+'</title></rect>';
+    svg+='<text x="'+(x+passo/2)+'" y="'+(H-10)+'" text-anchor="middle" font-size="11" fill="#44564E">'+esc(enMes(m.k).slice(0,3))+'</text>';
+  });
+  var algum=meses.some(function(m){return m.tem;});
+  var vencendo=EN.contratos.filter(enVencendo).sort(function(a,b){return a.fim.localeCompare(b.fim);});
+  var funil=r.funil||{};
+  $('#en-corpo').innerHTML=
+    '<div class="grade-d">'+
+      cartao('Unidades ativas',String(r.unidades||0),EN_AMBIENTES.map(function(a){return (amb[a[0]]||0)+' '+a[1].split(' (')[0].toLowerCase();}).join(' · '))+
+      cartao('Contratos vigentes',String(r.contratos_vigentes||0),enNum(r.volume_venda_mwh,1)+' MWh/mês vendidos'+(eq?' · '+enNum(r.volume_compra_mwh,1)+' comprados':''))+
+      cartao('Economia em 12 meses',fmtMoeda(r.economia_12m||0),pct===null?'sem apuração lançada':enNum(pct,1)+'% sobre o custo no mercado cativo')+
+      cartao('Faturas em aberto',String(r.faturas_abertas||0),(r.faturas_vencidas||0)+(r.faturas_vencidas===1?' vencida':' vencidas'))+
+    '</div>'+
+    '<div class="dupla-d">'+
+      '<section class="painel" style="flex:2 1 420px"><div class="cartao-d-topo"><span><strong>Economia por mês</strong> <span class="apoio">últimos 12 meses</span></span><a href="#energia" data-en-ir="apuracao">Ver apuração →</a></div>'+
+        (algum?'<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Economia por mês nos últimos 12 meses, total '+esc(fmtMoeda(r.economia_12m||0))+'" style="width:100%;height:auto">'+svg+'</svg>':'<p class="vazio">Nenhuma apuração lançada nos últimos 12 meses.</p>')+'</section>'+
+      '<section class="painel" style="flex:1 1 300px"><div class="cartao-d-topo"><span><strong>Contratos vencendo em 90 dias</strong></span><a href="#energia" data-en-ir="contratos">Ver todos →</a></div>'+
+        (vencendo.length?'<ul class="lista-p">'+vencendo.slice(0,7).map(function(c){
+          var dd=enDias(c.fim);
+          return '<li><button type="button" class="titulo-t" data-en-ct="'+esc(c.id)+'"><span class="codigo">'+esc(enCod('CE',c.numero))+'</span> '+esc(enParte(c))+'</button>'+
+            '<span class="meta'+(dd<=30?' vencida':'')+'">Termina em '+esc(dataBr(c.fim))+' · '+(dd===0?'hoje':dd+(dd===1?' dia':' dias'))+'</span></li>';}).join('')+'</ul>'
+          :'<p class="vazio">Nenhum contrato termina nos próximos 90 dias.</p>')+'</section>'+
+    '</div>'+
+    (eq?'<h2 class="titulo-s">Funil de migração</h2><div class="cartoes">'+EN_ETAPAS.map(function(e){
+      return '<a class="cartao" href="#energia" data-en-ir="migracao"><span>'+esc(e[1])+'</span><strong style="font-size:24px">'+(funil[e[0]]||0)+'</strong></a>';}).join('')+'</div>':'')+
+    '<p class="nota">Economia de cada mês = quanto a unidade pagaria no mercado cativo − (o que pagou à distribuidora + a energia faturada). Os valores vêm da apuração lançada pela equipe; ainda não há leitura automática de faturas nem da CCEE.</p>';
+  $$('[data-en-ir]').forEach(function(a){a.onclick=function(ev){ev.preventDefault();EN.aba=a.getAttribute('data-en-ir');desenhaEnergia();};});
+  $$('[data-en-ct]').forEach(function(b){b.onclick=function(){verContrato(b.getAttribute('data-en-ct'));};});
+}
+
+/* ----- unidades consumidoras ----- */
+function enUnidades(){
+  var eq=ehEquipe();
+  $('#en-corpo').innerHTML='<div class="campo"><label class="oculto-visual" for="en-busca">Buscar</label><input id="en-busca" type="text" placeholder="Buscar por nome, instalação, titular ou distribuidora" value="'+esc(EN.busca)+'"></div><div id="en-lista"></div>';
+  function lista(){
+    var b=EN.busca.trim().toLowerCase();
+    var linhas=EN.unidades.filter(function(u){
+      return !b||[u.apelido,u.codigo_instalacao,u.distribuidora,u.cidade,enPessoa(u.titular_pf_id,u.titular_pj_id)].join(' ').toLowerCase().indexOf(b)>=0;
+    }).sort(function(x,y){return (x.situacao===y.situacao?0:(x.situacao==='ativo'?-1:1))||enNomeUnidade(x).localeCompare(enNomeUnidade(y));}).map(function(u){
+      return '<tr><td><button type="button" class="titulo-t" data-en-un="'+esc(u.id)+'">'+esc(enNomeUnidade(u))+'</button>'+(u.apelido?'<span class="sub">Instalação '+esc(u.codigo_instalacao)+'</span>':'')+'</td>'+
+        '<td>'+esc(enPessoa(u.titular_pf_id,u.titular_pj_id))+'</td>'+
+        '<td>'+esc(u.distribuidora)+'<span class="sub">'+esc(u.cidade?(u.cidade+(u.uf?' - '+u.uf:'')):'')+'</span></td>'+
+        '<td>'+esc(u.grupo+(u.subgrupo?' · '+u.subgrupo:''))+'<span class="sub">'+esc(u.modalidade?rotuloDe(EN_MODALIDADES,u.modalidade):'')+'</span></td>'+
+        '<td>'+esc(rotuloDe(EN_AMBIENTES,u.ambiente))+'</td>'+(eq?'<td>'+esc(enOrg(u.organizacao_id))+'</td>':'')+
+        '<td><span class="situacao'+(u.situacao==='ativo'?'':' off')+'">'+(u.situacao==='ativo'?'Ativa':'Inativa')+'</span></td></tr>';
+    }).join('');
+    $('#en-lista').innerHTML='<div class="rolagem"><table style="min-width:860px"><thead><tr><th scope="col">Unidade</th><th scope="col">Titular</th><th scope="col">Distribuidora</th><th scope="col">Grupo</th><th scope="col">Ambiente</th>'+(eq?'<th scope="col">De quem</th>':'')+'<th scope="col">Situação</th></tr></thead><tbody>'+
+      (linhas||'<tr><td colspan="'+(eq?7:6)+'" class="vazio">'+(EN.unidades.length?'Nenhuma unidade nesta busca.':'Nenhuma unidade consumidora cadastrada.')+'</td></tr>')+'</tbody></table></div>';
+    $$('[data-en-un]').forEach(function(x){x.onclick=function(){verUnidade(x.getAttribute('data-en-un'));};});
+  }
+  $('#en-busca').oninput=function(){EN.busca=this.value;lista();};
+  lista();
+}
+function verUnidade(id){
+  var u=enUnidade(id);if(!u){aviso('Unidade não encontrada.',true);return;}
+  evento('Abriu uma unidade consumidora','Energia',{id:u.id});
+  var cts=enContratosDaUnidade(u.id),aps=EN.apuracoes.filter(function(a){return a.unidade_id===u.id;});
+  var endereco=[u.logradouro,u.numero,u.complemento,u.bairro,u.cidade&&(u.cidade+(u.uf?' - '+u.uf:'')),u.cep&&fmtCep(u.cep)].filter(Boolean).join(', ');
+  tela('<div class="cabeca"><div><h1>'+esc(enNomeUnidade(u))+'</h1><p class="apoio">Unidade consumidora · '+esc(ehEquipe()?enOrg(u.organizacao_id):'sua organização')+' · '+(u.situacao==='ativo'?'Ativa':'Inativa')+'</p></div>'+
+      '<div class="acoes"><button class="botao claro" type="button" id="f-voltar">Voltar</button><button class="botao" type="button" id="f-editar">Editar</button>'+
+      '<button class="botao claro" type="button" id="f-apurar">Lançar apuração</button>'+
+      '<button class="botao claro" type="button" id="f-situacao">'+(u.situacao==='ativo'?'Inativar':'Reativar')+'</button>'+
+      (temModulo('workflow')?'<button class="botao ambar" type="button" id="f-tarefa">Nova tarefa</button>':'')+'</div></div>'+
+    '<div class="painel"><h2 class="titulo-s">Identificação</h2><div class="dados">'+
+      dado('Titular',enPessoa(u.titular_pf_id,u.titular_pj_id))+dado('Distribuidora',u.distribuidora)+dado('Número da instalação',u.codigo_instalacao,true)+
+      dado('Ambiente',rotuloDe(EN_AMBIENTES,u.ambiente))+'</div>'+
+      '<h2 class="titulo-s">Classificação e consumo</h2><div class="dados">'+
+      dado('Grupo / subgrupo',u.grupo+(u.subgrupo?' · '+u.subgrupo:''))+dado('Modalidade tarifária',u.modalidade?rotuloDe(EN_MODALIDADES,u.modalidade):'')+
+      dado('Demanda na ponta',u.demanda_ponta_kw==null?'':enNum(u.demanda_ponta_kw,2)+' kW')+dado('Demanda fora da ponta',u.demanda_fora_kw==null?'':enNum(u.demanda_fora_kw,2)+' kW')+
+      dado('Consumo médio',u.consumo_medio_kwh==null?'':enNum(u.consumo_medio_kwh,0)+' kWh/mês')+'</div>'+
+      '<h2 class="titulo-s">Endereço</h2><div class="dados">'+dado('Endereço da unidade',endereco)+'</div>'+
+      (u.observacoes?'<h2 class="titulo-s">Observações</h2><p style="white-space:pre-wrap">'+esc(u.observacoes)+'</p>':'')+'</div>'+
+    '<div class="painel"><h2>Contratos que atendem a unidade</h2>'+(cts.length?'<ul class="lista-p">'+cts.map(function(c){
+      return '<li><button type="button" class="titulo-t" data-en-ct="'+esc(c.id)+'"><span class="codigo">'+esc(enCod('CE',c.numero))+'</span> '+esc(rotuloDe(EN_PRODUTOS,c.produto))+'</button><span class="meta">'+esc(dataBr(c.inicio))+' a '+esc(dataBr(c.fim))+' · '+esc(rotuloDe(EN_CT_STATUS,c.status))+'</span></li>';}).join('')+'</ul>':'<p class="apoio">Nenhum contrato ligado a esta unidade.</p>')+'</div>'+
+    '<div class="painel"><h2>Apurações</h2>'+enTabelaApuracoes(aps,false)+'</div>');
+  ligaCopiar();ligaTabelaApuracoes();
+  $$('[data-en-ct]').forEach(function(b){b.onclick=function(){verContrato(b.getAttribute('data-en-ct'));};});
+  $('#f-voltar').onclick=function(){EN.aba='unidades';desenhaEnergia();};
+  $('#f-editar').onclick=function(){editarUnidade(u);};
+  $('#f-apurar').onclick=function(){lancarApuracao(u.id,null);};
+  $('#f-situacao').onclick=async function(){
+    ocupar(this,true);
+    var s=await sb.rpc('energia_unidade_situacao',{p_id:u.id,p_situacao:u.situacao==='ativo'?'inativo':'ativo'});
+    if(s.error){ocupar(this,false);aviso(msgErro(s.error),true);return;}
+    aviso(u.situacao==='ativo'?'Unidade inativada.':'Unidade reativada.');
+    await carregaEnergia().catch(function(){});verUnidade(u.id);
+  };
+  if($('#f-tarefa'))$('#f-tarefa').onclick=function(){abrirTarefa(null,{origem:'Unidade '+enNomeUnidade(u)+' ('+u.codigo_instalacao+')',modulo:'Energia'});};
+}
+function editarUnidade(u){
+  var novo=!u;u=u||{grupo:'B',ambiente:'cativo'};
+  var org=novo?(ehEquipe()?null:E.acesso.organizacao_id):(u.organizacao_id||null);
+  function subOpc(g,atual){return '<option value="">Não informado</option>'+EN_SUBGRUPOS[g].map(function(s){return '<option'+(s===atual?' selected':'')+'>'+s+'</option>';}).join('');}
+  tela('<div class="cabeca"><div><h1>'+(novo?'Nova unidade consumidora':'Editar unidade consumidora')+'</h1><p class="apoio">Obrigatórios: titular, distribuidora e número da instalação (está na conta de luz).</p></div></div>'+
+    '<form class="painel" id="f-un" novalidate>'+enSeletorOrg('u-org',org||'',novo)+
+    '<h2 class="titulo-s">Identificação</h2><div class="grade3">'+
+      '<div class="campo"><label for="u-titular">Titular</label><select id="u-titular">'+enOpcoesPessoa(org,u.titular_pf_id,u.titular_pj_id)+'</select></div>'+
+      ci('u-apelido','Nome da unidade (opcional)',u.apelido,'maxlength="120" placeholder="Ex.: Fábrica Duque de Caxias"')+
+      ci('u-distribuidora','Distribuidora',u.distribuidora,'maxlength="120" list="u-dists" required')+
+      ci('u-codigo_instalacao','Número da instalação',u.codigo_instalacao,'maxlength="40" required')+
+      cs('u-ambiente','Ambiente de contratação',u.ambiente,EN_AMBIENTES,'Escolha')+'</div>'+
+    '<datalist id="u-dists">'+EN.unidades.map(function(x){return x.distribuidora;}).filter(function(x,i,a){return a.indexOf(x)===i;}).map(function(x){return '<option value="'+esc(x)+'">';}).join('')+'</datalist>'+
+    '<p class="apoio" id="u-sem-cad" style="font-size:13px"></p>'+
+    '<h2 class="titulo-s">Classificação e consumo</h2><div class="grade3">'+
+      '<div class="campo"><label for="u-grupo">Grupo tarifário</label><select id="u-grupo"><option value="A"'+(u.grupo==='A'?' selected':'')+'>A · alta e média tensão</option><option value="B"'+(u.grupo==='B'?' selected':'')+'>B · baixa tensão</option></select></div>'+
+      '<div class="campo"><label for="u-subgrupo">Subgrupo</label><select id="u-subgrupo">'+subOpc(u.grupo||'B',u.subgrupo)+'</select></div>'+
+      cs('u-modalidade','Modalidade tarifária',u.modalidade,EN_MODALIDADES)+
+      ci('u-demanda_ponta_kw','Demanda na ponta (kW)',u.demanda_ponta_kw==null?'':enNum(u.demanda_ponta_kw,2),'inputmode="decimal" maxlength="20"')+
+      ci('u-demanda_fora_kw','Demanda fora da ponta (kW)',u.demanda_fora_kw==null?'':enNum(u.demanda_fora_kw,2),'inputmode="decimal" maxlength="20"')+
+      ci('u-consumo_medio_kwh','Consumo médio (kWh/mês)',u.consumo_medio_kwh==null?'':enNum(u.consumo_medio_kwh,0),'inputmode="decimal" maxlength="20"')+'</div>'+
+    '<h2 class="titulo-s">Endereço da unidade</h2><div class="grade3">'+
+      ci('u-cep','CEP',fmtCep(u.cep),'inputmode="numeric" maxlength="9"')+ci('u-logradouro','Logradouro',u.logradouro,'maxlength="160"')+ci('u-numero','Número',u.numero,'maxlength="20"')+
+      ci('u-complemento','Complemento',u.complemento,'maxlength="80"')+ci('u-bairro','Bairro',u.bairro,'maxlength="100"')+ci('u-cidade','Cidade',u.cidade,'maxlength="100"')+cs('u-uf','UF',u.uf,UFS)+'</div>'+
+    '<div class="campo"><label for="u-observacoes">Observações (opcional)</label><textarea id="u-observacoes" rows="2" maxlength="2000">'+esc(u.observacoes||'')+'</textarea></div>'+
+    '<div class="grade"><button class="botao" type="submit">'+(novo?'Cadastrar':'Salvar')+'</button><button class="botao claro" type="button" id="u-cancelar">Cancelar</button></div></form>');
+  ligaCep('u-');
+  function avisaCadastro(){
+    var vazio=$('#u-titular').options.length<=1;
+    $('#u-sem-cad').textContent=vazio?('Nenhuma pessoa ativa no Cadastro para esta origem. '+(temModulo('cadastro')?'Cadastre o titular primeiro em Cadastro.':'Peça a quem tem o módulo Cadastro para cadastrar o titular.')):'';
+  }
+  avisaCadastro();
+  if($('#u-org'))$('#u-org').onchange=function(){$('#u-titular').innerHTML=enOpcoesPessoa(this.value||null,null,null);avisaCadastro();};
+  $('#u-grupo').onchange=function(){$('#u-subgrupo').innerHTML=subOpc(this.value,'');};
+  $('#u-cancelar').onclick=function(){if(novo){EN.aba='unidades';desenhaEnergia();}else verUnidade(u.id);};
+  $('#f-un').onsubmit=async function(ev){
+    ev.preventDefault();
+    var d={},b=$('button[type=submit]',this);
+    ['apelido','distribuidora','codigo_instalacao','ambiente','grupo','subgrupo','modalidade','cep','logradouro','numero','complemento','bairro','cidade','uf','observacoes'].forEach(function(k){d[k]=$('#u-'+k).value.trim();});
+    ['demanda_ponta_kw','demanda_fora_kw','consumo_medio_kwh'].forEach(function(k){d[k]=enLeNum($('#u-'+k).value);});
+    enLePessoa($('#u-titular').value,'titular_pf_id','titular_pj_id',d);
+    if(!d.titular_pf_id&&!d.titular_pj_id){aviso('Escolha o titular da unidade.',true);return;}
+    if(!d.distribuidora||!d.codigo_instalacao){aviso('Informe a distribuidora e o número da instalação.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('energia_unidade_salvar',{p_id:novo?null:u.id,p_org:novo?enOrgEscolhida('u-org'):(u.organizacao_id||null),p_dados:d});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    aviso(novo?'Unidade cadastrada.':'Unidade salva.');
+    await carregaEnergia().catch(function(){});verUnidade(r.data);
+  };
+}
+
+/* ----- contratos ----- */
+function enContratos(){
+  var eq=ehEquipe();
+  $('#en-corpo').innerHTML='<div class="campo"><label class="oculto-visual" for="en-busca">Buscar</label><input id="en-busca" type="text" placeholder="Buscar por número, cliente ou fornecedor" value="'+esc(EN.busca)+'"></div><div id="en-lista"></div>';
+  function lista(){
+    var b=EN.busca.trim().toLowerCase();
+    var linhas=EN.contratos.filter(function(c){return !b||(enCod('CE',c.numero)+' '+enParte(c)).toLowerCase().indexOf(b)>=0;}).map(function(c){
+      var venc=enVencendo(c);
+      return '<tr'+(venc?' class="alerta"':'')+'><td><button type="button" class="titulo-t" data-en-ct="'+esc(c.id)+'"><span class="codigo">'+esc(enCod('CE',c.numero))+'</span></button><span class="sub">'+(c.tipo==='venda'?'Venda':'Compra')+' · '+esc(rotuloDe(EN_PRODUTOS,c.produto))+'</span></td>'+
+        '<td>'+esc(enParte(c))+'<span class="sub">'+(c.tipo==='venda'?enUnidadesDoContrato(c.id).length+' unidade(s)':'fornecedor')+'</span></td>'+
+        '<td>'+esc(dataBr(c.inicio))+' a '+esc(dataBr(c.fim))+(venc?'<span class="sub vencida">termina em '+enDias(c.fim)+' dias</span>':'')+'</td>'+
+        '<td>'+esc(c.volume_mwh_mes==null?'—':enNum(c.volume_mwh_mes,3)+' MWh/mês')+'<span class="sub">'+esc(c.produto==='gd'?(c.desconto_pct==null?'':enNum(c.desconto_pct,2)+'% de desconto'):(c.preco_mwh==null?'':fmtMoeda(c.preco_mwh)+'/MWh'))+'</span></td>'+
+        (eq?'<td>'+esc(enOrg(c.organizacao_id))+'</td>':'')+'<td>'+enSituacaoContrato(c)+'</td></tr>';
+    }).join('');
+    $('#en-lista').innerHTML='<div class="rolagem"><table style="min-width:860px"><thead><tr><th scope="col">Contrato</th><th scope="col">Cliente ou fornecedor</th><th scope="col">Vigência</th><th scope="col">Volume e preço</th>'+(eq?'<th scope="col">De quem</th>':'')+'<th scope="col">Situação</th></tr></thead><tbody>'+
+      (linhas||'<tr><td colspan="'+(eq?6:5)+'" class="vazio">'+(EN.contratos.length?'Nenhum contrato nesta busca.':'Nenhum contrato cadastrado.')+'</td></tr>')+'</tbody></table></div>'+
+      '<p class="apoio" style="font-size:13px">Linhas em destaque: contratos assinados ou vigentes que terminam nos próximos 90 dias.</p>';
+    $$('[data-en-ct]').forEach(function(x){x.onclick=function(){verContrato(x.getAttribute('data-en-ct'));};});
+  }
+  $('#en-busca').oninput=function(){EN.busca=this.value;lista();};
+  lista();
+}
+function verContrato(id){
+  var c=enContrato(id);if(!c){aviso('Contrato não encontrado.',true);return;}
+  evento('Abriu um contrato de energia','Energia',{id:c.id});
+  var uns=enUnidadesDoContrato(c.id),cod=enCod('CE',c.numero);
+  tela('<div class="cabeca"><div><h1>'+esc(cod)+' · '+esc(enParte(c))+'</h1><p class="apoio">Contrato de '+(c.tipo==='venda'?'venda':'compra')+' · '+esc(rotuloDe(EN_PRODUTOS,c.produto))+' · '+esc(rotuloDe(EN_CT_STATUS,c.status))+(ehEquipe()?' · '+esc(enOrg(c.organizacao_id)):'')+'</p></div>'+
+      '<div class="acoes"><button class="botao claro" type="button" id="f-voltar">Voltar</button><button class="botao" type="button" id="f-editar">Editar</button>'+
+      (temModulo('workflow')?'<button class="botao ambar" type="button" id="f-tarefa">Nova tarefa</button>':'')+'</div></div>'+
+    (enVencendo(c)?'<p class="erro" role="status">Este contrato termina em '+enDias(c.fim)+' dias ('+esc(dataBr(c.fim))+'). Avalie a renovação.</p>':'')+
+    '<div class="painel"><h2 class="titulo-s">Partes e vigência</h2><div class="dados">'+
+      dado(c.tipo==='venda'?'Cliente':'Fornecedor ou gerador',enParte(c))+dado('Início',dataBr(c.inicio))+dado('Término',dataBr(c.fim))+dado('Situação',rotuloDe(EN_CT_STATUS,c.status))+'</div>'+
+      '<h2 class="titulo-s">Condições comerciais</h2><div class="dados">'+
+      dado('Volume',c.volume_mwh_mes==null?'':enNum(c.volume_mwh_mes,3)+' MWh/mês')+dado('Preço',c.preco_mwh==null?'':fmtMoeda(c.preco_mwh)+' por MWh')+
+      dado('Desconto garantido',c.desconto_pct==null?'':enNum(c.desconto_pct,2)+'%')+dado('Flexibilidade',c.flex_pct==null?'':'± '+enNum(c.flex_pct,2)+'%')+
+      dado('Sazonalização',c.sazo_pct==null?'':'± '+enNum(c.sazo_pct,2)+'%')+dado('Submercado',c.submercado?rotuloDe(EN_SUBMERCADOS,c.submercado):'')+
+      dado('Fonte',c.fonte?rotuloDe(EN_FONTES,c.fonte):'')+dado('Reajuste',c.indice_reajuste?rotuloDe(EN_INDICES,c.indice_reajuste):'')+dado('Data-base do reajuste',c.data_base_reajuste?dataBr(c.data_base_reajuste):'')+'</div>'+
+      (c.observacoes?'<h2 class="titulo-s">Observações</h2><p style="white-space:pre-wrap">'+esc(c.observacoes)+'</p>':'')+'</div>'+
+    (c.tipo==='venda'?'<div class="painel"><h2>Unidades atendidas</h2>'+(uns.length?'<ul class="lista-p">'+uns.map(function(u){
+      return '<li><button type="button" class="titulo-t" data-en-un="'+esc(u.id)+'">'+esc(enNomeUnidade(u))+'</button><span class="meta">Instalação '+esc(u.codigo_instalacao)+' · '+esc(u.distribuidora)+'</span></li>';}).join('')+'</ul>':'<p class="apoio">Nenhuma unidade ligada. Edite o contrato para escolher as unidades.</p>')+'</div>':''));
+  $$('[data-en-un]').forEach(function(b){b.onclick=function(){verUnidade(b.getAttribute('data-en-un'));};});
+  $('#f-voltar').onclick=function(){EN.aba='contratos';desenhaEnergia();};
+  $('#f-editar').onclick=function(){editarContrato(c);};
+  if($('#f-tarefa'))$('#f-tarefa').onclick=function(){abrirTarefa(null,{origem:'Contrato '+cod+' · '+enParte(c),modulo:'Energia'});};
+}
+function editarContrato(c){
+  var novo=!c;c=c||{tipo:'venda',produto:'acl',status:'rascunho'};
+  var org=novo?(ehEquipe()?null:E.acesso.organizacao_id):(c.organizacao_id||null);
+  var marcadas=novo?[]:enUnidadesDoContrato(c.id).map(function(u){return u.id;});
+  function caixasUnidades(o){
+    var uns=EN.unidades.filter(function(u){return (u.organizacao_id||null)===(o||null)&&(u.situacao==='ativo'||marcadas.indexOf(u.id)>=0);});
+    return uns.length?uns.map(function(u){return '<label class="caixa-mod"><input type="checkbox" data-en-cu="'+esc(u.id)+'"'+(marcadas.indexOf(u.id)>=0?' checked':'')+'> '+esc(enNomeUnidade(u))+' <span class="apoio" style="font-size:12px">('+esc(u.codigo_instalacao)+')</span></label>';}).join(''):'<p class="apoio">Nenhuma unidade ativa nesta origem. Cadastre as unidades em Energia > Unidades.</p>';
+  }
+  function opc(lista,v){return lista.map(function(o){return '<option value="'+esc(o[0])+'"'+(o[0]===v?' selected':'')+'>'+esc(o[1])+'</option>';}).join('');}
+  function fmt(v,casas){return v==null?'':enNum(v,casas);}
+  tela('<div class="cabeca"><div><h1>'+(novo?'Novo contrato de energia':'Editar '+esc(enCod('CE',c.numero)))+'</h1><p class="apoio">Venda: a Celeiro fornece energia a um cliente do Cadastro. Compra: a Celeiro compra de um fornecedor ou gerador.</p></div></div>'+
+    '<form class="painel" id="f-ct" novalidate>'+enSeletorOrg('c-org',org||'',novo)+
+    '<div class="grade3">'+
+      '<div class="campo"><label for="c-tipo">Tipo</label><select id="c-tipo">'+opc([['venda','Venda ao cliente'],['compra','Compra de fornecedor ou gerador']],c.tipo)+'</select></div>'+
+      '<div class="campo"><label for="c-produto">Produto</label><select id="c-produto">'+opc(EN_PRODUTOS,c.produto)+'</select></div>'+
+      '<div class="campo"><label for="c-status">Situação</label><select id="c-status">'+opc(EN_CT_STATUS,c.status)+'</select></div>'+
+      '<div class="campo" id="c-bloco-cliente"><label for="c-cliente">Cliente</label><select id="c-cliente">'+enOpcoesPessoa(org,c.cliente_pf_id,c.cliente_pj_id)+'</select></div>'+
+      '<div class="campo" id="c-bloco-contra">'+'<label for="c-contraparte">Fornecedor ou gerador</label><input id="c-contraparte" type="text" maxlength="160" value="'+esc(c.contraparte||'')+'"></div>'+
+      '<div class="campo"><label for="c-inicio">Início</label><input id="c-inicio" type="date" value="'+esc(c.inicio||'')+'"></div>'+
+      '<div class="campo"><label for="c-fim">Término</label><input id="c-fim" type="date" value="'+esc(c.fim||'')+'"></div></div>'+
+    '<h2 class="titulo-s">Condições comerciais</h2><div class="grade3">'+
+      ci('c-volume_mwh_mes','Volume (MWh/mês)',fmt(c.volume_mwh_mes,3),'inputmode="decimal" maxlength="20"')+
+      ci('c-preco_mwh','Preço (R$/MWh)',fmt(c.preco_mwh,2),'inputmode="decimal" maxlength="20"')+
+      ci('c-desconto_pct','Desconto garantido (%)',fmt(c.desconto_pct,2),'inputmode="decimal" maxlength="8"')+
+      ci('c-flex_pct','Flexibilidade (± %)',fmt(c.flex_pct,2),'inputmode="decimal" maxlength="8"')+
+      ci('c-sazo_pct','Sazonalização (± %)',fmt(c.sazo_pct,2),'inputmode="decimal" maxlength="8"')+
+      cs('c-submercado','Submercado',c.submercado,EN_SUBMERCADOS)+cs('c-fonte','Fonte',c.fonte,EN_FONTES)+
+      cs('c-indice_reajuste','Índice de reajuste',c.indice_reajuste,EN_INDICES)+
+      '<div class="campo"><label for="c-data_base_reajuste">Data-base do reajuste</label><input id="c-data_base_reajuste" type="date" value="'+esc(c.data_base_reajuste||'')+'"></div></div>'+
+    '<fieldset class="campo" id="c-bloco-unidades" style="border:0;padding:0;margin:0"><legend class="rotulo" style="padding:0;margin-bottom:6px;font-size:14px;font-weight:500">Unidades atendidas</legend><div class="caixas" id="c-unidades">'+caixasUnidades(org)+'</div></fieldset>'+
+    '<div class="campo"><label for="c-observacoes">Observações (opcional)</label><textarea id="c-observacoes" rows="2" maxlength="2000">'+esc(c.observacoes||'')+'</textarea></div>'+
+    '<div class="grade"><button class="botao" type="submit">'+(novo?'Cadastrar':'Salvar')+'</button><button class="botao claro" type="button" id="c-cancelar">Cancelar</button></div></form>');
+  function tipo(){
+    var venda=$('#c-tipo').value==='venda';
+    $('#c-bloco-cliente').classList.toggle('oculto',!venda);
+    $('#c-bloco-contra').classList.toggle('oculto',venda);
+    $('#c-bloco-unidades').classList.toggle('oculto',!venda);
+  }
+  tipo();$('#c-tipo').onchange=tipo;
+  if($('#c-org'))$('#c-org').onchange=function(){marcadas=[];$('#c-cliente').innerHTML=enOpcoesPessoa(this.value||null,null,null);$('#c-unidades').innerHTML=caixasUnidades(this.value||null);};
+  $('#c-cancelar').onclick=function(){if(novo){EN.aba='contratos';desenhaEnergia();}else verContrato(c.id);};
+  $('#f-ct').onsubmit=async function(ev){
+    ev.preventDefault();
+    var d={},b=$('button[type=submit]',this);
+    ['tipo','produto','status','contraparte','inicio','fim','submercado','fonte','indice_reajuste','data_base_reajuste','observacoes'].forEach(function(k){d[k]=$('#c-'+k).value.trim();});
+    ['volume_mwh_mes','preco_mwh','desconto_pct','flex_pct','sazo_pct'].forEach(function(k){d[k]=enLeNum($('#c-'+k).value);});
+    enLePessoa($('#c-cliente').value,'cliente_pf_id','cliente_pj_id',d);
+    if(d.tipo==='venda'&&!d.cliente_pf_id&&!d.cliente_pj_id){aviso('Escolha o cliente no Cadastro.',true);return;}
+    if(d.tipo==='compra'&&!d.contraparte){aviso('Informe o fornecedor ou gerador.',true);return;}
+    if(!d.inicio||!d.fim){aviso('Informe o início e o término.',true);return;}
+    if(d.fim<d.inicio){aviso('O término não pode ser antes do início.',true);return;}
+    var unidades=d.tipo==='venda'?$$('[data-en-cu]').filter(function(x){return x.checked;}).map(function(x){return x.getAttribute('data-en-cu');}):[];
+    ocupar(b,true);
+    var r=await sb.rpc('energia_contrato_salvar',{p_id:novo?null:c.id,p_org:novo?enOrgEscolhida('c-org'):(c.organizacao_id||null),p_dados:d,p_unidades:unidades});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    aviso(novo?'Contrato cadastrado.':'Contrato salvo.');
+    await carregaEnergia().catch(function(){});verContrato(r.data);
+  };
+}
+
+/* ----- apuração mensal ----- */
+function enTabelaApuracoes(aps,comUnidade){
+  if(!aps.length)return '<p class="vazio">Nenhuma apuração lançada'+(comUnidade?' para este mês':'')+'.</p>';
+  var tot={c:0,r:0,d:0,e:0,x:0};
+  var linhas=aps.map(function(a){
+    tot.c+=Number(a.consumo_kwh);tot.r+=Number(a.valor_referencia);tot.d+=Number(a.valor_distribuidora);tot.e+=Number(a.valor_energia);tot.x+=Number(a.economia);
+    var u=enUnidade(a.unidade_id),pct=Number(a.valor_referencia)>0?Number(a.economia)/Number(a.valor_referencia)*100:null;
+    return '<tr><td>'+(comUnidade?'<button type="button" class="titulo-t" data-en-ap="'+esc(a.id)+'">'+esc(enNomeUnidade(u))+'</button><span class="sub">'+esc(u?u.codigo_instalacao:'')+'</span>':'<button type="button" class="titulo-t" data-en-ap="'+esc(a.id)+'">'+esc(enMes(a.competencia))+'</button>')+'</td>'+
+      '<td>'+esc(enNum(a.consumo_kwh,0))+' kWh</td><td>'+esc(fmtMoeda(a.valor_referencia))+'</td><td>'+esc(fmtMoeda(a.valor_distribuidora))+'</td><td>'+esc(fmtMoeda(a.valor_energia))+'</td>'+
+      '<td'+(Number(a.economia)<0?' class="vencida"':'')+'>'+esc(fmtMoeda(a.economia))+(pct===null?'':'<span class="sub">'+esc(enNum(pct,1))+'%</span>')+'</td>'+
+      '<td><select class="en-fatura" style="min-width:140px" data-id="'+esc(a.id)+'" aria-label="Situação da fatura">'+EN_FATURAS.map(function(f){return '<option value="'+f[0]+'"'+(a.fatura_status===f[0]?' selected':'')+'>'+f[1]+'</option>';}).join('')+'</select>'+
+        (a.vencimento?'<span class="sub">vence '+esc(dataBr(a.vencimento))+'</span>':'')+'</td></tr>';
+  }).join('');
+  var pctT=tot.r>0?tot.x/tot.r*100:null;
+  return '<div class="rolagem"><table style="min-width:940px"><thead><tr><th scope="col">'+(comUnidade?'Unidade':'Competência')+'</th><th scope="col">Consumo</th><th scope="col">Custo no cativo</th><th scope="col">Distribuidora</th><th scope="col">Energia Celeiro</th><th scope="col">Economia</th><th scope="col">Fatura</th></tr></thead><tbody>'+linhas+
+    '<tr><th scope="row">Total</th><th>'+esc(enNum(tot.c,0))+' kWh</th><th>'+esc(fmtMoeda(tot.r))+'</th><th>'+esc(fmtMoeda(tot.d))+'</th><th>'+esc(fmtMoeda(tot.e))+'</th><th>'+esc(fmtMoeda(tot.x))+(pctT===null?'':' <span class="apoio" style="font-weight:400">('+esc(enNum(pctT,1))+'%)</span>')+'</th><th></th></tr></tbody></table></div>';
+}
+function ligaTabelaApuracoes(){
+  $$('.en-fatura').forEach(function(sel){
+    var anterior=sel.value;
+    sel.onchange=async function(){
+      sel.disabled=true;
+      var x=await sb.rpc('energia_apuracao_fatura',{p_id:sel.getAttribute('data-id'),p_status:sel.value});
+      sel.disabled=false;
+      if(x.error){sel.value=anterior;aviso(msgErro(x.error),true);return;}
+      anterior=sel.value;
+      EN.apuracoes.forEach(function(a){if(a.id===sel.getAttribute('data-id'))a.fatura_status=sel.value;});
+      aviso('Situação da fatura atualizada.');
+    };
+  });
+  $$('[data-en-ap]').forEach(function(b){b.onclick=function(){
+    var a=EN.apuracoes.filter(function(x){return x.id===b.getAttribute('data-en-ap');})[0];
+    if(a)lancarApuracao(a.unidade_id,a);
+  };});
+}
+function enApuracao(){
+  var comps=[];EN.apuracoes.forEach(function(a){var k=String(a.competencia).slice(0,7);if(comps.indexOf(k)<0)comps.push(k);});
+  comps.sort().reverse();
+  if(!EN.competencia||comps.indexOf(EN.competencia)<0)EN.competencia=comps[0]||'';
+  var aps=EN.apuracoes.filter(function(a){return String(a.competencia).slice(0,7)===EN.competencia;}).sort(function(x,y){return enNomeUnidade(enUnidade(x.unidade_id)).localeCompare(enNomeUnidade(enUnidade(y.unidade_id)));});
+  var semApuracao=EN.competencia?EN.unidades.filter(function(u){return u.situacao==='ativo'&&(u.ambiente==='livre'||u.ambiente==='gd')&&!aps.some(function(a){return a.unidade_id===u.id;});}):[];
+  $('#en-corpo').innerHTML=
+    '<div class="grade"><div class="campo" style="max-width:260px"><label for="en-comp">Competência</label><select id="en-comp">'+(comps.length?comps.map(function(k){return '<option value="'+k+'"'+(k===EN.competencia?' selected':'')+'>'+esc(enMes(k))+'</option>';}).join(''):'<option value="">Nenhuma</option>')+'</select></div>'+
+      '<button class="botao claro" type="button" id="en-exportar">Exportar</button></div>'+
+    enTabelaApuracoes(aps,true)+
+    (semApuracao.length?'<div class="painel"><h2>Sem apuração em '+esc(enMes(EN.competencia))+'</h2><p class="apoio">Unidades ativas no mercado livre ou em geração distribuída que ainda não têm o mês lançado.</p><ul class="lista-p">'+
+      semApuracao.map(function(u){return '<li><button type="button" class="titulo-t" data-en-lancar="'+esc(u.id)+'">'+esc(enNomeUnidade(u))+'</button><span class="meta">'+(u.apelido?'Instalação '+esc(u.codigo_instalacao)+' · ':'')+esc(u.distribuidora)+'</span></li>';}).join('')+'</ul></div>':'')+
+    '<p class="nota">Lance um mês por unidade: o consumo, quanto a unidade pagaria se continuasse no mercado cativo (custo de referência), o que pagou à distribuidora pelo uso da rede e quanto a Celeiro faturou pela energia. Lançar de novo o mesmo mês substitui os valores; a Auditoria guarda o antes e o depois.</p>';
+  ligaTabelaApuracoes();
+  $('#en-comp').onchange=function(){EN.competencia=this.value;enApuracao();};
+  $$('[data-en-lancar]').forEach(function(b){b.onclick=function(){lancarApuracao(b.getAttribute('data-en-lancar'),null,EN.competencia);};});
+  $('#en-exportar').onclick=function(){
+    if(!aps.length){aviso('Não há apurações neste mês para exportar.',true);return;}
+    function c(v){return '"'+String(v==null?'':v).replace(/"/g,'""')+'"';}
+    function n(v){return String(v==null?'':v).replace('.',',');}
+    var csv=['Competência;Unidade;Instalação;Distribuidora;Titular;Consumo (kWh);Custo no cativo;Distribuidora (R$);Energia (R$);Economia;Fatura;Vencimento'];
+    aps.forEach(function(a){var u=enUnidade(a.unidade_id)||{};
+      csv.push([enMes(a.competencia),enNomeUnidade(u),u.codigo_instalacao,u.distribuidora,enPessoa(u.titular_pf_id,u.titular_pj_id)].map(c).concat([n(a.consumo_kwh),n(a.valor_referencia),n(a.valor_distribuidora),n(a.valor_energia),n(a.economia)],[c(rotuloDe(EN_FATURAS,a.fatura_status)),c(a.vencimento?dataBr(a.vencimento):'')]).join(';'));});
+    var url=URL.createObjectURL(new Blob(['﻿'+csv.join('\r\n')],{type:'text/csv;charset=utf-8'}));
+    var el=document.createElement('a');el.href=url;el.download='celeiro-energia-apuracao-'+EN.competencia+'.csv';
+    document.body.appendChild(el);el.click();el.remove();setTimeout(function(){URL.revokeObjectURL(url);},2000);
+    evento('Exportou a apuração de energia','Energia',{competencia:EN.competencia,registros:aps.length});
+  };
+}
+function lancarApuracao(unidadeId,a,comp){
+  var ativas=EN.unidades.filter(function(u){return u.situacao==='ativo'||u.id===unidadeId;});
+  if(!ativas.length){aviso('Cadastre uma unidade consumidora antes de lançar a apuração.',true);return;}
+  var mesPassado=(function(){var d=new Date();d.setDate(1);d.setMonth(d.getMonth()-1);return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2);})();
+  var compIni=a?String(a.competencia).slice(0,7):(comp||mesPassado);
+  var mesAtual=hojeIso().slice(0,7);
+  function opcContratos(uid,sel){
+    var cs2=enContratosDaUnidade(uid);
+    return '<option value="">Nenhum</option>'+cs2.map(function(c){return '<option value="'+esc(c.id)+'"'+(c.id===sel||(!sel&&!a&&c.status==='vigente'&&cs2.length===1)?' selected':'')+'>'+esc(enCod('CE',c.numero))+' · '+esc(rotuloDe(EN_CT_STATUS,c.status))+'</option>';}).join('');
+  }
+  function v(x,casas){return x==null?'':enNum(x,casas);}
+  var d=enDialogo('dlg-apuracao',a?'Apuração de '+enMes(a.competencia):'Lançar apuração',
+    '<div class="campo"><label for="a-unidade">Unidade</label><select id="a-unidade"'+(a?' disabled':'')+'>'+ativas.map(function(u){return '<option value="'+esc(u.id)+'"'+(u.id===unidadeId?' selected':'')+'>'+esc(enNomeUnidade(u))+' · '+esc(u.codigo_instalacao)+'</option>';}).join('')+'</select></div>'+
+    '<div class="grade">'+
+      '<div class="campo"><label for="a-comp">Competência (mês de consumo)</label><input id="a-comp" type="month" max="'+mesAtual+'" value="'+esc(compIni)+'"'+(a?' disabled':'')+'></div>'+
+      '<div class="campo"><label for="a-consumo">Consumo (kWh)</label><input id="a-consumo" type="text" inputmode="decimal" maxlength="20" value="'+esc(a?v(a.consumo_kwh,0):'')+'"></div></div>'+
+    '<div class="grade">'+
+      '<div class="campo"><label for="a-ref">Custo no mercado cativo (R$)</label><input id="a-ref" type="text" inputmode="decimal" maxlength="20" value="'+esc(a?v(a.valor_referencia,2):'')+'"></div>'+
+      '<div class="campo"><label for="a-dist">Pago à distribuidora (R$)</label><input id="a-dist" type="text" inputmode="decimal" maxlength="20" value="'+esc(a?v(a.valor_distribuidora,2):'')+'"></div>'+
+      '<div class="campo"><label for="a-ener">Energia faturada pela Celeiro (R$)</label><input id="a-ener" type="text" inputmode="decimal" maxlength="20" value="'+esc(a?v(a.valor_energia,2):'')+'"></div></div>'+
+    '<p class="previa" id="a-previa" aria-live="polite"></p>'+
+    '<div class="grade">'+
+      '<div class="campo"><label for="a-contrato">Contrato</label><select id="a-contrato">'+opcContratos(unidadeId||ativas[0].id,a&&a.contrato_id)+'</select></div>'+
+      '<div class="campo"><label for="a-fatura">Fatura</label><select id="a-fatura">'+EN_FATURAS.map(function(f){return '<option value="'+f[0]+'"'+((a?a.fatura_status:'a_emitir')===f[0]?' selected':'')+'>'+f[1]+'</option>';}).join('')+'</select></div>'+
+      '<div class="campo"><label for="a-venc">Vencimento</label><input id="a-venc" type="date" value="'+esc(a&&a.vencimento||'')+'"></div></div>'+
+    '<div class="campo"><label for="a-obs">Observações (opcional)</label><textarea id="a-obs" rows="2" maxlength="1000">'+esc(a&&a.observacoes||'')+'</textarea></div>',
+    '<button class="botao" type="submit">Salvar apuração</button>');
+  function num(id){return Number(enLeNum($('#'+id,d).value))||0;}
+  function previa(){
+    var r=num('a-ref'),eco=r-num('a-dist')-num('a-ener');
+    $('#a-previa',d).innerHTML='Economia do mês: <strong>'+esc(fmtMoeda(eco))+'</strong>'+(r>0?' ('+esc(enNum(eco/r*100,1))+'% do custo no cativo)':'')+(eco<0?'<span class="sub">Valor negativo: a unidade pagou mais do que pagaria no cativo.</span>':'');
+  }
+  ['a-ref','a-dist','a-ener'].forEach(function(id){$('#'+id,d).oninput=previa;});previa();
+  $('#a-unidade',d).onchange=function(){$('#a-contrato',d).innerHTML=opcContratos(this.value,null);};
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),comp2=$('#a-comp',d).value;
+    if(!comp2){aviso('Informe a competência.',true);return;}
+    if(comp2>mesAtual){aviso('A competência não pode ser um mês futuro.',true);return;}
+    if(!enLeNum($('#a-consumo',d).value)||!enLeNum($('#a-ref',d).value)){aviso('Informe o consumo e o custo no mercado cativo.',true);return;}
+    var dados={competencia:comp2+'-01',consumo_kwh:enLeNum($('#a-consumo',d).value),valor_referencia:enLeNum($('#a-ref',d).value),
+      valor_distribuidora:enLeNum($('#a-dist',d).value),valor_energia:enLeNum($('#a-ener',d).value),contrato_id:$('#a-contrato',d).value,
+      fatura_status:$('#a-fatura',d).value,vencimento:$('#a-venc',d).value,observacoes:$('#a-obs',d).value.trim()};
+    ocupar(b,true);
+    var r=await sb.rpc('energia_apuracao_salvar',{p_unidade:$('#a-unidade',d).value,p_dados:dados});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso('Apuração salva.');
+    var naUnidade=$('#f-apurar')&&!$('#en-corpo');
+    await carregaEnergia().catch(function(){});
+    if(naUnidade){verUnidade($('#a-unidade',d)?$('#a-unidade',d).value:unidadeId);return;}
+    EN.competencia=comp2;EN.aba='apuracao';desenhaEnergia();
+  };
+}
+
+/* ----- funil de migração (equipe Celeiro) ----- */
+function enMigracao(){
+  var lista=EN.migracoes.filter(function(m){return EN.testes||!m.teste;});
+  var b=EN.busca.trim().toLowerCase();
+  if(b)lista=lista.filter(function(m){return (enCod('MG',m.numero)+' '+m.nome+' '+m.distribuidora+' '+m.documento).toLowerCase().indexOf(b)>=0;});
+  function nomeResp(id){var u=EN.equipe.filter(function(x){return x.user_id===id;})[0];return u?u.nome:'';}
+  var colunas=EN_ETAPAS.map(function(e){
+    var itens=lista.filter(function(m){return m.etapa===e[0];});
+    var soma=itens.reduce(function(s,m){return s+(Number(m.valor_fatura)||0);},0);
+    return '<section class="coluna" data-en-col="'+e[0]+'"><h2>'+esc(e[1])+' <span class="conta">'+itens.length+'</span></h2>'+(soma?'<p class="meta">'+esc(fmtMoeda(soma))+' em faturas/mês</p>':'')+
+      itens.map(function(m){
+        var dias=Math.floor((Date.now()-new Date(m.etapa_desde).getTime())/86400000);
+        return '<article class="cartao-t" draggable="true" data-en-mg="'+esc(m.id)+'">'+
+          '<button type="button" class="titulo-t" data-en-abrir="'+esc(m.id)+'"><span class="codigo">'+esc(enCod('MG',m.numero))+'</span> '+esc(m.nome)+'</button>'+
+          '<p class="meta">'+esc([m.distribuidora,m.valor_fatura!=null?fmtMoeda(m.valor_fatura)+'/mês':''].filter(Boolean).join(' · ')||'Sem dados da fatura')+'</p>'+
+          '<p class="meta">'+esc(nomeResp(m.responsavel_id)||'Sem responsável')+' · '+(dias===0?'hoje nesta etapa':dias+(dias===1?' dia':' dias')+' nesta etapa')+'</p>'+
+          '<div class="chips">'+(m.origem==='app'?'<span class="selo novo">App</span>':'')+(m.teste?'<span class="selo claro">Teste</span>':'')+(m.etapa==='perdida'&&m.motivo_perda?'<span class="selo urgente">'+esc(m.motivo_perda)+'</span>':'')+'</div>'+
+          '<label class="oculto-visual" for="mv-'+esc(m.id)+'">Mover '+esc(m.nome)+' para</label><select id="mv-'+esc(m.id)+'" class="en-mover" data-id="'+esc(m.id)+'" style="height:36px;font-size:13px">'+
+            EN_ETAPAS.map(function(x){return '<option value="'+x[0]+'"'+(x[0]===m.etapa?' selected':'')+'>'+esc(x[1])+'</option>';}).join('')+'</select></article>';
+      }).join('')+'</section>';
+  }).join('');
+  $('#en-corpo').innerHTML=
+    '<div class="grade"><div class="campo"><label class="oculto-visual" for="en-busca">Buscar</label><input id="en-busca" type="text" placeholder="Buscar por número, nome, distribuidora ou documento" value="'+esc(EN.busca)+'"></div>'+
+      '<label class="caixa-mod" style="flex:0 0 auto"><input type="checkbox" id="en-testes"'+(EN.testes?' checked':'')+'> Mostrar registros de teste do app</label></div>'+
+    '<div class="quadro">'+colunas+'</div>'+
+    '<p class="nota">Pedidos de "Energia com Desconto" feitos no app entram sozinhos em Lead. Arraste o cartão ou use a lista do cartão para mudar de etapa. Ao marcar como Perdida, informe o motivo.</p>';
+  $('#en-busca').oninput=function(){EN.busca=this.value;var pos=this.selectionStart;enMigracao();var x=$('#en-busca');x.focus();try{x.setSelectionRange(pos,pos);}catch(err){}};
+  $('#en-testes').onchange=function(){EN.testes=this.checked;enMigracao();};
+  $$('[data-en-abrir]').forEach(function(x){x.onclick=function(){editarMigracao(EN.migracoes.filter(function(m){return m.id===x.getAttribute('data-en-abrir');})[0]);};});
+  async function mover(id,etapa,sel){
+    var m=EN.migracoes.filter(function(x){return x.id===id;})[0];if(!m||m.etapa===etapa)return;
+    var motivo='';
+    if(etapa==='perdida'){motivo=window.prompt('Por que este pedido foi perdido?','');if(!motivo||!motivo.trim()){if(sel)sel.value=m.etapa;aviso('Para marcar como perdida, informe o motivo.',true);return;}}
+    var r=await sb.rpc('energia_migracao_mover',{p_id:id,p_etapa:etapa,p_motivo:motivo});
+    if(r.error){if(sel)sel.value=m.etapa;aviso(msgErro(r.error),true);return;}
+    m.etapa=etapa;m.etapa_desde=new Date().toISOString();m.motivo_perda=etapa==='perdida'?motivo.trim():'';
+    aviso('Pedido movido para '+rotuloDe(EN_ETAPAS,etapa)+'.');
+    enMigracao();
+  }
+  $$('.en-mover').forEach(function(s){s.onchange=function(){mover(s.getAttribute('data-id'),s.value,s);};});
+  $$('[data-en-mg]').forEach(function(c){c.ondragstart=function(ev){ev.dataTransfer.setData('text/plain',c.getAttribute('data-en-mg'));};});
+  $$('[data-en-col]').forEach(function(col){
+    col.ondragover=function(ev){ev.preventDefault();col.classList.add('alvo');};
+    col.ondragleave=function(){col.classList.remove('alvo');};
+    col.ondrop=function(ev){ev.preventDefault();col.classList.remove('alvo');mover(ev.dataTransfer.getData('text/plain'),col.getAttribute('data-en-col'),null);};
+  });
+}
+function editarMigracao(m){
+  var novo=!m;m=m||{etapa:'lead'};
+  var d=enDialogo('dlg-migracao',novo?'Novo pedido de migração':enCod('MG',m.numero)+' · '+m.nome,
+    '<div class="grade">'+ci('m-nome','Cliente',m.nome,'maxlength="160" required')+ci('m-documento','CPF ou CNPJ',m.documento?(m.documento.length===11?fmtCpf(m.documento):formataCnpj(m.documento)):'','inputmode="numeric" maxlength="18"')+'</div>'+
+    '<div class="grade">'+ci('m-telefone','Telefone',fmtTel(m.telefone),'inputmode="tel" maxlength="20"')+ci('m-email','E-mail',m.email,'maxlength="254"')+'</div>'+
+    '<div class="grade">'+ci('m-distribuidora','Distribuidora',m.distribuidora,'maxlength="120"')+ci('m-unidade_texto','Unidade informada',m.unidade_texto,'maxlength="160"')+'</div>'+
+    '<div class="grade">'+ci('m-valor_fatura','Fatura média (R$/mês)',m.valor_fatura==null?'':enNum(m.valor_fatura,2),'inputmode="decimal" maxlength="20"')+
+      ci('m-economia_estimada_pct','Economia estimada (%)',m.economia_estimada_pct==null?'':enNum(m.economia_estimada_pct,2),'inputmode="decimal" maxlength="8"')+
+      '<div class="campo"><label for="m-data_prevista">Migração prevista para</label><input id="m-data_prevista" type="date" value="'+esc(m.data_prevista||'')+'"></div></div>'+
+    '<div class="grade">'+
+      '<div class="campo"><label for="m-etapa">Etapa</label><select id="m-etapa">'+EN_ETAPAS.map(function(e){return '<option value="'+e[0]+'"'+(e[0]===m.etapa?' selected':'')+'>'+esc(e[1])+'</option>';}).join('')+'</select></div>'+
+      '<div class="campo"><label for="m-responsavel_id">Responsável</label><select id="m-responsavel_id"><option value="">Sem responsável</option>'+EN.equipe.map(function(u){return '<option value="'+esc(u.user_id)+'"'+(u.user_id===m.responsavel_id?' selected':'')+'>'+esc(u.nome)+'</option>';}).join('')+'</select></div></div>'+
+    '<div class="campo" id="m-bloco-perda"><label for="m-motivo_perda">Motivo da perda</label><input id="m-motivo_perda" type="text" maxlength="300" value="'+esc(m.motivo_perda||'')+'"></div>'+
+    '<div class="campo"><label for="m-unidade_id">Unidade consumidora cadastrada (quando já existir)</label><select id="m-unidade_id"><option value="">Nenhuma</option>'+EN.unidades.map(function(u){return '<option value="'+esc(u.id)+'"'+(u.id===m.unidade_id?' selected':'')+'>'+esc(enNomeUnidade(u))+' · '+esc(u.codigo_instalacao)+'</option>';}).join('')+'</select></div>'+
+    '<div class="campo"><label for="m-observacoes">Observações</label><textarea id="m-observacoes" rows="3" maxlength="2000">'+esc(m.observacoes||'')+'</textarea></div>'+
+    (novo?'':'<p class="apoio" style="font-size:13px">'+(m.origem==='app'?'Recebido pelo app':'Criado no Office')+' em '+esc(dataHora(m.criado_em).data)+'.'+(m.teste?' Registro de teste.':'')+'</p>'),
+    '<button class="botao" type="submit">'+(novo?'Criar pedido':'Salvar')+'</button>'+(!novo&&temModulo('workflow')?'<button type="button" class="botao ambar" id="m-tarefa">Nova tarefa</button>':''));
+  function perda(){$('#m-bloco-perda',d).classList.toggle('oculto',$('#m-etapa',d).value!=='perdida');}
+  perda();$('#m-etapa',d).onchange=perda;
+  if($('#m-tarefa',d))$('#m-tarefa',d).onclick=function(){d.fechar();abrirTarefa(null,{origem:'Migração '+enCod('MG',m.numero)+' · '+m.nome,modulo:'Energia'});};
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),x={};
+    ['nome','documento','telefone','email','distribuidora','unidade_texto','data_prevista','etapa','responsavel_id','motivo_perda','unidade_id','observacoes'].forEach(function(k){x[k]=$('#m-'+k,d).value.trim();});
+    x.valor_fatura=enLeNum($('#m-valor_fatura',d).value);x.economia_estimada_pct=enLeNum($('#m-economia_estimada_pct',d).value);
+    if(!x.nome){aviso('Informe o nome do cliente.',true);return;}
+    var doc=soNum(x.documento);
+    if(doc&&!(cpfValido(doc)||cnpjValido(doc))){aviso('CPF ou CNPJ inválido.',true);return;}
+    if(x.etapa==='perdida'&&!x.motivo_perda){aviso('Informe o motivo da perda.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('energia_migracao_salvar',{p_id:novo?null:m.id,p_dados:x});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso(novo?'Pedido criado.':'Pedido salvo.');
+    recarregaEnergia('migracao');
   };
 }
 

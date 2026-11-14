@@ -19,9 +19,10 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | Auditoria: registro de todas as ações, consulta com filtros, exportação | Pronto |
 | Workflow: tarefas em lista e em quadro, responsável, envolvidos, prazo, comentários com @, anexos, confidenciais | Pronto |
 | Botão "Nova tarefa" em todas as telas, guardando a tela de origem | Pronto |
-| Dashboard: tarefas vencidas, urgentes, suas e não lidas, gráfico de 15 dias e pendências | Pronto (arrecadação e inadimplentes vêm do Financeiro; energia sem dados) |
+| Dashboard: tarefas vencidas, urgentes, suas e não lidas, gráfico de 15 dias e pendências | Pronto (arrecadação e inadimplentes vêm do Financeiro; economia de energia vem do módulo Energia) |
 | Cadastro de pessoas físicas: dados pessoais, contatos, endereço, profissional e financeiro | Pronto |
 | Cadastro de pessoas jurídicas: empresa, quadro de sócios (QSA), representante e responsável financeiro | Pronto |
+| Energia: unidades consumidoras, contratos de compra e venda, apuração mensal da economia e funil de migração para o mercado livre | Pronto (depende de rodar `supabase-energia.sql`) |
 | Financeiro, Investimentos, Conexão MCP, Conteúdo | Aparecem no menu quando habilitados, com aviso da fase em que serão construídos |
 
 ## Arquivos
@@ -31,6 +32,7 @@ Login próprio, Google Authenticator obrigatório, perfis, módulos e auditoria.
 | `index.html` | O sistema inteiro (telas de acesso e área interna) |
 | `config.js` | Endereço e chave pública do projeto Supabase do backoffice (já preenchidos) |
 | `supabase.sql` | Tabelas, regras de segurança e auditoria, para rodar no painel do Supabase |
+| `supabase-energia.sql` | Módulo Energia, para rodar depois do `supabase.sql` (e do `supabase-app.sql`, se usar o app) |
 | `supabase/functions/criar-usuario/index.ts` | Função do servidor que cria o acesso de um novo usuário (para publicar no Supabase) |
 | `supabase/functions/mcp/index.ts` | Servidor MCP do backoffice (para publicar no Supabase, com "Verify JWT" desligado) |
 | `indicacao/index.html` | Página pública do link de indicação (registro de interesse, sem login) |
@@ -398,7 +400,7 @@ falta o teste com um assistente real depois de publicado.
 - Segunda linha: tarefas em aberto, concluídas em 15 dias, usuários ativos e organizações.
 - Gráfico de tarefas criadas e concluídas por dia nos últimos 15 dias, e a lista de pendências com responsável e prazo.
 - **Arrecadação** mostra o que foi recebido no mês corrente e quanto ainda está a receber; **Inadimplentes** mostra o valor e a quantidade de contas a receber vencidas. Os dois vêm do Financeiro (livros da Celeiro para a equipe, da própria organização para o cliente) e aparecem para quem tem o módulo Financeiro.
-- **Economia de energia** continua "Sem dados": falta definir a fonte.
+- **Economia de energia** mostra a soma dos últimos 12 meses lançada no módulo Energia, para quem tem o módulo.
 
 ## Como a segurança funciona
 
@@ -436,7 +438,7 @@ falta o teste com um assistente real depois de publicado.
 - **Cadastro sem arquivos.** O envio de documentos (RG, contrato social) ainda não existe.
 - **Cadastro sem validação oficial.** CPF e CNPJ são conferidos pelos dígitos. A consulta de CNPJ e de CEP usa bases públicas gratuitas (BrasilAPI e ViaCEP), que podem ficar fora do ar; a consulta contratada à Receita (CPF, situação) não foi feita.
 - **Auditoria guarda dados pessoais.** Cada alteração de cadastro registra os valores de antes e depois, inclusive CPF e renda. Considere isso na política de retenção.
-- **Cadastro de produtos** (Energia, Financiamento, Captação) ainda não foi construído.
+- **Cadastro de produtos** (Financiamento, Captação) ainda não foi construído. Energia tem módulo próprio (abaixo).
 - **Permissão dentro do módulo.** Os níveis definem a quais módulos a pessoa tem acesso. Ainda não há separação entre ver, criar, editar e excluir dentro de cada módulo; isso entra junto com a construção dos módulos.
 
 ## Situação dos testes
@@ -507,3 +509,43 @@ O app lê os módulos ligados pela função `app_config` (mesmo endereço, `rpc/
 
 Em **Usuários > Editar**, o campo E-mail agora pode ser alterado. A troca muda o e-mail de login no Supabase e o cadastro do backoffice, e entra na auditoria. Quem pode: Master (qualquer usuário) e Corporativo master (operadores da própria organização). Regras conferidas em Postgres local (8 verificações); não testado contra o projeto Supabase real.
 14. Em **Cadastro**, crie uma pessoa física (teste o CEP) e uma pessoa jurídica (teste "Buscar dados pelo CNPJ"), escolha o responsável no quadro de sócios e informe os dados do representante.
+
+## Módulo Energia (comercialização de energia)
+
+Controla a operação da comercializadora: as unidades consumidoras dos clientes, os contratos de compra e venda, a economia apurada a cada mês e o funil de migração para o mercado livre.
+
+**Para ativar:**
+
+1. Rode `supabase-energia.sql` no SQL Editor do projeto do backoffice, **depois** do `supabase.sql`. Se usa a integração com o app, rode também depois do `supabase-app.sql`: os pedidos de "Energia com Desconto" passam a entrar sozinhos no funil, inclusive os que já tinham chegado. Pode ser rodado mais de uma vez. Se rodar o `supabase-app.sql` pela primeira vez depois, rode o `supabase-energia.sql` de novo.
+2. Em **Módulos e permissões**, habilite **Energia** para o perfil Gerencial e para os clientes corporativos que devem acompanhar a própria energia. O Master já vê.
+
+**Partes do módulo:**
+
+| Aba | O que faz |
+|---|---|
+| Visão geral | Unidades por ambiente (cativo, em migração, mercado livre, geração distribuída), contratos vigentes e volume em MWh/mês, economia dos últimos 12 meses com gráfico mês a mês, faturas em aberto, contratos que terminam em 90 dias e o funil de migração |
+| Unidades | Unidade consumidora com titular (pessoa física ou jurídica do Cadastro), distribuidora, número da instalação, grupo e subgrupo tarifário, modalidade, demanda, consumo médio e endereço. Não é apagada: é inativada |
+| Contratos | Venda (a Celeiro fornece a um cliente, ligado às unidades atendidas) ou compra (de um fornecedor ou gerador). Produto mercado livre ou geração distribuída, vigência, volume, preço, desconto, flexibilidade, sazonalização, submercado, fonte e reajuste. Numerados CE-0001 em diante |
+| Apuração mensal | Um lançamento por unidade e mês: consumo, custo de referência no mercado cativo, valor pago à distribuidora e energia faturada pela Celeiro. A economia é calculada pelo banco. Situação da fatura (a emitir, emitida, paga, vencida, cancelada). Lista as unidades do mercado livre e de GD sem o mês lançado. Exporta CSV |
+| Migração | Quadro com as etapas Lead, Análise da fatura, Proposta enviada, Contrato assinado, Denúncia na distribuidora, Adesão à CCEE, Migrada e Perdida. Cada pedido tem responsável da equipe, fatura média, economia estimada e data prevista. Perdida exige motivo. Numerados MG-0001 em diante |
+
+**Economia do mês** = custo de referência no cativo − (valor pago à distribuidora + energia faturada pela Celeiro).
+
+**Regras:**
+- Quem tem o módulo Energia vê e altera. A equipe Celeiro vê tudo; cada cliente corporativo vê só as unidades, contratos e apurações da própria organização.
+- O funil de migração é só da equipe Celeiro.
+- Titular e cliente vêm do Cadastro, da mesma origem (Celeiro ou a mesma organização). Quem tem Energia mas não tem Cadastro consegue escolher, mas vê apenas nome e documento.
+- O mesmo número de instalação não se repete na mesma distribuidora.
+- Lançar de novo o mesmo mês de uma unidade substitui os valores; a Auditoria guarda o antes e o depois.
+- Números aceitam o formato brasileiro: "1.234,56" e "60.000".
+- Fichas de unidade, contrato e pedido têm o botão **Nova tarefa**, que abre a tarefa já marcada com o módulo Energia.
+
+**Limites:**
+- A apuração é digitada. Ainda não há leitura automática da fatura da distribuidora, importação de planilha nem integração com a CCEE.
+- Não calcula preço nem economia projetada: a proposta é feita fora e a economia estimada do pedido é informada à mão.
+- Não emite fatura nem boleto. A situação da fatura é um controle manual até o módulo Financeiro existir.
+- Não há aviso por e-mail de contrato vencendo; o alerta aparece na Visão geral e na lista de contratos.
+- Não guarda arquivos (contrato assinado, fatura da distribuidora).
+- Mover para "Migrada" não muda sozinho o ambiente da unidade. Atualize a unidade para "Mercado livre".
+
+**Testes:** `supabase-energia.sql` rodou três vezes seguidas num Postgres local, sobre o `supabase.sql` e o `supabase-app.sql`, com 53 verificações aprovadas. Elas cobrem: Master, Gerencial e Corporativo com e sem o módulo; segundo fator; isolamento por organização; gravação direta recusada; validações; economia; resumo; funil; pedidos do app antes e depois; e auditoria. As telas foram percorridas no navegador como Master e como Corporativo master sobre esse banco, com dados de exemplo. **Não testado contra o projeto Supabase real.**
