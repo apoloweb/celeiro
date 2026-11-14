@@ -308,6 +308,21 @@ contábil adotado (aporte como passivo, retorno como despesa) deve ser confirmad
 universal: entre 21h e meia-noite de Brasília, "hoje" no banco já é o dia seguinte (afeta só o que conta como
 vencido ou futuro nessas três horas).
 
+## Filiais
+
+Em **Organizações**, cada organização (e a própria Celeiro Administradora) tem o botão **Filiais**, que abre a
+página das unidades dela: cartões com total de filiais, grupos e pessoas; busca; filtro por grupo; e a tabela
+agrupada por grupo ou regional, com a sede marcada. Cada filial tem nome, CNPJ, grupo ou regional, sede do grupo,
+pessoas (membros, colaboradores), responsável, telefone, e-mail, endereço e observações.
+
+- É **cadastro e consulta**: os dados dos módulos (Cadastro, Financeiro, tarefas) continuam separados por
+  organização, não por filial.
+- Só o Master cadastra e altera. A equipe Celeiro lê todas; o usuário corporativo lê as da própria organização
+  (a operação `filiais_listar` já existe; ainda não há tela para o cliente).
+- Filial não é excluída: é desativada. O mesmo nome não se repete dentro do mesmo grupo.
+- Tabela `filiais` e operações `filiais_listar` e `filial_salvar`, no `supabase.sql`. Tudo vai para a Auditoria
+  no módulo Organizações.
+
 ## Conexão MCP
 
 O backoffice tem um servidor MCP próprio: a função `mcp` (`supabase/functions/mcp/index.ts`), no endereço

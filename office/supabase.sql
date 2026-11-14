@@ -854,6 +854,169 @@ grant execute on function public.definir_modulo(uuid, text, text, boolean)      
 --    Nada é entregue a quem entrou só com a senha (sem o segundo fator).
 -- =====================================================================
 
+-- ---------------------------------------------------------------------
+-- Filiais: unidades de uma organização (ou da própria Celeiro, quando a
+-- organização é nula). É cadastro e consulta: os dados dos módulos continuam
+-- separados por organização, não por filial.
+-- ---------------------------------------------------------------------
+create table if not exists public.filiais (
+  id             uuid primary key default gen_random_uuid(),
+  organizacao_id uuid references public.organizacoes(id) on delete cascade,
+  nome           text not null check (char_length(nome) between 1 and 160),
+  cnpj           text not null default '' check (char_length(cnpj) <= 14),
+  cep            text not null default '',
+  logradouro     text not null default '',
+  numero         text not null default '',
+  complemento    text not null default '',
+  bairro         text not null default '',
+  cidade         text not null default '',
+  uf             text not null default '' check (uf = '' or uf ~ '^[A-Z]{2}$'),
+  telefone       text not null default '',
+  email          text not null default '',
+  responsavel    text not null default '',
+  observacoes    text not null default '',
+  ativo          boolean not null default true,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+-- Agrupamento opcional (regional, região, diretoria), a unidade que é a sede do grupo
+-- e a quantidade de pessoas da unidade (membros, colaboradores).
+alter table public.filiais add column if not exists grupo      text not null default '' check (char_length(grupo) <= 80);
+alter table public.filiais add column if not exists sede_grupo boolean not null default false;
+alter table public.filiais add column if not exists membros    integer check (membros is null or membros >= 0);
+create index if not exists filiais_org on public.filiais (organizacao_id, grupo);
+create unique index if not exists filiais_cnpj
+  on public.filiais (coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid), cnpj) where cnpj <> '';
+drop index if exists public.filiais_nome;
+create unique index if not exists filiais_grupo_nome
+  on public.filiais (coalesce(organizacao_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(grupo), lower(nome));
+
+alter table public.filiais enable row level security;
+revoke all on public.filiais from anon, authenticated;
+
+drop trigger if exists auditar_filiais on public.filiais;
+create trigger auditar_filiais after insert or update or delete on public.filiais
+  for each row execute function public.auditar('Organizações');
+
+-- Filiais de uma organização (nulo = Celeiro). Com p_todas, todas as que o usuário alcança.
+-- Equipe Celeiro vê todas; usuário corporativo vê as da própria organização.
+create or replace function public.filiais_listar(p_org uuid, p_todas boolean default false)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.aal2() or public.meu_perfil() is null then
+    raise exception 'Acesso negado';
+  end if;
+  if not public.eh_equipe() and (p_todas or p_org is distinct from public.minha_org()) then
+    p_todas := false;
+    p_org := public.minha_org();
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', f.id, 'organizacao_id', f.organizacao_id, 'nome', f.nome, 'cnpj', f.cnpj, 'cep', f.cep,
+      'grupo', f.grupo, 'sede_grupo', f.sede_grupo, 'membros', f.membros,
+      'logradouro', f.logradouro, 'numero', f.numero, 'complemento', f.complemento, 'bairro', f.bairro,
+      'cidade', f.cidade, 'uf', f.uf, 'telefone', f.telefone, 'email', f.email, 'responsavel', f.responsavel,
+      'observacoes', f.observacoes, 'ativo', f.ativo, 'criado_em', f.criado_em)
+      order by lower(f.grupo), f.sede_grupo desc, lower(f.nome))
+    from public.filiais f
+    where p_todas or f.organizacao_id is not distinct from p_org), '[]'::jsonb);
+end;
+$$;
+
+-- Cria ou altera uma filial. Só o Master.
+create or replace function public.filial_salvar(p_id uuid, p_org uuid, p_dados jsonb)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_d    jsonb := coalesce(p_dados, '{}'::jsonb);
+  v_nome text := left(trim(coalesce(v_d ->> 'nome', '')), 160);
+  v_cnpj text := regexp_replace(coalesce(v_d ->> 'cnpj', ''), '\D', '', 'g');
+  v_uf   text := upper(trim(coalesce(v_d ->> 'uf', '')));
+  v_mail text := lower(trim(coalesce(v_d ->> 'email', '')));
+  v_grp  text := left(trim(coalesce(v_d ->> 'grupo', '')), 80);
+  v_sede boolean := coalesce(v_d ->> 'sede_grupo', 'false') = 'true';
+  v_mem  integer;
+  v_id   uuid;
+begin
+  if not public.eh_master() then
+    raise exception 'Só o Master cadastra filiais';
+  end if;
+  if p_org is not null and not exists (select 1 from public.organizacoes where id = p_org) then
+    raise exception 'Organização não encontrada';
+  end if;
+  if p_id is not null and not exists (select 1 from public.filiais where id = p_id and organizacao_id is not distinct from p_org) then
+    raise exception 'Filial não encontrada';
+  end if;
+  if char_length(v_nome) = 0 then
+    raise exception 'Informe o nome da filial';
+  end if;
+  if v_cnpj <> '' and not public.cnpj_valido(v_cnpj) then
+    raise exception 'CNPJ inválido. Confira os números';
+  end if;
+  if v_uf <> '' and v_uf !~ '^[A-Z]{2}$' then
+    raise exception 'UF inválida. Use a sigla com duas letras';
+  end if;
+  if v_mail <> '' and v_mail !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then
+    raise exception 'E-mail inválido';
+  end if;
+  begin
+    v_mem := nullif(trim(coalesce(v_d ->> 'membros', '')), '')::integer;
+  exception when others then
+    raise exception 'A quantidade de pessoas precisa ser um número inteiro';
+  end;
+  if v_mem is not null and v_mem < 0 then
+    raise exception 'A quantidade de pessoas não pode ser negativa';
+  end if;
+  if v_sede and v_grp = '' then
+    raise exception 'Para marcar como sede, informe o grupo ou regional';
+  end if;
+  if exists (select 1 from public.filiais f where f.organizacao_id is not distinct from p_org
+             and lower(f.grupo) = lower(v_grp) and lower(f.nome) = lower(v_nome) and f.id is distinct from p_id) then
+    raise exception 'Já existe uma filial com este nome %', case when v_grp = '' then 'nesta organização' else 'neste grupo' end;
+  end if;
+  if v_cnpj <> '' and exists (select 1 from public.filiais f where f.organizacao_id is not distinct from p_org
+             and f.cnpj = v_cnpj and f.id is distinct from p_id) then
+    raise exception 'Já existe uma filial com este CNPJ nesta organização';
+  end if;
+  if p_id is null then
+    insert into public.filiais (organizacao_id, nome, grupo, sede_grupo, membros, cnpj, cep, logradouro, numero, complemento, bairro, cidade, uf,
+      telefone, email, responsavel, observacoes)
+    values (p_org, v_nome, v_grp, v_sede, v_mem, v_cnpj, left(regexp_replace(coalesce(v_d ->> 'cep', ''), '\D', '', 'g'), 8),
+      left(trim(coalesce(v_d ->> 'logradouro', '')), 160), left(trim(coalesce(v_d ->> 'numero', '')), 20),
+      left(trim(coalesce(v_d ->> 'complemento', '')), 80), left(trim(coalesce(v_d ->> 'bairro', '')), 80),
+      left(trim(coalesce(v_d ->> 'cidade', '')), 80), v_uf,
+      left(regexp_replace(coalesce(v_d ->> 'telefone', ''), '\D', '', 'g'), 13), left(v_mail, 254),
+      left(trim(coalesce(v_d ->> 'responsavel', '')), 120), left(coalesce(v_d ->> 'observacoes', ''), 1000))
+    returning id into v_id;
+    return v_id;
+  end if;
+  update public.filiais
+     set nome = v_nome, grupo = v_grp, sede_grupo = v_sede, membros = v_mem, cnpj = v_cnpj, cep = left(regexp_replace(coalesce(v_d ->> 'cep', ''), '\D', '', 'g'), 8),
+         logradouro = left(trim(coalesce(v_d ->> 'logradouro', '')), 160), numero = left(trim(coalesce(v_d ->> 'numero', '')), 20),
+         complemento = left(trim(coalesce(v_d ->> 'complemento', '')), 80), bairro = left(trim(coalesce(v_d ->> 'bairro', '')), 80),
+         cidade = left(trim(coalesce(v_d ->> 'cidade', '')), 80), uf = v_uf,
+         telefone = left(regexp_replace(coalesce(v_d ->> 'telefone', ''), '\D', '', 'g'), 13), email = left(v_mail, 254),
+         responsavel = left(trim(coalesce(v_d ->> 'responsavel', '')), 120),
+         observacoes = left(coalesce(v_d ->> 'observacoes', ''), 1000),
+         ativo = coalesce((v_d ->> 'ativo')::boolean, ativo), atualizado_em = now()
+   where id = p_id;
+  return p_id;
+end;
+$$;
+
+revoke all on function public.filiais_listar(uuid, boolean)     from public, anon;
+revoke all on function public.filial_salvar(uuid, uuid, jsonb)  from public, anon;
+grant execute on function public.filiais_listar(uuid, boolean)    to authenticated;
+grant execute on function public.filial_salvar(uuid, uuid, jsonb) to authenticated;
+
 drop policy if exists "organizacoes leitura" on public.organizacoes;
 create policy "organizacoes leitura" on public.organizacoes
   for select to authenticated

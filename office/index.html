@@ -203,6 +203,8 @@ tr.total td{font-weight:700;border-top:2px solid var(--verde)}
 .pilha{display:flex;flex-direction:column;gap:20px}
 .fin-acoes{display:flex;flex-wrap:wrap;gap:6px}
 .opcao{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:15px}
+tr.grupo-l th{background:var(--nevoa);text-align:left;font-size:14px;padding:10px 12px}
+tr.grupo-l th .sub{display:inline;margin-left:10px;font-weight:400}
 .opcao input{width:18px;height:18px;margin:0}
 .lista-simples{margin:8px 0;padding-left:18px;font-size:14px;line-height:1.7}
 .fin-faixa{display:flex;flex-direction:column;gap:6px}
@@ -658,22 +660,31 @@ function telaPrevista(m){
 }
 
 /* ---------- Organizações (Master) ---------- */
+var ORG={filiaisDe:undefined,busca:'',grupo:''};
 async function telaOrganizacoes(){
+  if(ORG.filiaisDe!==undefined){return telaFiliais();}
   carregando('Organizações');
-  var r=await sb.from('organizacoes').select('*').order('nome');
+  var rs=await Promise.all([sb.from('organizacoes').select('*').order('nome'),sb.rpc('filiais_listar',{p_org:null,p_todas:true})]);
+  var r=rs[0];
   if(r.error){falhaTela('Organizações',r.error);return;}
+  var fs=rs[1].error?[]:(rs[1].data||[]),conta={};
+  fs.forEach(function(f){var k=f.organizacao_id||'';conta[k]=(conta[k]||0)+1;});
+  function botaoFiliais(id,nome){var n=conta[id||'']||0;return '<button class="botao claro pequeno" type="button" data-filiais="'+esc(id||'')+'" data-nome="'+esc(nome)+'">Filiais ('+n+')</button>';}
   var linhas=(r.data||[]).map(function(o){
     return '<tr><td>'+esc(o.nome)+'</td><td>'+esc(formataCnpj(o.cnpj)||'—')+'</td>'+
       '<td><span class="situacao'+(o.ativo?'':' off')+'">'+(o.ativo?'Ativa':'Inativa')+'</span></td>'+
+      '<td>'+botaoFiliais(o.id,o.nome)+'</td>'+
       '<td><button class="botao claro pequeno" type="button" data-org="'+esc(o.id)+'" data-ativo="'+(o.ativo?'1':'0')+'">'+(o.ativo?'Desativar':'Ativar')+'</button></td></tr>';
   }).join('');
-  tela('<div class="cabeca"><div><h1>Organizações</h1><p class="apoio">Clientes corporativos. Ao desativar uma organização, todos os usuários dela perdem o acesso.</p></div></div>'+
+  tela('<div class="cabeca"><div><h1>Organizações</h1><p class="apoio">Clientes corporativos e as filiais de cada um. Ao desativar uma organização, todos os usuários dela perdem o acesso.</p></div></div>'+
     '<form class="painel" id="f-org" novalidate><h2>Nova organização</h2><div class="grade">'+
       '<div class="campo"><label for="o-nome">Nome</label><input id="o-nome" type="text" maxlength="160" required></div>'+
       '<div class="campo"><label for="o-cnpj">CNPJ (opcional)</label><input id="o-cnpj" type="text" inputmode="numeric" maxlength="18"></div>'+
       '<button class="botao" type="submit">Cadastrar</button></div></form>'+
-    '<div class="rolagem"><table><thead><tr><th scope="col">Nome</th><th scope="col">CNPJ</th><th scope="col">Situação</th><th scope="col">Ação</th></tr></thead><tbody>'+
-      (linhas||'<tr><td colspan="4" class="vazio">Nenhuma organização cadastrada.</td></tr>')+'</tbody></table></div>');
+    '<div class="rolagem"><table id="t-orgs"><thead><tr><th scope="col">Nome</th><th scope="col">CNPJ</th><th scope="col">Situação</th><th scope="col">Filiais</th><th scope="col">Ação</th></tr></thead><tbody>'+
+      '<tr><td>Celeiro Administradora<span class="sub">a própria Celeiro</span></td><td>—</td><td><span class="situacao">Ativa</span></td><td>'+botaoFiliais('','Celeiro Administradora')+'</td><td></td></tr>'+
+      linhas+'</tbody></table></div>'+
+    (rs[1].error?'<p class="erro">Não foi possível ler as filiais: '+esc(msgErro(rs[1].error))+'</p>':''));
   $('#f-org').onsubmit=async function(ev){
     ev.preventDefault();
     var nome=$('#o-nome').value.trim(),cnpj=$('#o-cnpj').value.trim(),b=$('button[type=submit]',this);
@@ -692,6 +703,94 @@ async function telaOrganizacoes(){
       aviso('Situação alterada.');telaOrganizacoes();
     };
   });
+  $$('[data-filiais]').forEach(function(b){b.onclick=function(){ORG.filiaisDe=b.getAttribute('data-filiais')||null;ORG.nome=b.getAttribute('data-nome');ORG.busca='';ORG.grupo='';telaFiliais();};});
+}
+
+/* ---------- Filiais de uma organização ---------- */
+async function telaFiliais(){
+  carregando('Filiais');
+  var r=await sb.rpc('filiais_listar',{p_org:ORG.filiaisDe,p_todas:false});
+  if(r.error){falhaTela('Filiais',r.error);return;}
+  var fs=r.data||[],grupos=[];
+  fs.forEach(function(f){if(grupos.indexOf(f.grupo)<0)grupos.push(f.grupo);});
+  var comGrupo=grupos.filter(function(g){return g;});
+  var pessoas=fs.reduce(function(t,f){return t+(Number(f.membros)||0);},0);
+  function endereco(f){
+    var a=[f.logradouro+(f.numero?', '+f.numero:''),f.bairro,[f.cidade,f.uf].filter(Boolean).join('/')].filter(function(x){return x&&x.trim();}).join(' · ');
+    return a||'—';
+  }
+  function desenha(){
+    var q=ORG.busca.trim().toLowerCase(),vis=fs.filter(function(f){
+      if(ORG.grupo!==''&&f.grupo!==(ORG.grupo==='(sem grupo)'?'':ORG.grupo))return false;
+      if(!q)return true;
+      return [f.nome,f.grupo,f.responsavel,f.cidade,f.uf,f.cnpj,f.bairro].join(' ').toLowerCase().indexOf(q)>=0;
+    });
+    var h='',atual=null;
+    vis.forEach(function(f){
+      if(f.grupo!==atual){
+        atual=f.grupo;
+        var doG=vis.filter(function(x){return x.grupo===atual;}),pg=doG.reduce(function(t,x){return t+(Number(x.membros)||0);},0);
+        if(comGrupo.length)h+='<tr class="grupo-l"><th scope="colgroup" colspan="6">'+esc(atual||'Sem grupo')+'<span class="sub">'+doG.length+(doG.length===1?' filial':' filiais')+(pg?' · '+pg.toLocaleString('pt-BR')+' pessoas':'')+'</span></th></tr>';
+      }
+      h+='<tr><td>'+esc(f.nome)+(f.sede_grupo?' <span class="selo claro">Sede</span>':'')+(f.cnpj?'<span class="sub">CNPJ '+esc(formataCnpj(f.cnpj))+'</span>':'')+'</td>'+
+        '<td>'+esc(f.responsavel||'—')+(f.telefone?'<span class="sub">'+esc(fmtTel(f.telefone))+'</span>':'')+'</td>'+
+        '<td class="num">'+(f.membros==null?'—':Number(f.membros).toLocaleString('pt-BR'))+'</td>'+
+        '<td>'+esc(endereco(f))+(f.cep?'<span class="sub">CEP '+esc(f.cep.replace(/^(\d{5})(\d{3})$/,'$1-$2'))+'</span>':'')+'</td>'+
+        '<td><span class="situacao'+(f.ativo?'':' off')+'">'+(f.ativo?'Ativa':'Inativa')+'</span></td>'+
+        '<td>'+(ehMaster()?'<button class="botao claro pequeno" type="button" data-editar-filial="'+esc(f.id)+'">Editar</button>':'')+'</td></tr>';
+    });
+    $('#t-filiais tbody').innerHTML=h||'<tr><td colspan="6" class="vazio">'+(fs.length?'Nenhuma filial com este filtro.':'Nenhuma filial cadastrada.')+'</td></tr>';
+    $('#fil-conta').textContent=vis.length===fs.length?'':'Mostrando '+vis.length+' de '+fs.length+'.';
+    $$('[data-editar-filial]').forEach(function(b){b.onclick=function(){dlgFilial(fs.filter(function(x){return x.id===b.getAttribute('data-editar-filial');})[0],comGrupo);};});
+  }
+  tela('<div class="cabeca"><div><p class="apoio"><button class="link" type="button" id="fil-voltar">← Organizações</button></p><h1>Filiais de '+esc(ORG.nome||'')+'</h1>'+
+      '<p class="apoio">Unidades desta organização. É cadastro e consulta: os dados dos módulos continuam separados por organização, não por filial.</p></div>'+
+      (ehMaster()?'<button class="botao" type="button" id="fil-nova">Nova filial</button>':'')+'</div>'+
+    '<div class="grade-d" style="margin-bottom:16px">'+
+      '<div class="cartao-d baixo"><div class="cartao-d-topo"><span>Filiais</span></div><p class="numero">'+fs.length.toLocaleString('pt-BR')+'</p><p class="apoio">'+fs.filter(function(f){return f.ativo;}).length+' ativas</p></div>'+
+      '<div class="cartao-d baixo"><div class="cartao-d-topo"><span>Grupos ou regionais</span></div><p class="numero">'+comGrupo.length+'</p><p class="apoio">'+(function(n){return n+(n===1?' sede marcada':' sedes marcadas');})(fs.filter(function(f){return f.sede_grupo;}).length)+'</p></div>'+
+      '<div class="cartao-d baixo"><div class="cartao-d-topo"><span>Pessoas</span></div><p class="numero">'+pessoas.toLocaleString('pt-BR')+'</p><p class="apoio">soma do campo Pessoas das filiais</p></div></div>'+
+    '<div class="painel"><div class="grade"><div class="campo"><label for="fil-busca">Buscar</label><input id="fil-busca" type="text" placeholder="Nome, responsável, cidade, UF ou CNPJ" value="'+esc(ORG.busca)+'"></div>'+
+      (comGrupo.length?'<div class="campo" style="flex:0 1 260px"><label for="fil-grupo">Grupo ou regional</label><select id="fil-grupo"><option value="">Todos</option>'+grupos.map(function(g){var v=g||'(sem grupo)';return '<option value="'+esc(v)+'"'+(ORG.grupo===v?' selected':'')+'>'+esc(g||'Sem grupo')+'</option>';}).join('')+'</select></div>':'')+
+      '</div><p class="meta" id="fil-conta" role="status"></p></div>'+
+    '<div class="rolagem"><table id="t-filiais"><thead><tr><th scope="col">Filial</th><th scope="col">Responsável</th><th scope="col" class="num">Pessoas</th><th scope="col">Endereço</th><th scope="col">Situação</th><th scope="col">Ação</th></tr></thead><tbody></tbody></table></div>');
+  desenha();
+  $('#fil-voltar').onclick=function(){ORG.filiaisDe=undefined;telaOrganizacoes();};
+  $('#fil-busca').oninput=function(){ORG.busca=this.value;desenha();};
+  if($('#fil-grupo'))$('#fil-grupo').onchange=function(){ORG.grupo=this.value;desenha();};
+  if($('#fil-nova'))$('#fil-nova').onclick=function(){dlgFilial(null,comGrupo);};
+}
+function dlgFilial(f,grupos){
+  var novo=!f;f=f||{ativo:true};
+  function campo(id,rotulo,valor,extra){return '<div class="campo"'+(extra&&extra.estilo?' style="'+extra.estilo+'"':'')+'><label for="'+id+'">'+rotulo+'</label><input id="'+id+'" type="text" value="'+esc(valor==null?'':valor)+'"'+((extra&&extra.attr)||'')+'></div>';}
+  var d=finDlg(novo?'Nova filial':'Editar filial',
+    '<div class="grade">'+campo('fl-nome','Nome da filial',f.nome,{attr:' maxlength="160" required'})+campo('fl-cnpj','CNPJ (opcional)',f.cnpj?formataCnpj(f.cnpj):'',{attr:' inputmode="numeric" maxlength="18"',estilo:'flex:0 1 200px'})+'</div>'+
+    '<div class="grade"><div class="campo"><label for="fl-grupo">Grupo ou regional (opcional)</label><input id="fl-grupo" type="text" maxlength="80" list="fl-grupos" value="'+esc(f.grupo||'')+'" placeholder="Ex.: Regional 001"><datalist id="fl-grupos">'+(grupos||[]).map(function(g){return '<option value="'+esc(g)+'">';}).join('')+'</datalist></div>'+
+      '<div class="campo" style="flex:0 1 150px"><span class="rotulo">Sede do grupo</span>'+chaveSw(!!f.sede_grupo,'Sede do grupo','id="fl-sede"')+'</div>'+
+      campo('fl-membros','Pessoas',f.membros,{attr:' inputmode="numeric" maxlength="7"',estilo:'flex:0 1 120px'})+'</div>'+
+    '<div class="grade">'+campo('fl-resp','Responsável',f.responsavel,{attr:' maxlength="120"'})+campo('fl-tel','Telefone',f.telefone?fmtTel(f.telefone):'',{attr:' inputmode="tel" maxlength="20"',estilo:'flex:0 1 190px'})+
+      '<div class="campo"><label for="fl-email">E-mail</label><input id="fl-email" type="email" maxlength="254" value="'+esc(f.email||'')+'"></div></div>'+
+    '<div class="grade">'+campo('fl-cep','CEP',f.cep?f.cep.replace(/^(\d{5})(\d{3})$/,'$1-$2'):'',{attr:' inputmode="numeric" maxlength="9"',estilo:'flex:0 1 130px'})+campo('fl-log','Logradouro',f.logradouro,{attr:' maxlength="160"'})+campo('fl-num','Número',f.numero,{attr:' maxlength="20"',estilo:'flex:0 1 110px'})+'</div>'+
+    '<div class="grade">'+campo('fl-comp','Complemento',f.complemento,{attr:' maxlength="80"'})+campo('fl-bairro','Bairro',f.bairro,{attr:' maxlength="80"'})+campo('fl-cidade','Cidade',f.cidade,{attr:' maxlength="80"'})+campo('fl-uf','UF',f.uf,{attr:' maxlength="2"',estilo:'flex:0 1 80px'})+'</div>'+
+    '<div class="campo"><label for="fl-obs">Observações</label><textarea id="fl-obs" rows="2" maxlength="1000">'+esc(f.observacoes||'')+'</textarea></div>'+
+    (novo?'':'<div class="campo"><span class="rotulo">Ativa</span>'+chaveSw(f.ativo,'Filial ativa','id="fl-ativo"')+'</div>'),
+    '<button class="botao" type="submit">Salvar filial</button>',true);
+  $$('.chave-sw',d).forEach(function(s){s.onclick=function(){s.setAttribute('aria-checked',s.getAttribute('aria-checked')==='true'?'false':'true');};});
+  $('form',d).onsubmit=async function(ev){
+    ev.preventDefault();
+    var b=$('button[type=submit]',d),nome=$('#fl-nome',d).value.trim(),cnpj=$('#fl-cnpj',d).value.trim(),mem=$('#fl-membros',d).value.trim();
+    if(!nome){aviso('Informe o nome da filial.',true);$('#fl-nome',d).focus();return;}
+    if(cnpj&&!cnpjValido(cnpj)){aviso('CNPJ inválido. Confira os números.',true);return;}
+    if(mem&&!/^\d+$/.test(mem)){aviso('Em Pessoas, use só números.',true);return;}
+    ocupar(b,true);
+    var r=await sb.rpc('filial_salvar',{p_id:novo?null:f.id,p_org:ORG.filiaisDe,p_dados:{nome:nome,cnpj:cnpj,grupo:$('#fl-grupo',d).value,sede_grupo:$('#fl-sede',d).getAttribute('aria-checked')==='true',membros:mem,
+      responsavel:$('#fl-resp',d).value,telefone:$('#fl-tel',d).value,email:$('#fl-email',d).value,cep:$('#fl-cep',d).value,logradouro:$('#fl-log',d).value,numero:$('#fl-num',d).value,
+      complemento:$('#fl-comp',d).value,bairro:$('#fl-bairro',d).value,cidade:$('#fl-cidade',d).value,uf:$('#fl-uf',d).value,observacoes:$('#fl-obs',d).value,
+      ativo:novo?true:$('#fl-ativo',d).getAttribute('aria-checked')==='true'}});
+    if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
+    d.fechar();aviso('Filial salva.');telaFiliais();
+  };
+  $('#fl-nome',d).focus();
 }
 
 /* ---------- Usuários, níveis de permissão e módulos de cada pessoa ---------- */
