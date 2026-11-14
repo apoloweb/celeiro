@@ -321,15 +321,39 @@ Regras, todas aplicadas no banco (`supabase.sql`, seção 11):
   e por usuário. O Master não precisa de liberação individual. O usuário também precisa ter o módulo Conexão MCP.
 - Somente leitura por padrão. Gravar exige as duas coisas: escrita liberada pelo Master no módulo e a opção
   "Permitir gravação" marcada ao criar a conexão.
-- O token (`clro_…`) aparece uma única vez; o banco guarda só o resumo SHA-256. Validade de 30 dias a 1 ano,
-  no máximo 5 conexões ativas por usuário, 120 chamadas por minuto por conexão.
+- O token (`clro_…`) aparece uma única vez; o banco guarda só o resumo SHA-256. Validade de até 90 dias,
+  no máximo 5 conexões ativas por usuário, 60 chamadas por minuto por conexão.
+- **Nível somente leitura.** Um nível de permissão pode ser marcado como "Pelo MCP, somente leitura"
+  (Usuários → Níveis de permissão). Quem está nele nunca grava por conexão MCP, mesmo com a escrita liberada
+  para a organização, e não consegue criar conexão com gravação. Tentativas de gravar, ou de usar ferramenta de
+  módulo fora do nível, voltam com erro claro e ficam na Auditoria como "MCP: chamada recusada".
 - Revogar (o dono, o Master ou o Corporativo master da organização), bloquear o usuário, desativar o usuário
   ou desligar o módulo corta o acesso na chamada seguinte.
-- Toda chamada entra na Auditoria com origem `mcp`, o IP de quem chamou e o nome da conexão. O token nunca é gravado.
+- Toda chamada entra na Auditoria com origem `mcp`, o IP de quem chamou e o nome da conexão. As alterações
+  feitas dentro de uma chamada (linhas "Criou/Alterou registro") também ficam com origem `mcp` e o nome da
+  conexão. O token nunca é gravado.
 
 Ferramentas desta versão: quem sou eu; resumo do dashboard; listar, ver, criar, mover e comentar tarefas;
-buscar cadastros (documento mascarado), ver pessoa física e ver empresa; consultar auditoria.
+buscar cadastros (documento mascarado), ver pessoa física e ver empresa; consultar auditoria; resumo de atividades.
 Cadastro e Auditoria não têm ferramentas de gravação.
+
+- **Consultar auditoria** (`auditoria_consultar`): filtros de período (`de`/`ate`), usuário, módulo, tipo de ação
+  (criacao, alteracao, exclusao, acesso, consulta, outro), origem (tela ou mcp) e texto; 50 eventos por página
+  (máximo 200), do mais recente para o mais antigo. Cada evento traz data e hora de Brasília, quem fez, módulo,
+  ação, o registro afetado (id e título legível) e um resumo curto do que mudou. CPF, CNPJ, conta, chave Pix,
+  e-mail e telefone saem mascarados; tarefas confidenciais fora do alcance do usuário aparecem sem título.
+- **Resumo de atividades** (`atividades_resumo`): para um período (padrão: últimas 24 horas), tarefas criadas,
+  movidas e concluídas, quem mais agiu, módulos com mais atividade e as tarefas vencidas ou urgentes de agora.
+
+### Assistente de IA (Lívia)
+
+A Lívia é uma usuária da Equipe Celeiro (perfil Gerencial) no nível **Assistente IA**: módulos Dashboard,
+Workflow, Auditoria e Conexão MCP, marcado como somente leitura pelo MCP. Pelo MCP ela enxerga seis ferramentas:
+quem sou eu, resumo do dashboard, listar tarefas, ver tarefa, consultar auditoria e resumo de atividades.
+Para repetir a configuração pela tela, como Master: (1) Usuários → Níveis de permissão → Novo nível, marcar os
+quatro módulos e "Pelo MCP, somente leitura"; (2) Usuários → Editar a usuária → Nível; (3) Conexão MCP →
+Liberação do MCP (Master) → Para quem: Equipe Celeiro → ligar Leitura em Dashboard, Workflow e Auditoria;
+(4) na mesma tela, Usuários liberados → ligar a usuária.
 
 Para publicar:
 

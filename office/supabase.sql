@@ -95,6 +95,11 @@ create table if not exists public.niveis_permissao (
 alter table public.usuarios
   add column if not exists nivel_id uuid references public.niveis_permissao(id);
 
+-- Nível que, pelo MCP, só lê: quem está nele nunca escreve por conexão de IA,
+-- mesmo que a escrita esteja liberada para a organização.
+alter table public.niveis_permissao
+  add column if not exists mcp_somente_leitura boolean not null default false;
+
 -- Auditoria: todas as ações de todos os usuários
 create table if not exists public.auditoria (
   id             bigint generated always as identity primary key,
@@ -314,7 +319,19 @@ declare
   v_uid   uuid := (select auth.uid());
   v_u     public.usuarios%rowtype;
   v_email text;
+  v_con   text := nullif((select auth.jwt()) ->> 'mcp_conexao', '');
+  v_det   jsonb := p_detalhes;
+  v_ori   text := p_origem;
 begin
+  -- Tudo o que acontece dentro de uma chamada do MCP fica marcado como "mcp",
+  -- com o nome da conexão, inclusive as alterações gravadas pelos gatilhos.
+  if v_con is not null then
+    v_ori := 'mcp';
+    if coalesce(v_det, '{}'::jsonb) ->> 'conexao' is null then
+      v_det := coalesce(v_det, '{}'::jsonb) || jsonb_build_object('conexao',
+        (select c.nome from public.mcp_conexoes c where c.id::text = v_con));
+    end if;
+  end if;
   if v_uid is not null then
     select * into v_u from public.usuarios where user_id = v_uid;
     if v_u.user_id is null then
@@ -328,11 +345,11 @@ begin
     ip, pais, navegador, origem
   ) values (
     v_uid, v_u.nome, coalesce(v_u.email, v_email), v_u.perfil, v_u.organizacao_id,
-    p_acao, coalesce(p_modulo, ''), p_tabela, p_registro, p_detalhes,
+    p_acao, coalesce(p_modulo, ''), p_tabela, p_registro, v_det,
     nullif(trim(split_part(coalesce(public.cabecalho('x-forwarded-for'), ''), ',', 1)), ''),
     nullif(public.cabecalho('cf-ipcountry'), ''),
     left(public.cabecalho('user-agent'), 300),
-    p_origem
+    v_ori
   );
 end;
 $$;
@@ -619,8 +636,9 @@ end;
 $$;
 
 -- Cria ou altera um nível de permissão (p_id nulo = novo)
+drop function if exists public.salvar_nivel(uuid, text, text, uuid, text[]);
 create or replace function public.salvar_nivel(
-  p_id uuid, p_nome text, p_descricao text, p_org uuid, p_modulos text[]
+  p_id uuid, p_nome text, p_descricao text, p_org uuid, p_modulos text[], p_mcp_leitura boolean default null
 )
 returns uuid
 language plpgsql
@@ -655,8 +673,8 @@ begin
   end if;
 
   if p_id is null then
-    insert into public.niveis_permissao (nome, descricao, organizacao_id, modulos)
-    values (trim(p_nome), coalesce(trim(p_descricao), ''), p_org, v_mods)
+    insert into public.niveis_permissao (nome, descricao, organizacao_id, modulos, mcp_somente_leitura)
+    values (trim(p_nome), coalesce(trim(p_descricao), ''), p_org, v_mods, coalesce(p_mcp_leitura, false))
     returning id into v_id;
     return v_id;
   end if;
@@ -669,7 +687,8 @@ begin
     raise exception 'Não é possível mudar a organização de um nível já criado';
   end if;
   update public.niveis_permissao
-     set nome = trim(p_nome), descricao = coalesce(trim(p_descricao), ''), modulos = v_mods
+     set nome = trim(p_nome), descricao = coalesce(trim(p_descricao), ''), modulos = v_mods,
+         mcp_somente_leitura = coalesce(p_mcp_leitura, mcp_somente_leitura)
    where id = p_id;
   return p_id;
 end;
@@ -806,7 +825,7 @@ revoke all on function public.atualizar_usuario(uuid, text, text, uuid, boolean,
 revoke all on function public.alterar_email_usuario(uuid, text) from public, anon;
 revoke all on function public.pode_criar_usuario(text, uuid)                   from public, anon;
 revoke all on function public.nivel_valido(uuid, text, uuid)                   from public, anon;
-revoke all on function public.salvar_nivel(uuid, text, text, uuid, text[])     from public, anon;
+revoke all on function public.salvar_nivel(uuid, text, text, uuid, text[], boolean) from public, anon;
 revoke all on function public.excluir_nivel(uuid)                              from public, anon;
 revoke all on function public.usuarios_com_modulos()                           from public, anon;
 revoke all on function public.definir_modulo(uuid, text, text, boolean)        from public, anon;
@@ -825,7 +844,7 @@ grant execute on function public.atualizar_usuario(uuid, text, text, uuid, boole
 grant execute on function public.alterar_email_usuario(uuid, text) to authenticated;
 grant execute on function public.pode_criar_usuario(text, uuid)                   to authenticated;
 grant execute on function public.nivel_valido(uuid, text, uuid)                   to authenticated;
-grant execute on function public.salvar_nivel(uuid, text, text, uuid, text[])     to authenticated;
+grant execute on function public.salvar_nivel(uuid, text, text, uuid, text[], boolean) to authenticated;
 grant execute on function public.excluir_nivel(uuid)                              to authenticated;
 grant execute on function public.usuarios_com_modulos()                           to authenticated;
 grant execute on function public.definir_modulo(uuid, text, text, boolean)        to authenticated;
@@ -2416,8 +2435,11 @@ insert into public.mcp_ferramentas (nome, modulo, escrita, titulo, descricao, pa
    'Mostra o cadastro completo de uma empresa, com quadro societário e representante.',
    '{"type":"object","properties":{"id":{"type":"string","description":"Identificador devolvido por cadastro_buscar."}},"required":["id"],"additionalProperties":false}', 32),
   ('auditoria_consultar', 'auditoria', false, 'Consultar auditoria',
-   'Consulta o registro de auditoria que o usuário pode ver: quem fez o quê, quando, de qual IP e por qual origem (tela, banco ou mcp).',
-   '{"type":"object","properties":{"dias":{"type":"integer","minimum":1,"maximum":90,"description":"Quantos dias para trás. Padrão: 7."},"texto":{"type":"string","description":"Trecho da ação ou do nome do usuário."},"origem":{"type":"string","enum":["tela","banco","mcp"]},"limite":{"type":"integer","minimum":1,"maximum":100,"description":"Padrão: 30."}},"additionalProperties":false}', 40)
+   'Consulta o registro de auditoria que o usuário pode ver: quem fez o quê, quando, em qual módulo e em qual registro, com um resumo curto do que mudou. Do mais recente para o mais antigo. CPF, CNPJ, conta, chave Pix, e-mail e telefone vêm mascarados. Para uma visão geral de um período, prefira atividades_resumo.',
+   '{"type":"object","properties":{"de":{"type":"string","description":"Início do período: AAAA-MM-DD ou AAAA-MM-DDTHH:MM, no horário de Brasília. Padrão: 7 dias antes do fim."},"ate":{"type":"string","description":"Fim do período, no mesmo formato. Padrão: agora."},"usuario":{"type":"string","description":"Parte do nome de quem fez a ação."},"modulo":{"type":"string","description":"Módulo, por exemplo Workflow, Cadastro, Financeiro, Usuários."},"tipo_acao":{"type":"string","enum":["criacao","alteracao","exclusao","acesso","consulta","outro"],"description":"criacao, alteracao e exclusao de registros; acesso (entradas no sistema e conexões); consulta (telas abertas, leituras pelo MCP)."},"origem":{"type":"string","enum":["tela","mcp"],"description":"tela: feito por pessoas no sistema. mcp: feito por um assistente de IA."},"texto":{"type":"string","description":"Trecho da ação."},"limite":{"type":"integer","minimum":1,"maximum":200,"description":"Eventos por página. Padrão: 50."},"pagina":{"type":"integer","minimum":1,"description":"Padrão: 1. Use tem_mais para saber se há próxima."}},"additionalProperties":false}', 40),
+  ('atividades_resumo', 'auditoria', false, 'Resumo de atividades',
+   'Resumo agregado do que aconteceu no Celeiro Office em um período (padrão: últimas 24 horas): tarefas criadas, movidas e concluídas, quem mais agiu, módulos com mais atividade e as tarefas vencidas ou urgentes de agora. Use quando perguntarem "o que rolou hoje no office?".',
+   '{"type":"object","properties":{"de":{"type":"string","description":"Início do período: AAAA-MM-DD ou AAAA-MM-DDTHH:MM, no horário de Brasília. Padrão: 24 horas antes do fim."},"ate":{"type":"string","description":"Fim do período, no mesmo formato. Padrão: agora."}},"additionalProperties":false}', 41)
 on conflict (nome) do update
   set modulo = excluded.modulo, escrita = excluded.escrita, titulo = excluded.titulo,
       descricao = excluded.descricao, parametros = excluded.parametros, ordem = excluded.ordem;
@@ -2467,8 +2489,9 @@ stable
 security definer
 set search_path = ''
 as $$
-  select m.codigo, m.nome, l.escrita
+  select m.codigo, m.nome, l.escrita and not coalesce(n.mcp_somente_leitura, false)
   from public.usuarios u
+  left join public.niveis_permissao n on n.id = u.nivel_id
   join public.mcp_liberacoes l on l.organizacao_id is not distinct from u.organizacao_id and l.leitura
   join public.modulos m on m.codigo = l.modulo
   where u.user_id = p_user
@@ -2517,6 +2540,10 @@ begin
 
   v_r := jsonb_build_object(
     'liberado', public.mcp_usuario_liberado(v_uid),
+    'nivel', (select n.nome from public.usuarios u join public.niveis_permissao n on n.id = u.nivel_id where u.user_id = v_uid),
+    'somente_leitura', coalesce((select n.mcp_somente_leitura from public.usuarios u
+                                 join public.niveis_permissao n on n.id = u.nivel_id where u.user_id = v_uid), false),
+    'validade_maxima_dias', 90, 'limite_por_minuto', 60,
     'modulos', coalesce((
       select jsonb_agg(jsonb_build_object('modulo', m.modulo, 'nome', m.nome, 'escrita', m.escrita))
       from public.mcp_modulos(v_uid) m), '[]'::jsonb),
@@ -2558,6 +2585,8 @@ begin
           'user_id', u.user_id, 'nome', u.nome, 'email', u.email, 'perfil', u.perfil,
           'organizacao', o.nome, 'ativo', u.ativo,
           'tem_modulo', 'mcp' = any(public.modulos_efetivos(u.user_id)),
+          'nivel', (select n.nome from public.niveis_permissao n where n.id = u.nivel_id),
+          'somente_leitura', coalesce((select n.mcp_somente_leitura from public.niveis_permissao n where n.id = u.nivel_id), false),
           'liberado', u.perfil = 'master' or coalesce(mu.liberado, false)
         ) order by u.nome)
         from public.usuarios u
@@ -2602,8 +2631,13 @@ begin
   if char_length(v_nome) = 0 then
     raise exception 'Dê um nome à conexão';
   end if;
-  if p_dias is null or p_dias < 1 or p_dias > 365 then
-    raise exception 'A validade precisa ficar entre 1 e 365 dias';
+  if p_dias is null or p_dias < 1 or p_dias > 90 then
+    raise exception 'A validade precisa ficar entre 1 e 90 dias';
+  end if;
+  if coalesce(p_escrita, false) and exists (
+       select 1 from public.usuarios u join public.niveis_permissao n on n.id = u.nivel_id
+       where u.user_id = v_uid and n.mcp_somente_leitura) then
+    raise exception 'O seu nível de permissão só permite conexões somente leitura';
   end if;
   if (select count(*) from public.mcp_conexoes
       where user_id = v_uid and revogada_em is null and expira_em > now()) >= 5 then
@@ -2740,6 +2774,429 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------
+-- Apoio às ferramentas de leitura usadas por assistentes de IA
+-- ---------------------------------------------------------------------
+
+-- Mascara dados sensíveis dentro de um texto livre: e-mail, CNPJ, CPF, telefone
+-- e qualquer sequência longa de números (conta, cartão).
+create or replace function public.mcp_mascara_texto(p_texto text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
+    coalesce(p_texto, ''),
+    '([A-Za-z0-9])[A-Za-z0-9._%+-]*@([A-Za-z0-9-]+\.[A-Za-z0-9.-]+)', '\1***@\2', 'g'),
+    '\m\d{2}\.?\d{3}\.?(\d{3})/?(\d{4})-?\d{2}\M', '**.***.\1/\2-**', 'g'),
+    '\m\d{3}\.?(\d{3})\.?(\d{3})-?\d{2}\M', '***.\1.\2-**', 'g'),
+    '\(?\m\d{2}\)?[ ]?9?\d{4}-?\d{2}(\d{2})\M', '(**) *****-**\1', 'g'),
+    '\m\d{8,}(\d{2})\M', '********\1', 'g');
+$$;
+
+-- Mascara um valor conforme o nome do campo de onde ele veio
+create or replace function public.mcp_mascara_campo(p_chave text, p_valor text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when p_valor is null or p_valor = '' then ''
+    when lower(p_chave) ~ '(cpf|cnpj|documento)' then
+      case length(regexp_replace(p_valor, '\D', '', 'g'))
+        when 11 then regexp_replace(regexp_replace(p_valor, '\D', '', 'g'), '^\d{3}(\d{3})(\d{3})\d{2}$', '***.\1.\2-**')
+        when 14 then regexp_replace(regexp_replace(p_valor, '\D', '', 'g'), '^\d{5}(\d{3})(\d{4})\d{2}$', '**.***.\1/\2-**')
+        else '***' end
+    when lower(p_chave) ~ 'e_?mail' then
+      case when p_valor ~ '@' then public.mcp_mascara_texto(p_valor) else p_valor end
+    when lower(p_chave) ~ '(telefone|celular|whatsapp|fone)' then
+      '(**) *****-**' || right(regexp_replace(p_valor, '\D', '', 'g'), 2)
+    when lower(p_chave) ~ '(pix|agencia|conta_numero|numero_conta|conta_digito|conta_corrente|banco_conta|token|senha|hash|prefixo|renda|patrimonio|^rg$|cnh|passaporte)'
+      or lower(p_chave) = 'conta' then '***'
+    else public.mcp_mascara_texto(p_valor)
+  end;
+$$;
+
+-- Tipo de uma ação da auditoria, para filtro
+create or replace function public.mcp_aud_tipo(p_acao text, p_detalhes jsonb)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when p_acao ~* '^MCP: (assistente conectou|conexão recusada|chamada recusada)' then 'acesso'
+    when p_acao ~* '^MCP:' then case when p_detalhes ->> 'escrita' = 'true' then 'alteracao' else 'consulta' end
+    when p_acao ~* '^(Criou|Emitiu|Cadastrou|Anexou|Registrou|Recebeu)' then 'criacao'
+    when p_acao ~* '^Excluiu' then 'exclusao'
+    when p_acao ~* '^(Alterou|Moveu|Baixou título|Estornou|Revogou|Liberou|Bloqueou|Marcou|Atualizou|Confirmou|Cancelou|Redefiniu|Trocou)' then 'alteracao'
+    when p_acao ~* '^(Entrou|Saiu|Informou e-mail|Código do autenticador|Tentou entrar|Sessão)' then 'acesso'
+    when p_acao ~* '^(Abriu|Visualizou|Baixou o anexo|Consultou|Exportou|Filtrou|Imprimiu)' then 'consulta'
+    else 'outro'
+  end;
+$$;
+
+-- A linha de auditoria fala de uma tarefa que o usuário atual não pode ver?
+create or replace function public.mcp_aud_oculta(a public.auditoria)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_d  jsonb := coalesce(a.detalhes -> 'depois', a.detalhes -> 'antes', '{}'::jsonb);
+  v_id uuid;
+begin
+  if a.tabela is null or a.tabela not like 'workflow\_%' or public.eh_master() then
+    return false;
+  end if;
+  begin
+    v_id := case when a.tabela = 'workflow_tarefas' then a.registro_id::uuid else (v_d ->> 'tarefa_id')::uuid end;
+  exception when others then
+    return false;
+  end;
+  if v_id is null then
+    return false;
+  end if;
+  if exists (select 1 from public.workflow_tarefas t where t.id = v_id) then
+    return not public.workflow_pode_ver(v_id);
+  end if;
+  return coalesce(v_d ->> 'confidencial', 'false') = 'true';
+end;
+$$;
+
+-- Nome legível do registro afetado
+create or replace function public.mcp_aud_titulo(a public.auditoria)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_d   jsonb := coalesce(a.detalhes -> 'depois', a.detalhes -> 'antes', '{}'::jsonb);
+  v_t   text;
+  v_cod text;
+begin
+  if public.mcp_aud_oculta(a) then
+    return 'Tarefa confidencial';
+  end if;
+  if a.tabela = 'workflow_tarefas' then
+    v_t := 'WF-' || lpad(coalesce(v_d ->> 'numero', '?'), 4, '0') || ' · ' || coalesce(v_d ->> 'titulo', '');
+  elsif a.tabela in ('workflow_comentarios', 'workflow_anexos') then
+    select 'WF-' || lpad(t.numero::text, 4, '0') || ' · ' || t.titulo into v_cod
+      from public.workflow_tarefas t where t.id::text = v_d ->> 'tarefa_id';
+    v_t := case a.tabela when 'workflow_comentarios' then 'Comentário' else 'Anexo ' || coalesce(v_d ->> 'nome', '') end
+           || ' na tarefa ' || coalesce(v_cod, 'excluída');
+  elsif a.tabela = 'fin_titulos' then
+    v_t := case v_d ->> 'tipo' when 'pagar' then 'CP-' else 'CR-' end || lpad(coalesce(v_d ->> 'numero', '?'), 6, '0')
+           || ' · ' || coalesce(v_d ->> 'descricao', '');
+  elsif a.tabela = 'fin_faturas' then
+    v_t := 'FAT-' || lpad(coalesce(v_d ->> 'numero', '?'), 6, '0') || ' · ' || coalesce(v_d ->> 'cliente_nome', '');
+  elsif a.tabela = 'mcp_usuarios' then
+    v_t := 'Uso do MCP por ' || coalesce((select u.nome from public.usuarios u where u.user_id::text = v_d ->> 'user_id'), 'usuário removido');
+  elsif a.tabela = 'mcp_liberacoes' then
+    v_t := 'Liberação do MCP · ' || coalesce((select m.nome from public.modulos m where m.codigo = v_d ->> 'modulo'), v_d ->> 'modulo', '')
+           || ' · ' || coalesce((select o.nome from public.organizacoes o where o.id::text = v_d ->> 'organizacao_id'), 'Equipe Celeiro');
+  elsif a.tabela = 'modulo_permissoes' then
+    v_t := 'Permissão do módulo ' || coalesce(v_d ->> 'modulo', '') || ' para o perfil ' || coalesce(v_d ->> 'perfil', '');
+  else
+    v_t := coalesce(nullif(v_d ->> 'titulo', ''), nullif(v_d ->> 'nome', ''), nullif(v_d ->> 'nome_completo', ''),
+                    nullif(v_d ->> 'razao_social', ''), nullif(v_d ->> 'investidor_nome', ''), nullif(v_d ->> 'descricao', ''),
+                    nullif(v_d ->> 'historico', ''), nullif(a.detalhes ->> 'nome', ''), nullif(a.detalhes ->> 'conexao', ''), '');
+  end if;
+  return left(public.mcp_mascara_texto(v_t), 160);
+end;
+$$;
+
+-- Resumo curto do que mudou, com dados sensíveis mascarados
+create or replace function public.mcp_aud_resumo(a public.auditoria)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_antes  jsonb := a.detalhes -> 'antes';
+  v_depois jsonb := a.detalhes -> 'depois';
+  v_r      text;
+  v_n      int;
+begin
+  if a.detalhes is null then
+    return '';
+  end if;
+  if public.mcp_aud_oculta(a) then
+    return 'Detalhes ocultos: tarefa confidencial fora do alcance deste usuário.';
+  end if;
+  if v_antes is not null and v_depois is not null then
+    select string_agg(x.k || ': ' || x.de || ' → ' || x.para, '; ' order by x.k), count(*) into v_r, v_n
+    from (
+      select case when d.key = 'nivel_id' then 'nivel' else d.key end as k,
+             case when d.key = 'nivel_id' then coalesce((select n.nome from public.niveis_permissao n where n.id::text = o.value #>> '{}'), 'padrão do perfil')
+                  when jsonb_typeof(o.value) in ('object', 'array') then '(lista)'
+                  else coalesce(nullif(left(public.mcp_mascara_campo(d.key, o.value #>> '{}'), 60), ''), 'vazio') end as de,
+             case when d.key = 'nivel_id' then coalesce((select n.nome from public.niveis_permissao n where n.id::text = d.value #>> '{}'), 'padrão do perfil')
+                  when jsonb_typeof(d.value) in ('object', 'array') then '(lista alterada)'
+                  else coalesce(nullif(left(public.mcp_mascara_campo(d.key, d.value #>> '{}'), 60), ''), 'vazio') end as para
+      from jsonb_each(v_depois) d
+      join jsonb_each(v_antes) o on o.key = d.key
+      where d.value is distinct from o.value
+        and (d.key = 'nivel_id'
+             or d.key !~ '(^id$|_id$|_em$|_por$|^criado|^atualizado|hash|token|^janela|^chamadas$|^ultimo_uso$)')
+      order by d.key
+      limit 6
+    ) x;
+    return coalesce(v_r, 'Sem mudança relevante nos campos.');
+  elsif v_depois is not null then
+    select string_agg(d.key || ': ' || left(public.mcp_mascara_campo(d.key, d.value #>> '{}'), 60), '; ' order by d.key) into v_r
+    from jsonb_each(v_depois) d
+    where d.key in ('status', 'prioridade', 'prazo', 'valor', 'vencimento', 'tipo', 'perfil', 'situacao', 'meio', 'papel', 'modulo', 'habilitado', 'texto', 'leitura', 'escrita', 'liberado')
+      and jsonb_typeof(d.value) not in ('object', 'array', 'null') and d.value #>> '{}' <> '';
+    return 'Criado' || coalesce(' com ' || v_r, '') || '.';
+  elsif v_antes is not null then
+    return 'Excluído.';
+  end if;
+  select string_agg(d.key || ': ' || left(public.mcp_mascara_campo(d.key, d.value #>> '{}'), 80), '; ' order by d.key) into v_r
+  from (select * from jsonb_each(a.detalhes) limit 12) d
+  where jsonb_typeof(d.value) not in ('object', 'array', 'null')
+    and d.key !~ '(^id$|_id$|hash|token|^dono$)' and d.value #>> '{}' <> '';
+  return coalesce(v_r, '');
+end;
+$$;
+
+-- Lê "de" e "até" de uma ferramenta: data (AAAA-MM-DD, no fuso de Brasília) ou data e hora.
+create or replace function public.mcp_instante(p_texto text, p_fim boolean)
+returns timestamptz
+language plpgsql
+stable
+set search_path = ''
+as $$
+begin
+  if p_texto is null or trim(p_texto) = '' then
+    return null;
+  end if;
+  if trim(p_texto) ~ '^\d{4}-\d{2}-\d{2}$' then
+    return ((trim(p_texto)::date + case when p_fim then 1 else 0 end)::timestamp at time zone 'America/Sao_Paulo')
+           - case when p_fim then interval '1 millisecond' else interval '0' end;
+  end if;
+  if trim(p_texto) ~ '(Z|[+-]\d{2}:?\d{2})$' then
+    return trim(p_texto)::timestamptz;
+  end if;
+  return trim(p_texto)::timestamp at time zone 'America/Sao_Paulo';
+exception when others then
+  raise exception 'Data inválida: "%". Use AAAA-MM-DD ou AAAA-MM-DDTHH:MM', left(p_texto, 40);
+end;
+$$;
+
+-- Linhas da auditoria que o usuário atual alcança (mesma regra da tela Auditoria)
+create or replace function public.mcp_aud_alcance(a public.auditoria)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select public.eh_master()
+      or (public.pode_modulo('auditoria')
+          and (public.meu_perfil() = 'gerencial' or a.organizacao_id = public.minha_org()));
+$$;
+
+-- Ferramenta "Consultar auditoria"
+create or replace function public.mcp_auditoria_consultar(p_args jsonb)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_a    jsonb := coalesce(p_args, '{}'::jsonb);
+  v_lim  int;
+  v_pag  int;
+  v_de   timestamptz := public.mcp_instante(v_a ->> 'de', false);
+  v_ate  timestamptz := public.mcp_instante(v_a ->> 'ate', true);
+  v_usu  text := lower(trim(coalesce(v_a ->> 'usuario', '')));
+  v_mod  text := lower(trim(coalesce(v_a ->> 'modulo', '')));
+  v_tipo text := coalesce(v_a ->> 'tipo_acao', '');
+  v_ori  text := coalesce(v_a ->> 'origem', '');
+  v_txt  text := lower(trim(coalesce(v_a ->> 'texto', '')));
+  v_tot  bigint;
+  v_ev   jsonb;
+begin
+  begin
+    v_lim := least(greatest(coalesce((v_a ->> 'limite')::int, 50), 1), 200);
+    v_pag := greatest(coalesce((v_a ->> 'pagina')::int, 1), 1);
+  exception when others then
+    raise exception 'Limite e página precisam ser números inteiros';
+  end;
+  if v_tipo not in ('', 'criacao', 'alteracao', 'exclusao', 'acesso', 'consulta', 'outro') then
+    raise exception 'Tipo de ação inválido. Use criacao, alteracao, exclusao, acesso, consulta ou outro';
+  end if;
+  if v_ori not in ('', 'tela', 'mcp') then
+    raise exception 'Origem inválida. Use tela ou mcp';
+  end if;
+  v_ate := coalesce(v_ate, now());
+  if v_de is null then
+    begin
+      v_de := v_ate - make_interval(days => least(greatest(coalesce((v_a ->> 'dias')::int, 7), 1), 90));
+    exception when others then
+      raise exception 'Dias precisa ser um número inteiro';
+    end;
+  end if;
+  if v_de > v_ate then
+    raise exception 'O início do período vem depois do fim';
+  end if;
+
+  with f as (
+    select a.*
+    from public.auditoria a
+    where a.ocorrido_em between v_de and v_ate
+      and public.mcp_aud_alcance(a)
+      and (v_usu = '' or position(v_usu in lower(coalesce(a.usuario_nome, '') || ' ' || coalesce(a.usuario_email, ''))) > 0)
+      and (v_mod = '' or position(v_mod in lower(a.modulo)) > 0
+           or exists (select 1 from public.modulos m where m.codigo = v_mod and m.nome = a.modulo))
+      and (v_tipo = '' or public.mcp_aud_tipo(a.acao, a.detalhes) = v_tipo)
+      and (v_ori = '' or (v_ori = 'mcp') = (a.origem = 'mcp'))
+      and (v_txt = '' or position(v_txt in lower(a.acao || ' ' || coalesce(a.usuario_nome, ''))) > 0)
+  ), pagina as (
+    select * from f order by ocorrido_em desc, id desc limit v_lim offset (v_pag - 1) * v_lim
+  )
+  select (select count(*) from f),
+         coalesce((select jsonb_agg(jsonb_build_object(
+           'quando', to_char(p.ocorrido_em at time zone 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') || '-03:00',
+           'quem', coalesce(p.usuario_nome, case when p.user_id is null then 'Sistema' else 'Usuário sem perfil' end),
+           'perfil', p.perfil,
+           'modulo', p.modulo,
+           'acao', public.mcp_mascara_texto(p.acao),
+           'tipo_acao', public.mcp_aud_tipo(p.acao, p.detalhes),
+           'origem', case when p.origem = 'mcp' then 'mcp' when p.origem = 'integracao' then 'integracao'
+                          when p.user_id is null then 'sistema' else 'tela' end,
+           'conexao', case when p.origem = 'mcp' then p.detalhes ->> 'conexao' end,
+           'registro', case when p.registro_id is null and p.tabela is null then null else jsonb_build_object(
+             'id', p.registro_id, 'tipo', p.tabela, 'titulo', public.mcp_aud_titulo(p)) end,
+           'resumo', public.mcp_aud_resumo(p)
+         ) order by p.ocorrido_em desc, p.id desc) from pagina p), '[]'::jsonb)
+    into v_tot, v_ev;
+
+  return jsonb_build_object(
+    'periodo', jsonb_build_object(
+      'de', to_char(v_de at time zone 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') || '-03:00',
+      'ate', to_char(v_ate at time zone 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') || '-03:00',
+      'fuso', 'America/Sao_Paulo'),
+    'total', v_tot, 'pagina', v_pag, 'por_pagina', v_lim,
+    'paginas', greatest(ceil(v_tot::numeric / v_lim)::int, 1),
+    'tem_mais', v_tot > v_pag * v_lim,
+    'ordem', 'do mais recente para o mais antigo',
+    'eventos', v_ev);
+end;
+$$;
+
+-- Ferramenta "Resumo de atividades": o que aconteceu no período, já agregado
+create or replace function public.mcp_atividades_resumo(p_args jsonb)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_a   jsonb := coalesce(p_args, '{}'::jsonb);
+  v_de  timestamptz := public.mcp_instante(v_a ->> 'de', false);
+  v_ate timestamptz := coalesce(public.mcp_instante(v_a ->> 'ate', true), now());
+  v_r   jsonb;
+  v_ts  jsonb;
+  v_hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+begin
+  v_de := coalesce(v_de, v_ate - interval '24 hours');
+  if v_de > v_ate then
+    raise exception 'O início do período vem depois do fim';
+  end if;
+  if v_ate - v_de > interval '92 days' then
+    raise exception 'Período longo demais. Use até 92 dias';
+  end if;
+
+  with f as (
+    select a.*, public.mcp_aud_oculta(a) as oculta
+    from public.auditoria a
+    where a.ocorrido_em between v_de and v_ate and public.mcp_aud_alcance(a)
+  ), acoes as (
+    -- o que as pessoas fizeram: fora as consultas do próprio assistente e a navegação
+    select * from f
+    where acao !~* '^MCP:' and public.mcp_aud_tipo(acao, detalhes) in ('criacao', 'alteracao', 'exclusao', 'outro')
+  ), t as (
+    select f.*, f.detalhes -> 'antes' as antes, f.detalhes -> 'depois' as depois
+    from f where f.tabela = 'workflow_tarefas'
+  )
+  select jsonb_build_object(
+    'eventos_no_periodo', (select count(*) from f),
+    'acoes_de_pessoas', (select count(*) from acoes),
+    'consultas_pelo_mcp', (select count(*) from f where acao ~* '^MCP:'),
+    'acessos', (select count(*) from f where acao ~* '^(Informou e-mail|Entrou)' ),
+    'tarefas', jsonb_build_object(
+      'criadas', (select count(*) from t where acao = 'Criou registro'),
+      'movidas', (select count(*) from t where acao = 'Alterou registro' and antes ->> 'status' is distinct from depois ->> 'status'),
+      'concluidas', (select count(*) from t where acao = 'Alterou registro' and depois ->> 'status' = 'concluida'
+                       and antes ->> 'status' is distinct from 'concluida'),
+      'comentarios', (select count(*) from f where tabela = 'workflow_comentarios' and acao = 'Criou registro'),
+      'anexos', (select count(*) from f where tabela = 'workflow_anexos' and acao = 'Alterou registro'
+                   and detalhes -> 'depois' ->> 'enviado' = 'true' and detalhes -> 'antes' ->> 'enviado' = 'false'),
+      'movimentos', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'tarefa', case when x.oculta then 'Tarefa confidencial'
+                         else 'WF-' || lpad(coalesce(x.depois ->> 'numero', '?'), 4, '0') || ' · ' || public.mcp_mascara_texto(coalesce(x.depois ->> 'titulo', '')) end,
+          'o_que', case when x.acao = 'Criou registro' then 'criada'
+                        when x.depois ->> 'status' = 'concluida' then 'concluída'
+                        else 'movida de ' || coalesce(x.antes ->> 'status', '?') || ' para ' || coalesce(x.depois ->> 'status', '?') end,
+          'quem', coalesce(x.usuario_nome, 'Sistema'),
+          'quando', to_char(x.ocorrido_em at time zone 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') || '-03:00')
+          order by x.ocorrido_em desc)
+        from (select * from t
+              where acao = 'Criou registro'
+                 or (acao = 'Alterou registro' and antes ->> 'status' is distinct from depois ->> 'status')
+              order by ocorrido_em desc limit 20) x), '[]'::jsonb)),
+    'quem_mais_agiu', coalesce((
+      select jsonb_agg(jsonb_build_object('nome', q.nome, 'acoes', q.n) order by q.n desc, q.nome)
+      from (select coalesce(usuario_nome, 'Sistema') as nome, count(*) as n from acoes group by 1 order by 2 desc, 1 limit 5) q), '[]'::jsonb),
+    'modulos_com_mais_atividade', coalesce((
+      select jsonb_agg(jsonb_build_object('modulo', q.modulo, 'acoes', q.n) order by q.n desc, q.modulo)
+      from (select coalesce(nullif(modulo, ''), 'Sem módulo') as modulo, count(*) as n from acoes group by 1 order by 2 desc, 1 limit 5) q), '[]'::jsonb)
+  ) into v_r;
+
+  -- pendências de agora (não dependem do período): vencidas e urgentes entre as tarefas que o usuário vê
+  if public.pode_modulo('workflow') then
+    v_ts := public.workflow_listar();
+    v_r := v_r || jsonb_build_object('pendencias_agora', jsonb_build_object(
+      'vencidas_total', (select count(*) from jsonb_array_elements(v_ts) x
+                         where x ->> 'status' <> 'concluida' and (x ->> 'prazo')::date < v_hoje),
+      'urgentes_total', (select count(*) from jsonb_array_elements(v_ts) x
+                         where x ->> 'status' <> 'concluida' and x ->> 'prioridade' = 'urgente'),
+      'itens', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'tarefa', x ->> 'codigo', 'titulo', public.mcp_mascara_texto(x ->> 'titulo'), 'situacao', x ->> 'status',
+          'prazo', x ->> 'prazo', 'prioridade', x ->> 'prioridade',
+          'motivo', case when (x ->> 'prazo')::date < v_hoje and x ->> 'prioridade' = 'urgente' then 'vencida e urgente'
+                         when (x ->> 'prazo')::date < v_hoje then 'vencida' else 'urgente' end,
+          'responsavel', (select string_agg(p ->> 'nome', ', ') from jsonb_array_elements(x -> 'participantes') p
+                          where p ->> 'papel' = 'responsavel'))
+          order by (x ->> 'prazo')::date nulls last, x ->> 'codigo')
+        from (select y.x from jsonb_array_elements(v_ts) y(x)
+              where y.x ->> 'status' <> 'concluida'
+                and ((y.x ->> 'prazo')::date < v_hoje or y.x ->> 'prioridade' = 'urgente')
+              order by (y.x ->> 'prazo')::date nulls last limit 15) z(x)), '[]'::jsonb)));
+  end if;
+
+  return jsonb_build_object(
+    'periodo', jsonb_build_object(
+      'de', to_char(v_de at time zone 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') || '-03:00',
+      'ate', to_char(v_ate at time zone 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') || '-03:00',
+      'fuso', 'America/Sao_Paulo')) || v_r;
+end;
+$$;
+
 -- Executa uma ferramenta. Uso interno: só é chamada por mcp_chamar, depois que a
 -- conexão foi conferida e a sessão passou a valer como a do usuário dono dela.
 create or replace function public.mcp_executar(p_nome text, p_args jsonb)
@@ -2766,6 +3223,8 @@ begin
   if p_nome = 'quem_sou_eu' then
     return jsonb_build_object(
       'nome', v_u.nome, 'perfil', v_u.perfil,
+      'nivel', (select n.nome from public.niveis_permissao n where n.id = v_u.nivel_id),
+      'somente_leitura_pelo_nivel', coalesce((select n.mcp_somente_leitura from public.niveis_permissao n where n.id = v_u.nivel_id), false),
       'organizacao', coalesce((select o.nome from public.organizacoes o where o.id = v_u.organizacao_id), 'Celeiro (equipe)'),
       'modulos_liberados', coalesce((
         select jsonb_agg(jsonb_build_object('modulo', m.nome, 'leitura', true, 'escrita_liberada_pelo_master', m.escrita))
@@ -2933,26 +3392,10 @@ begin
     return v_r;
 
   elsif p_nome = 'auditoria_consultar' then
-    v_lim := least(greatest(coalesce((v_a ->> 'limite')::int, 30), 1), 100);
-    return (
-      with f as (
-        select a.*, row_number() over (order by a.ocorrido_em desc, a.id desc) as n
-        from public.auditoria a
-        where a.ocorrido_em >= now() - make_interval(days => least(greatest(coalesce((v_a ->> 'dias')::int, 7), 1), 90))
-          and (public.eh_master()
-               or (public.pode_modulo('auditoria')
-                   and (public.meu_perfil() = 'gerencial' or a.organizacao_id = public.minha_org())))
-          and (v_txt = '' or position(v_txt in lower(a.acao || ' ' || coalesce(a.usuario_nome, ''))) > 0)
-          and (coalesce(v_a ->> 'origem', '') = '' or a.origem = v_a ->> 'origem')
-      )
-      select jsonb_build_object(
-        'encontrados', (select count(*) from f),
-        'registros', coalesce((
-          select jsonb_agg(jsonb_build_object(
-            'quando', ocorrido_em, 'usuario', usuario_nome, 'perfil', perfil, 'acao', acao,
-            'modulo', modulo, 'ip', ip, 'pais', pais, 'origem', origem) order by n)
-          from f where n <= v_lim), '[]'::jsonb))
-    );
+    return public.mcp_auditoria_consultar(v_a);
+
+  elsif p_nome = 'atividades_resumo' then
+    return public.mcp_atividades_resumo(v_a);
   end if;
 
   raise exception 'Ferramenta desconhecida';
@@ -2977,6 +3420,7 @@ declare
   v_mod  text;
   v_res  jsonb;
   v_erro text;
+  v_niv  text;
   v_args jsonb := coalesce(p_args, '{}'::jsonb);
 begin
   select * into v_c from public.mcp_conexoes where token_hash = p_hash;
@@ -3009,14 +3453,14 @@ begin
       'erro', 'O uso do MCP não está liberado para este usuário');
   end if;
 
-  -- Limite de 120 chamadas por minuto por conexão
+  -- Limite de 60 chamadas por minuto por conexão
   if v_c.janela_inicio is null or v_c.janela_inicio < now() - interval '1 minute' then
     update public.mcp_conexoes
        set janela_inicio = now(), janela_chamadas = 1, ultimo_uso = now(), chamadas = chamadas + 1
      where id = v_c.id;
-  elsif v_c.janela_chamadas >= 120 then
+  elsif v_c.janela_chamadas >= 60 then
     return jsonb_build_object('ok', false, 'codigo', 'limite',
-      'erro', 'Muitas chamadas em pouco tempo. Aguarde um minuto');
+      'erro', 'Limite de 60 chamadas por minuto desta conexão. Aguarde um minuto e tente de novo');
   else
     update public.mcp_conexoes
        set janela_chamadas = janela_chamadas + 1, ultimo_uso = now(), chamadas = chamadas + 1
@@ -3049,10 +3493,19 @@ begin
     if not exists (select 1 from public.mcp_ferramentas_de(v_c.user_id, v_c.escrita) d where d.nome = v_f.nome) then
       perform public.grava_auditoria('MCP: chamada recusada', v_mod, null, null,
         jsonb_build_object('conexao', v_c.nome, 'ferramenta', v_f.nome, 'escrita', v_f.escrita), 'mcp');
+      select n.nome into v_niv from public.usuarios u join public.niveis_permissao n on n.id = u.nivel_id
+       where u.user_id = v_c.user_id and (n.mcp_somente_leitura or not (v_f.modulo = any(n.modulos)));
       return jsonb_build_object('ok', false, 'codigo', 'negado', 'erro',
-        case when v_f.escrita
-          then 'Esta conexão não tem permissão de escrita neste módulo. A escrita precisa ser liberada pelo Master e marcada na conexão'
-          else 'Este módulo não está liberado para uso pelo MCP' end);
+        case
+          when v_f.modulo is not null and not (v_f.modulo = any(public.modulos_efetivos(v_c.user_id))) then
+            'Acesso negado: o módulo ' || v_mod || ' não faz parte das permissões deste usuário'
+            || coalesce(' (nível "' || v_niv || '")', '') || '. A ferramenta ' || v_f.nome || ' não pode ser usada por esta conexão'
+          when v_f.escrita and v_niv is not null then
+            'Escrita não permitida: o nível "' || v_niv || '" deste usuário só permite leitura pelo MCP. A ferramenta '
+            || v_f.nome || ' altera dados e foi recusada'
+          when v_f.escrita then
+            'Esta conexão não tem permissão de escrita neste módulo. A escrita precisa ser liberada pelo Master e marcada na conexão'
+          else 'O módulo ' || v_mod || ' não está liberado para uso pelo MCP. Peça a liberação ao Master' end);
     end if;
 
     begin
@@ -3083,6 +3536,20 @@ revoke all on function public.mcp_usuario_liberado(uuid)      from public, anon,
 revoke all on function public.mcp_modulos(uuid)               from public, anon, authenticated;
 revoke all on function public.mcp_ferramentas_de(uuid, boolean) from public, anon, authenticated;
 revoke all on function public.mcp_tarefa(text)                from public, anon, authenticated;
+revoke all on function public.mcp_mascara_texto(text)         from public, anon, authenticated;
+revoke all on function public.mcp_mascara_campo(text, text)   from public, anon, authenticated;
+revoke all on function public.mcp_aud_tipo(text, jsonb)       from public, anon, authenticated;
+revoke all on function public.mcp_aud_oculta(public.auditoria)  from public, anon, authenticated;
+revoke all on function public.mcp_aud_titulo(public.auditoria)  from public, anon, authenticated;
+revoke all on function public.mcp_aud_resumo(public.auditoria)  from public, anon, authenticated;
+revoke all on function public.mcp_aud_alcance(public.auditoria) from public, anon, authenticated;
+revoke all on function public.mcp_instante(text, boolean)     from public, anon, authenticated;
+revoke all on function public.mcp_auditoria_consultar(jsonb)  from public, anon, authenticated;
+revoke all on function public.mcp_atividades_resumo(jsonb)    from public, anon, authenticated;
+
+-- Validade máxima de 90 dias também para as conexões que já existiam
+update public.mcp_conexoes set expira_em = criado_em + interval '90 days'
+ where revogada_em is null and expira_em > criado_em + interval '90 days';
 revoke all on function public.mcp_executar(text, jsonb)       from public, anon, authenticated;
 revoke all on function public.mcp_chamar(text, text, text, jsonb, text, text, text) from public, anon, authenticated;
 grant execute on function public.mcp_chamar(text, text, text, jsonb, text, text, text) to service_role;

@@ -786,7 +786,7 @@ async function telaUsuarios(op){
   var escopoNivel=edN?(edN.organizacao_id||''):(master?'':a.organizacao_id);
   var linhasNiveis=niveis.map(function(n){
     var qtd=usuarios.filter(function(u){return u.nivel_id===n.id;}).length;
-    return '<tr><td>'+esc(n.nome)+(n.descricao?'<span class="sub">'+esc(n.descricao)+'</span>':'')+'</td>'+
+    return '<tr><td>'+esc(n.nome)+(n.descricao?'<span class="sub">'+esc(n.descricao)+'</span>':'')+(n.mcp_somente_leitura?'<span class="sub">MCP: somente leitura</span>':'')+'</td>'+
       '<td>'+esc(n.organizacao_id?(nomeOrg[n.organizacao_id]||'—'):'Equipe Celeiro')+'</td>'+
       '<td>'+chipsModulos(n.modulos)+'</td><td>'+qtd+'</td>'+
       '<td><button class="botao claro pequeno" type="button" data-editar-nivel="'+esc(n.id)+'">Editar</button> '+
@@ -827,6 +827,8 @@ async function telaUsuarios(op){
       '<div class="campo"><label for="n-org">Para quem</label><select id="n-org"'+(master&&!edN?'':' disabled')+'>'+optEscopo+'</select></div></div>'+
       '<fieldset class="campo" style="border:0;padding:0;margin:0"><legend class="rotulo" style="padding:0;margin-bottom:8px;font-size:14px;font-weight:500">Módulos deste nível</legend><div class="caixas">'+
         (caixasModulos||'<span class="apoio">Nenhum módulo liberado para a sua organização.</span>')+'</div></fieldset>'+
+      '<div class="campo"><label class="opcao" for="n-mcp-leitura"><input type="checkbox" id="n-mcp-leitura"'+(edN&&edN.mcp_somente_leitura?' checked':'')+'> Pelo MCP, somente leitura</label>'+
+        '<p class="meta">Para assistentes de IA: quem está neste nível nunca cria nem altera nada por conexão MCP, mesmo que a escrita esteja liberada para a organização.</p></div>'+
       '<div class="grade"><button class="botao" type="submit">'+(edN?'Salvar nível':'Criar nível')+'</button>'+(edN?'<button class="botao claro" type="button" id="b-cancelar-nivel">Cancelar</button>':'')+'</div></form>'+
     '<div class="rolagem"><table style="min-width:720px"><thead><tr><th scope="col">Nível</th><th scope="col">Para quem</th><th scope="col">Módulos</th><th scope="col">Usuários</th><th scope="col">Ações</th></tr></thead><tbody>'+
       (linhasNiveis||'<tr><td colspan="5" class="vazio">Nenhum nível criado. Sem nível, cada usuário segue o padrão do perfil.</td></tr>')+'</tbody></table></div>'+
@@ -939,7 +941,7 @@ async function telaUsuarios(op){
     if(!nome){aviso('Dê um nome ao nível.',true);return;}
     if(!marcados.length){aviso('Marque pelo menos um módulo.',true);return;}
     ocupar(b,true);
-    var r=await sb.rpc('salvar_nivel',{p_id:edN?edN.id:null,p_nome:nome,p_descricao:$('#n-desc').value.trim(),p_org:$('#n-org').value||null,p_modulos:marcados});
+    var r=await sb.rpc('salvar_nivel',{p_id:edN?edN.id:null,p_nome:nome,p_descricao:$('#n-desc').value.trim(),p_org:$('#n-org').value||null,p_modulos:marcados,p_mcp_leitura:$('#n-mcp-leitura').checked});
     if(r.error){ocupar(b,false);aviso(msgErro(r.error),true);return;}
     aviso(edN?'Nível alterado.':'Nível criado.');telaUsuarios();
   };
@@ -1492,10 +1494,10 @@ async function telaMcp(){
       '<p class="apoio"><strong>Claude Code</strong>: <code>claude mcp add --transport http celeiro-office '+esc(endereco)+' --header "Authorization: Bearer SEU_TOKEN"</code></p></div>';
 
   var criar=p.liberado?'<form class="painel" id="f-mcp" novalidate><h2>Nova conexão</h2>'+
-      '<p class="apoio">Crie uma conexão para cada assistente. Ela enxerga só o que você enxerga na tela, dentro do que o Master liberou para o MCP.</p>'+
+      '<p class="apoio">Crie uma conexão para cada assistente. Ela enxerga só o que você enxerga na tela, dentro do que o Master liberou para o MCP. A validade máxima é de 90 dias e cada conexão aceita até 60 chamadas por minuto.</p>'+
       '<div class="grade"><div class="campo"><label for="mcp-nome">Nome da conexão</label><input id="mcp-nome" type="text" maxlength="80" placeholder="Ex.: Claude no meu computador" required></div>'+
-      '<div class="campo" style="flex:0 1 180px"><label for="mcp-dias">Validade</label><select id="mcp-dias"><option value="30">30 dias</option><option value="90" selected>90 dias</option><option value="180">180 dias</option><option value="365">1 ano</option></select></div>'+
-      '<div class="campo" style="flex:0 1 220px"><span class="rotulo" id="mcp-esc-r">Permitir gravação</span>'+chaveSw(false,'Permitir gravação','id="mcp-escrita"',!modEscrita.length)+'</div>'+
+      '<div class="campo" style="flex:0 1 180px"><label for="mcp-dias">Validade</label><select id="mcp-dias"><option value="7">7 dias</option><option value="30">30 dias</option><option value="60">60 dias</option><option value="90" selected>90 dias (máximo)</option></select></div>'+
+      '<div class="campo" style="flex:0 1 220px"><span class="rotulo" id="mcp-esc-r">Permitir gravação</span>'+chaveSw(false,'Permitir gravação','id="mcp-escrita"',!modEscrita.length||p.somente_leitura)+(p.somente_leitura?'<span class="sub">O seu nível ('+esc(p.nivel||'')+') só permite leitura</span>':'')+'</div>'+
       '<button class="botao" type="submit">Criar conexão</button></div>'+
       '<p class="apoio">'+(modEscrita.length?'Com a gravação ligada, o assistente pode criar e alterar registros em: '+esc(modEscrita.map(function(m){return m.nome;}).join(', '))+'. Deixe desligada se só precisa consultar.':'Gravação indisponível: o Master ainda não liberou a escrita pelo MCP em nenhum módulo seu. As conexões serão somente leitura.')+'</p></form>'
     :'<p class="erro" role="status">Seu usuário ainda não foi liberado para usar o MCP. Peça a liberação a um usuário Master.</p>';
@@ -1535,7 +1537,8 @@ async function telaMcp(){
           var ehM=u.perfil==='master';
           return '<tr><td>'+esc(u.nome)+'<span class="sub">'+esc(u.email)+(u.ativo?'':' · inativo')+'</span></td><td>'+esc(PERFIS[u.perfil]||u.perfil)+'</td><td>'+esc(u.organizacao||'Equipe Celeiro')+'</td>'+
             '<td>'+chaveSw(u.liberado,'MCP para '+u.nome,'data-usuario="'+esc(u.user_id)+'"',ehM)+
-              (ehM?'<span class="sub">sempre liberado</span>':(u.tem_modulo?'':'<span class="sub">falta o módulo Conexão MCP no perfil ou nível</span>'))+'</td></tr>';
+              (ehM?'<span class="sub">sempre liberado</span>':(u.tem_modulo?'':'<span class="sub">falta o módulo Conexão MCP no perfil ou nível</span>'))+
+              (u.nivel?'<span class="sub">nível '+esc(u.nivel)+(u.somente_leitura?' · somente leitura':'')+'</span>':'')+'</td></tr>';
         }).join('')+'</tbody></table></div>'+
       '<h2>Conexões dos outros usuários</h2><div class="rolagem"><table><thead><tr><th scope="col">Conexão</th><th scope="col">Usuário</th><th scope="col">Permissão</th><th scope="col">Expira em</th><th scope="col">Último uso</th><th scope="col">Situação</th><th scope="col">Ação</th></tr></thead><tbody>'+
         ((p.todas_conexoes||[]).map(function(c){return mcpLinhaConexao(c,true);}).join('')||'<tr><td colspan="7" class="vazio">Nenhuma conexão de outros usuários.</td></tr>')+'</tbody></table></div>';
