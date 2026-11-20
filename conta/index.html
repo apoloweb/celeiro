@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Conta Celeiro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Plano: conta de pagamento em tela única, tema escuro da marca (versão negativa do manual:
+   fundo verde, texto névoa, âmbar só em ação principal e realce). Estrutura da tela inicial:
+   saudação, ajuda, saldos, campo de Pix, atalhos, contas a vencer e barra de navegação flutuante. */
+:root{
+  color-scheme: dark;
+  --fundo:#08241B;        /* fundo geral, mais fechado que o verde da marca */
+  --cartao:#0F3D2E;       /* Verde Celeiro: cartões */
+  --cartao2:#14493A;      /* cartão dentro de cartão, campos */
+  --linha:#2A5B4A;        /* fios e bordas */
+  --tinta:#F4F6F3;        /* Névoa: texto */
+  --apoio:#A8BBB1;        /* texto secundário */
+  --destaque:#E3A72F;     /* Âmbar Energia */
+  --sobre-destaque:#0F3D2E;
+  --palco:#041811;
+  --fonte:"Sora", "Helvetica Neue", Arial, sans-serif;
+  --raio:18px; --raio-p:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--palco);color:var(--tinta);font-family:var(--fonte);font-size:14.5px;line-height:1.5;display:flex;justify-content:center;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;text-align:inherit}
+:focus-visible{outline:2px solid var(--destaque);outline-offset:2px}
+b{font-weight:600}
+#app{width:100%;max-width:440px;height:100%;background:var(--fundo);display:flex;flex-direction:column;position:relative;overflow:hidden}
+#topo{flex:none;display:flex;align-items:center;gap:8px;padding:14px 16px 10px;min-height:54px}
+#topo h1{font-size:17px;font-weight:600;flex:1;min-width:0}
+#tela{flex:1;overflow-y:auto;padding:6px 16px 120px;display:flex;flex-direction:column;gap:16px}
+#tela.sem-nav{padding-bottom:28px}
+#tela>*{flex-shrink:0}
+svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.icone-btn{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;flex:none;position:relative}
+.icone-btn:hover{background:var(--cartao)}
+.ponto::after{content:"";position:absolute;top:8px;right:8px;width:9px;height:9px;border-radius:50%;background:var(--destaque)}
+
+h2{font-size:21px;font-weight:600;line-height:1.2;text-wrap:balance}
+h3{font-size:15px;font-weight:600}
+.apoio{color:var(--apoio);font-size:13px}
+.rotulo{font-size:10.5px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--apoio)}
+.num{font-variant-numeric:tabular-nums}
+.pilha{display:flex;flex-direction:column;gap:10px}
+.fila{display:flex;align-items:center;gap:10px}
+.cresce{flex:1;min-width:0;overflow-wrap:anywhere}
+
+.saud{display:flex;align-items:center;gap:10px;padding:6px 0 0}
+.saud .nome{font-size:17px;font-weight:500;flex:1}
+.mono{height:20px;width:auto;fill:currentColor;display:block}
+.mono .barra{fill:var(--destaque)}
+.marca{display:flex;align-items:center;gap:8px;font-size:12px;letter-spacing:.2em;font-weight:500}
+.ajuda{display:flex;align-items:center;gap:6px}
+.ajuda .campo-ajuda{flex:1;display:flex;align-items:center;gap:10px;background:var(--cartao);border-radius:99px;padding:12px 16px;color:var(--apoio)}
+.ajuda .sep{width:1px;height:22px;background:var(--linha)}
+
+.bloco{background:var(--cartao);border:1px solid var(--linha);border-radius:var(--raio);padding:16px;display:flex;flex-direction:column;gap:14px}
+.bloco-topo{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pill{background:var(--cartao2);color:var(--tinta);border-radius:10px;padding:7px 14px;font-size:13px;font-weight:600}
+.saldos{display:flex;gap:10px;overflow-x:auto;margin:0 -16px;padding:0 16px 2px;scroll-snap-type:x mandatory}
+.saldo{flex:0 0 78%;scroll-snap-align:start;background:var(--cartao2);border:1px solid var(--linha);border-radius:var(--raio-p);display:flex;flex-direction:column}
+.saldo .corpo{padding:14px 14px 18px;display:flex;flex-direction:column;gap:6px;min-height:92px}
+.saldo .valor{font-size:24px;font-weight:600;line-height:1.1}
+.saldo .pe{border-top:1px solid var(--linha);padding:11px 14px;display:flex;align-items:center;justify-content:space-between;font-weight:600;color:var(--destaque);width:100%}
+.pix-campo{display:flex;align-items:center;gap:12px;background:var(--cartao);border:1px solid var(--linha);border-radius:var(--raio);padding:6px 8px 6px 16px}
+.pix-campo input{flex:1;min-width:0;background:none;border:0;padding:12px 0;outline:none}
+.pix-campo input::placeholder,.campo input::placeholder{color:var(--apoio)}
+.atalhos{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.atalho{background:var(--cartao);border-radius:var(--raio-p);padding:14px 4px;display:flex;flex-direction:column;align-items:center;gap:8px;font-size:12.5px;font-weight:500;text-align:center;min-height:92px}
+.lista{display:flex;flex-direction:column}
+.linha{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--linha);width:100%}
+.linha:last-child{border-bottom:0}
+.dia{display:flex;flex-direction:column;align-items:center;line-height:1.1;font-size:12px;color:var(--apoio);min-width:34px;border-right:1px solid var(--linha);padding-right:10px}
+.dia b{font-size:16px;color:var(--tinta)}
+.ic-mov{width:38px;height:38px;border-radius:50%;background:var(--cartao2);display:grid;place-items:center;flex:none}
+.entrada{color:var(--destaque)}
+
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;padding:10px 16px;border-radius:var(--raio-p);font-weight:600;border:1.5px solid var(--linha);text-align:center}
+.btn.cheio{background:var(--destaque);border-color:var(--destaque);color:var(--sobre-destaque)}
+.btn.curto{width:auto;min-height:38px;padding:6px 14px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.campo{display:flex;flex-direction:column;gap:5px}
+.campo label{font-size:13px;font-weight:500;color:var(--apoio)}
+.campo input,.campo select,.campo textarea{background:var(--cartao);border:1.5px solid var(--linha);border-radius:var(--raio-p);padding:13px;width:100%}
+.campo input:focus,.campo select:focus{outline:none;border-color:var(--destaque)}
+.campo .grande{font-size:26px;font-weight:600;text-align:center}
+.erro{font-size:13px;font-weight:600;border-left:3px solid var(--destaque);padding:8px 10px;background:var(--cartao)}
+.aviso{background:var(--cartao);border-left:3px solid var(--destaque);border-radius:var(--raio-p);padding:12px;font-size:13px}
+.chips{display:flex;gap:8px;overflow-x:auto}
+.chip{flex:none;padding:7px 14px;border-radius:99px;border:1.5px solid var(--linha);font-size:13px;font-weight:600}
+.chip[aria-pressed="true"]{background:var(--tinta);color:var(--fundo);border-color:var(--tinta)}
+.selo{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border:1px solid var(--linha);border-radius:99px;white-space:nowrap}
+.selo.ok{background:var(--destaque);border-color:var(--destaque);color:var(--sobre-destaque)}
+.codigo{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;background:var(--cartao2);border-radius:var(--raio-p);padding:12px;overflow-wrap:anywhere}
+.qr{align-self:center;width:180px;height:180px;border-radius:var(--raio-p);background:var(--tinta);color:var(--fundo);display:grid;place-items:center;text-align:center;font-size:12px;font-weight:600;padding:16px}
+.senha{display:flex;justify-content:center;gap:12px}
+.senha i{width:16px;height:16px;border-radius:50%;border:2px solid var(--apoio)}
+.senha i.cheio{background:var(--destaque);border-color:var(--destaque)}
+.teclado{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.teclado button{background:var(--cartao);border-radius:var(--raio-p);min-height:56px;font-size:20px;font-weight:500;text-align:center}
+.centro{align-items:center;text-align:center}
+.selo-ok{width:60px;height:60px;border-radius:50%;background:var(--destaque);color:var(--sobre-destaque);display:grid;place-items:center}
+.faixa-demo{flex:none;background:var(--destaque);color:var(--sobre-destaque);font-size:12px;font-weight:600;text-align:center;padding:5px 12px}
+
+#nav{position:absolute;left:14px;right:14px;bottom:14px;background:rgba(20,73,58,.96);border:1px solid var(--linha);border-radius:99px;display:grid;grid-template-columns:repeat(5,1fr);padding:6px;backdrop-filter:blur(8px)}
+#nav button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;font-size:10.5px;font-weight:500;color:var(--apoio);border-radius:99px}
+#nav button[aria-current="page"]{background:var(--fundo);color:var(--tinta)}
+#toast{position:absolute;left:16px;right:16px;bottom:96px;background:var(--tinta);color:var(--fundo);padding:12px 14px;border-radius:var(--raio-p);font-size:13px;font-weight:600;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.ver{opacity:1}
+@media (min-width:480px) and (min-height:720px){#app{height:calc(100% - 28px);margin-top:14px;border-radius:30px;border:1px solid var(--linha)}}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="faixa-demo">Demonstração · valores fictícios · senha de confirmação 4827</div>
+  <header id="topo"></header>
+  <main id="tela"></main>
+  <nav id="nav" aria-label="Navegação principal"></nav>
+  <div id="toast" role="status"></div>
+</div>
+<script>
+/* =====================================================================
+   Conta Celeiro · protótipo navegável da conta de pagamento
+   Nada aqui move dinheiro: o "servidor" é simulado no próprio navegador, com as MESMAS regras
+   das funções do banco (supabase-conta.sql): reservar, confirmar, creditar, transferir, limites.
+   Mapa: Ícones > Estado > Servidor simulado > Peças > Telas (T) > Desenho > Ações (A) > Formulários (F)
+   ===================================================================== */
+const P={
+  usuario:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+  ajuda:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1.1-1.5 2.2M12 17h.01"/>',
+  aviso:'<path d="M4 5h16v11H9l-5 4z"/>',
+  olho:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  olhoNao:'<path d="M3 3l18 18M10.6 5.2A9.7 9.7 0 0112 5c6 0 10 7 10 7a17 17 0 01-3.2 3.9M6.5 6.6A17 17 0 002 12s4 7 10 7c1.6 0 3-.4 4.3-1M9.9 9.9a3 3 0 004.2 4.2"/>',
+  pix:'<path d="M12 3l4.5 4.5L12 12 7.5 7.5zM12 12l4.5 4.5L12 21l-4.5-4.5zM3 12l4.5-4.5L12 12l-4.5 4.5zM21 12l-4.5 4.5L12 12l4.5-4.5z"/>',
+  qr:'<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/>',
+  pagar:'<path d="M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12"/>',
+  transferir:'<path d="M4 9h13l-3-3M20 15H7l3 3"/>',
+  cobrar:'<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  limites:'<path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="17" r="2"/>',
+  seguranca:'<path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M9.5 12l2 2 3.5-4"/>',
+  inicio:'<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
+  extrato:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  menu:'<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  voltar:'<path d="M15 5l-7 7 7 7"/>', seta:'<path d="M9 5l7 7-7 7"/>', ok:'<path d="M5 12l5 5 9-10"/>',
+  entra:'<path d="M12 5v14M6 13l6 6 6-6"/>', sai:'<path d="M12 19V5M6 11l6-6 6 6"/>', cima:'<path d="M6 15l6-6 6 6"/>', baixo:'<path d="M6 9l6 6 6-6"/>',
+  chave:'<circle cx="8" cy="14" r="4"/><path d="M11 11l9-9M16 6l3 3"/>'
+};
+const ic=n=>`<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+const mono=()=>`<svg class="mono" viewBox="0 0 388.57 148.31" role="img" aria-label="Celeiro"><path d="M175.01 0H74.15a74.15 74.15 0 0 0 0 148.31h81.28l28.48-35.6H74.15a38.56 38.56 0 0 1 0-77.12h72.38z"/><path d="M207.63 0h180.94l-28.48 35.59H243.23v77.12h145.34l-28.48 35.6H165.81l28.48-35.6h13.34z"/><path class="barra" d="M289.5 56.36h84.24l-28.48 35.59h-84.23z"/></svg>`;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const brl=c=>(c/100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const val$=c=>S.oculto?'R$ ••••••':brl(c);
+const centavos=t=>{const s=String(t||'').replace(/[^\d,]/g,'');if(!s)return 0;const [i,d='']=s.split(',');return Math.round(parseInt(i||'0',10)*100+parseInt((d+'00').slice(0,2),10))};
+const soDig=s=>String(s||'').replace(/\D/g,'');
+const dataBR=d=>d.toLocaleDateString('pt-BR');
+const horaBR=d=>d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+const diasDe=n=>{const d=new Date();d.setDate(d.getDate()+n);return d};
+const id=p=>p+'-'+Math.random().toString(36).slice(2,10).toUpperCase();
+
+/* ---------- Estado (dados de exemplo) ---------- */
+const S={
+  nome:'Paulo', oculto:true, pilha:[{v:'inicio'}], erro:'', filtro:'tudo', verBoletos:true,
+  conta:{agencia:'0001',numero:'000000-0',disponivel:1284350,bloqueado:0,senha:'4827',tentativas:0},
+  limites:{pix:{diurno:[500000,1000000],noturno:[100000,100000]},pagamento:{diurno:[1000000,2000000],noturno:[100000,100000]},transferencia:{diurno:[1000000,2000000],noturno:[100000,100000]}},
+  chaves:[{tipo:'CPF',chave:'***.982.247-**'},{tipo:'E-mail',chave:'paulo@exemplo.com.br'}],
+  mov:[], boletos:[], aPagar:[{id:'ap1',benef:'Associação de moradores (exemplo)',valor:48700,venc:diasDe(20),linha:'00000000000000000000000000000000000000000048700'}]
+};
+(function semente(){
+  const m=(dias,tipo,sentido,valor,desc,quem)=>S.mov.push({id:id('MOV'),tipo,sentido,valor,status:'liquidado',desc,quem,em:diasDe(-dias),doc:id('AUT')});
+  m(0,'pix_recebido','C',250000,'Pix recebido','Cliente de exemplo');
+  m(1,'pagamento_conta','D',18990,'Pagamento de conta','Concessionária de exemplo');
+  m(2,'transferencia_enviada','D',50000,'Transferência entre contas Celeiro','Bia Rocha (exemplo)');
+  m(4,'boleto_recebido','C',320000,'Boleto recebido','Empresa de exemplo Ltda.');
+  m(6,'pix_enviado','D',12050,'Pix enviado','Mercado de exemplo');
+  S.boletos.push({id:id('BOL'),pagador:'Empresa de exemplo Ltda.',doc:'00.000.000/0001-00',valor:185000,venc:diasDe(12),status:'registrado',linha:'00000.00000 00000.000000 00000.000000 0 00000000185000'});
+})();
+const atual=()=>S.pilha[S.pilha.length-1];
+const noturno=()=>{const h=new Date().getHours();return h>=20||h<6};
+
+/* ---------- Servidor simulado: mesmas regras de supabase-conta.sql ---------- */
+const GRUPO={pix_enviado:'pix',pagamento_conta:'pagamento',transferencia_enviada:'transferencia'};
+const Servidor={
+  // conta_reservar: confere limite e saldo e separa o valor
+  reservar(tipo,valor,desc,quem){
+    const [porOp,diario]=S.limites[GRUPO[tipo]][noturno()?'noturno':'diurno'];
+    if(!(valor>0))throw new Error('Informe um valor maior que zero.');
+    if(valor>porOp)throw new Error('Valor acima do limite por operação ('+brl(porOp)+').');
+    const hoje=new Date().toDateString();
+    const usado=S.mov.filter(m=>m.tipo===tipo&&m.sentido==='D'&&m.status!=='falhou'&&m.em.toDateString()===hoje).reduce((a,m)=>a+m.valor,0);
+    if(usado+valor>diario)throw new Error('Valor acima do limite diário. Disponível hoje: '+brl(Math.max(0,diario-usado))+'.');
+    if(S.conta.disponivel<valor)throw new Error('Saldo insuficiente.');
+    S.conta.disponivel-=valor;S.conta.bloqueado+=valor;
+    const m={id:id('MOV'),tipo,sentido:'D',valor,status:'pendente',desc,quem,em:new Date(),doc:null};
+    S.mov.unshift(m);return m;
+  },
+  // conta_confirmar: o provedor confirmou
+  confirmar(m){S.conta.bloqueado-=m.valor;m.status='liquidado';m.doc=id('AUT');return m},
+  // conta_creditar: entrada confirmada pelo provedor
+  creditar(tipo,valor,desc,quem){S.conta.disponivel+=valor;const m={id:id('MOV'),tipo,sentido:'C',valor,status:'liquidado',desc,quem,em:new Date(),doc:id('AUT')};S.mov.unshift(m);return m},
+  // conta_conferir_senha: cinco erros bloqueiam
+  conferirSenha(s){
+    if(S.conta.tentativas>=5)throw new Error('Senha bloqueada por tentativas erradas. Tente mais tarde.');
+    if(s===S.conta.senha){S.conta.tentativas=0;return true}
+    S.conta.tentativas++;return false;
+  }
+};
+
+/* ---------- Navegação ---------- */
+const RAIZ=['inicio','extrato','pix','cobrancas','menu'];
+function ir(v,p={}){S.erro='';S.pilha.push({v,...p});desenhar()}
+function aba(v){S.erro='';S.pilha=[{v}];desenhar()}
+function voltar(){S.erro='';if(S.pilha.length>1)S.pilha.pop();desenhar()}
+function trocar(v,p={}){S.erro='';S.pilha[S.pilha.length-1]={v,...p};desenhar()}
+let tT;function avisar(m){const a=document.getElementById('toast');a.textContent=m;a.classList.add('ver');clearTimeout(tT);tT=setTimeout(()=>a.classList.remove('ver'),2800)}
+
+/* ---------- Peças ---------- */
+const campo=(i,r,t='text',v='',x='')=>`<div class="campo"><label for="${i}">${r}</label><input id="${i}" type="${t}" value="${esc(v)}" ${x}></div>`;
+const erro=()=>S.erro?`<p class="erro" role="alert">${esc(S.erro)}</p>`:'';
+const dado=(r,v)=>`<div class="linha" style="padding:9px 0"><span class="cresce apoio">${r}</span><b class="num" style="text-align:right;overflow-wrap:anywhere;max-width:62%">${esc(v)}</b></div>`;
+const linhaMov=m=>`<button class="linha" data-a="comprovante" data-id="${m.id}"><span class="ic-mov ${m.sentido==='C'?'entrada':''}">${ic(m.sentido==='C'?'entra':'sai')}</span>
+  <span class="cresce"><b>${esc(m.desc)}</b><br><span class="apoio">${esc(m.quem||'')}${m.status==='pendente'?' · em processamento':''}</span></span>
+  <b class="num ${m.sentido==='C'?'entrada':''}" style="white-space:nowrap">${m.sentido==='C'?'+':'−'} ${S.oculto?'••••':brl(m.valor).replace('R$','').trim()}</b></button>`;
+const STATUS_BOL={registrado:'A vencer',pago:'Pago',cancelado:'Cancelado'};
+
+/* ---------- Telas ---------- */
+const T={
+inicio:()=>{
+  const aReceber=S.boletos.filter(b=>b.status==='registrado').reduce((a,b)=>a+b.valor,0);
+  const totalPagar=S.aPagar.reduce((a,b)=>a+b.valor,0);
+  return {inicio:true,html:`
+  <div class="saud">${ic('usuario')}<span class="nome">${esc(S.nome)}</span><span class="marca">${mono()}<span>CONTA</span></span></div>
+  <div class="ajuda">
+    <button class="campo-ajuda" data-a="ir" data-v="ajuda">${ic('ajuda')}<span>Posso ajudar?</span></button>
+    <button class="icone-btn ponto" data-a="ir" data-v="avisos" aria-label="Avisos">${ic('aviso')}</button><span class="sep"></span>
+    <button class="icone-btn" data-a="olho" aria-label="${S.oculto?'Mostrar valores':'Ocultar valores'}" aria-pressed="${!S.oculto}">${ic(S.oculto?'olhoNao':'olho')}</button>
+  </div>
+  <section class="bloco">
+    <div class="bloco-topo"><h3 style="font-weight:400;font-size:16px">Saldos</h3><button class="pill" data-a="ir" data-v="saldos">Meus saldos</button></div>
+    <div class="saldos">
+      <div class="saldo"><div class="corpo"><span class="apoio">Disponível</span><span class="valor num">${val$(S.conta.disponivel)}</span>${S.conta.bloqueado?`<span class="apoio num">Em processamento: ${val$(S.conta.bloqueado)}</span>`:''}</div>
+        <button class="pe" data-a="aba" data-v="extrato"><span>Extrato</span>${ic('seta')}</button></div>
+      <div class="saldo"><div class="corpo"><span class="apoio">A receber de boletos</span><span class="valor num">${val$(aReceber)}</span><span class="apoio">Boletos emitidos em aberto</span></div>
+        <button class="pe" data-a="aba" data-v="cobrancas"><span>Cobranças</span>${ic('seta')}</button></div>
+    </div>
+  </section>
+  <form class="pix-campo" data-form="colar" novalidate>${ic('pix')}<input id="colar" aria-label="Chave Pix ou copia e cola" placeholder="Cole uma chave Pix ou copia e cola" autocomplete="off"><button class="icone-btn" type="button" data-a="avisar" data-m="A leitura de QR Code usa a câmera do aparelho e entra no app publicado." aria-label="Ler QR Code">${ic('qr')}</button></form>
+  <div class="fila" style="justify-content:flex-end"><button class="pill" data-a="aba" data-v="menu">Menu completo</button></div>
+  <div class="atalhos">
+    <button class="atalho" data-a="ir" data-v="pagar">${ic('pagar')}Pagar</button>
+    <button class="atalho" data-a="ir" data-v="transferir">${ic('transferir')}Transferir</button>
+    <button class="atalho" data-a="ir" data-v="boletoNovo">${ic('cobrar')}Cobrar</button>
+    <button class="atalho" data-a="ir" data-v="limites">${ic('limites')}Limites</button>
+  </div>
+  ${S.aPagar.length?`<section class="bloco">
+    <div class="bloco-topo"><div class="fila"><span class="ic-mov">${ic('cobrar')}</span><div><b style="font-weight:500;font-size:15px">Você tem ${S.aPagar.length} ${S.aPagar.length>1?'contas':'conta'} a vencer</b><br><span class="apoio num">Total: ${val$(totalPagar)}</span></div></div>
+      <button class="fila" style="color:var(--destaque);font-weight:600;gap:4px" data-a="ver-boletos">${S.verBoletos?'Ocultar':'Exibir'}${ic(S.verBoletos?'cima':'baixo')}</button></div>
+    ${S.verBoletos?`<div class="lista">${S.aPagar.map(b=>`<button class="linha" data-a="pagar-conhecido" data-id="${b.id}"><span class="dia"><b>${b.venc.getDate()}</b>${b.venc.toLocaleDateString('pt-BR',{month:'short'}).replace('.','')}</span><span class="cresce">${esc(b.benef)}</span><b class="num">${val$(b.valor)}</b>${ic('seta')}</button>`).join('')}</div>`:''}
+  </section>`:''}
+  <section class="bloco"><div class="bloco-topo"><h3>Últimos lançamentos</h3><button class="pill" data-a="aba" data-v="extrato">Ver extrato</button></div>
+    <div class="lista">${S.mov.slice(0,3).map(linhaMov).join('')}</div></section>`}},
+
+extrato:()=>{
+  const l=S.mov.filter(m=>S.filtro==='tudo'||(S.filtro==='entradas'?m.sentido==='C':m.sentido==='D'));
+  let dia='',h='';
+  l.forEach(m=>{const d=dataBR(m.em);if(d!==dia){dia=d;h+=`<span class="rotulo" style="margin-top:10px">${d===dataBR(new Date())?'Hoje':d}</span>`}h+=linhaMov(m)});
+  return {titulo:'Extrato',html:`
+  <div class="bloco" style="gap:4px"><span class="apoio">Disponível</span><span class="num" style="font-size:24px;font-weight:600">${val$(S.conta.disponivel)}</span>${S.conta.bloqueado?`<span class="apoio num">Em processamento: ${val$(S.conta.bloqueado)}</span>`:''}</div>
+  <div class="chips">${[['tudo','Tudo'],['entradas','Entradas'],['saidas','Saídas']].map(([c,r])=>`<button class="chip" aria-pressed="${S.filtro===c}" data-a="filtro" data-c="${c}">${r}</button>`).join('')}</div>
+  <div class="lista">${h||'<p class="apoio">Nenhum lançamento neste filtro.</p>'}</div>`}},
+
+comprovante:()=>{
+  const m=S.mov.find(x=>x.id===atual().id);if(!m)return{titulo:'Comprovante',html:'<p>Lançamento não encontrado.</p>'};
+  return {titulo:'Comprovante',html:`
+  <div class="pilha centro" style="gap:10px;margin-top:6px">${atual().novo?`<span class="selo-ok">${ic('ok')}</span>`:''}<h2>${esc(m.desc)}</h2><span class="num" style="font-size:28px;font-weight:600">${brl(m.valor)}</span>
+    <span class="selo ${m.status==='liquidado'?'ok':''}">${m.status==='liquidado'?'Concluído':m.status==='pendente'?'Em processamento':'Não realizado'}</span></div>
+  <div class="bloco" style="gap:0">${dado('Data',dataBR(m.em)+' às '+horaBR(m.em))}${dado(m.sentido==='C'?'De':'Para',m.quem||'')}${m.chave?dado('Chave',m.chave):''}${dado('Tipo',m.sentido==='C'?'Entrada':'Saída')}${m.doc?dado('Autenticação',m.doc):''}${dado('Identificador',m.id)}</div>
+  <button class="btn" data-a="copiar" data-t="${esc(m.desc+' · '+brl(m.valor)+' · '+dataBR(m.em)+' · '+(m.doc||m.id))}">Copiar comprovante</button>
+  ${atual().novo?'<button class="btn cheio" data-a="aba" data-v="inicio">Voltar ao início</button>':''}`}},
+
+pix:()=>({titulo:'Pix',html:`
+  <div class="atalhos" style="grid-template-columns:repeat(3,1fr)">
+    <button class="atalho" data-a="ir" data-v="pixEnviar">${ic('sai')}Enviar</button>
+    <button class="atalho" data-a="ir" data-v="pixReceber">${ic('entra')}Receber</button>
+    <button class="atalho" data-a="ir" data-v="chaves">${ic('chave')}Minhas chaves</button>
+  </div>
+  <form class="pix-campo" data-form="colar" novalidate>${ic('pix')}<input id="colar" aria-label="Chave Pix ou copia e cola" placeholder="Cole uma chave Pix ou copia e cola" autocomplete="off"><button class="btn cheio curto" type="submit">Continuar</button></form>
+  <section class="bloco"><h3>Pix recentes</h3><div class="lista">${S.mov.filter(m=>m.tipo.startsWith('pix')).slice(0,5).map(linhaMov).join('')||'<p class="apoio">Nenhum Pix ainda.</p>'}</div></section>`}),
+
+pixEnviar:()=>{
+  const d=atual().destino;
+  if(!d)return{titulo:'Enviar Pix',html:`<h2>Para quem?</h2>
+    <form class="pilha" data-form="pixChave" novalidate>${campo('px-chave','Chave Pix (CPF, CNPJ, e-mail, celular ou chave aleatória)','text',atual().chave||'','autocomplete="off"')}${erro()}<button class="btn cheio" type="submit">Continuar</button></form>`};
+  return{titulo:'Enviar Pix',html:`<h2>Quanto?</h2>
+    <div class="bloco" style="gap:0">${dado('Para',d.nome)}${dado('Documento',d.doc)}${dado('Instituição',d.inst)}${dado('Chave',d.chave)}</div>
+    <form class="pilha" data-form="pixValor" novalidate>
+      <div class="campo"><label for="px-valor">Valor (R$)</label><input id="px-valor" class="grande num" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+      ${campo('px-desc','Mensagem (opcional)','text','','maxlength="140"')}
+      <p class="apoio num">Disponível: ${brl(S.conta.disponivel)} · limite por Pix agora: ${brl(S.limites.pix[noturno()?'noturno':'diurno'][0])}</p>
+      ${erro()}<button class="btn cheio" type="submit">Revisar</button></form>`}},
+
+pixReceber:()=>{
+  const c=atual().cobranca;
+  if(!c)return{titulo:'Receber Pix',html:`<h2>Gerar cobrança Pix</h2>
+    <form class="pilha" data-form="pixCobrar" novalidate>
+      <div class="campo"><label for="pr-valor">Valor (R$) · deixe em branco para valor livre</label><input id="pr-valor" class="grande num" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+      <div class="campo"><label for="pr-chave">Receber na chave</label><select id="pr-chave">${S.chaves.map(k=>`<option>${esc(k.chave)}</option>`).join('')}</select></div>
+      ${campo('pr-desc','Descrição (opcional)','text','','maxlength="140"')}${erro()}<button class="btn cheio" type="submit">Gerar QR Code</button></form>`};
+  return{titulo:'Receber Pix',html:`<div class="pilha centro"><h2>${c.valor?brl(c.valor):'Valor livre'}</h2><span class="apoio">Chave ${esc(c.chave)}</span></div>
+    <div class="qr">QR Code gerado pela instituição</div>
+    <div class="codigo">${esc(c.codigo)}</div>
+    <button class="btn" data-a="copiar" data-t="${esc(c.codigo)}">Copiar código</button>
+    <p class="aviso"><b>Simulação.</b> O código acima não é um Pix válido. Use o botão abaixo para ver o que acontece quando o pagamento chega.</p>
+    <button class="btn cheio" data-a="simular-pix-recebido">Simular recebimento</button>`}},
+
+chaves:()=>({titulo:'Minhas chaves Pix',html:`
+  <div class="lista">${S.chaves.map(k=>`<div class="linha"><span class="ic-mov">${ic('chave')}</span><span class="cresce"><b>${esc(k.chave)}</b><br><span class="apoio">${esc(k.tipo)}</span></span><span class="selo ok">Ativa</span></div>`).join('')}</div>
+  <button class="btn" data-a="nova-chave">Cadastrar chave aleatória</button>
+  <p class="apoio">O registro e a portabilidade de chaves são feitos pela instituição no diretório do Pix. Cada pessoa física pode ter até 5 chaves por conta.</p>`}),
+
+transferir:()=>{
+  const d=atual().destino;
+  if(!d)return{titulo:'Transferir',html:`<h2>Para qual conta Celeiro?</h2><p class="apoio">Transferência entre contas Celeiro cai na hora e não tem custo.</p>
+    <form class="pilha" data-form="trDestino" novalidate>${campo('tr-quem','CPF, CNPJ ou e-mail do titular','text','','autocomplete="off"')}${erro()}<button class="btn cheio" type="submit">Continuar</button></form>`};
+  return{titulo:'Transferir',html:`<h2>Quanto?</h2><div class="bloco" style="gap:0">${dado('Para',d.nome)}${dado('Conta',d.conta)}</div>
+    <form class="pilha" data-form="trValor" novalidate><div class="campo"><label for="tr-valor">Valor (R$)</label><input id="tr-valor" class="grande num" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+    ${campo('tr-desc','Mensagem (opcional)','text','','maxlength="140"')}<p class="apoio num">Disponível: ${brl(S.conta.disponivel)}</p>${erro()}<button class="btn cheio" type="submit">Revisar</button></form>`}},
+
+pagar:()=>{
+  const c=atual().conta;
+  if(!c)return{titulo:'Pagar conta',html:`<h2>Qual conta você quer pagar?</h2>
+    <form class="pilha" data-form="pgLinha" novalidate>${campo('pg-linha','Linha digitável (os números do boleto)','text',atual().linha||'','inputmode="numeric" autocomplete="off"')}${erro()}<button class="btn cheio" type="submit">Continuar</button>
+    <button class="btn" type="button" data-a="avisar" data-m="A leitura do código de barras usa a câmera do aparelho e entra no app publicado.">Ler código de barras</button></form>
+    ${S.aPagar.length?`<section class="bloco"><h3>Contas a vencer</h3><div class="lista">${S.aPagar.map(b=>`<button class="linha" data-a="pagar-conhecido" data-id="${b.id}"><span class="cresce">${esc(b.benef)}<br><span class="apoio">vence em ${dataBR(b.venc)}</span></span><b class="num">${brl(b.valor)}</b>${ic('seta')}</button>`).join('')}</div></section>`:''}`};
+  return{titulo:'Pagar conta',html:`<h2>Confira os dados</h2><div class="bloco" style="gap:0">${dado('Beneficiário',c.benef)}${dado('Vencimento',dataBR(c.venc))}${dado('Valor',brl(c.valor))}</div>
+    <p class="apoio num">Disponível: ${brl(S.conta.disponivel)}</p>${erro()}<button class="btn cheio" data-a="pg-revisar">Pagar ${brl(c.valor)}</button>`}},
+
+cobrancas:()=>({titulo:'Cobranças',html:`
+  <button class="btn cheio" data-a="ir" data-v="boletoNovo">Emitir boleto</button>
+  <button class="btn" data-a="ir" data-v="pixReceber">Cobrar por Pix</button>
+  <section class="bloco"><h3>Boletos emitidos</h3><div class="lista">${S.boletos.map(b=>`<button class="linha" data-a="ir" data-v="boleto" data-id="${b.id}"><span class="cresce"><b>${esc(b.pagador)}</b><br><span class="apoio">vence em ${dataBR(b.venc)}</span></span><span style="text-align:right"><b class="num">${val$(b.valor)}</b><br><span class="selo ${b.status==='pago'?'ok':''}">${STATUS_BOL[b.status]}</span></span></button>`).join('')||'<p class="apoio">Nenhum boleto emitido.</p>'}</div></section>`}),
+
+boletoNovo:()=>({titulo:'Emitir boleto',html:`<h2>Quem vai pagar?</h2>
+  <form class="pilha" data-form="boleto" novalidate>
+    ${campo('bo-nome','Nome ou razão social do pagador')}${campo('bo-doc','CPF ou CNPJ do pagador','text','','inputmode="numeric"')}
+    <div class="campo"><label for="bo-valor">Valor (R$)</label><input id="bo-valor" class="grande num" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+    ${campo('bo-venc','Vencimento','date')}${campo('bo-desc','Descrição que aparece no boleto (opcional)','text','','maxlength="140"')}
+    ${erro()}<button class="btn cheio" type="submit">Emitir boleto</button></form>`}),
+
+boleto:()=>{
+  const b=S.boletos.find(x=>x.id===atual().id);if(!b)return{titulo:'Boleto',html:'<p>Boleto não encontrado.</p>'};
+  return{titulo:'Boleto',html:`<div class="pilha centro">${atual().novo?`<span class="selo-ok">${ic('ok')}</span>`:''}<h2>${brl(b.valor)}</h2><span class="selo ${b.status==='pago'?'ok':''}">${STATUS_BOL[b.status]}</span></div>
+    <div class="bloco" style="gap:0">${dado('Pagador',b.pagador)}${dado('Documento',b.doc)}${dado('Vencimento',dataBR(b.venc))}${b.desc?dado('Descrição',b.desc):''}</div>
+    <span class="rotulo">Linha digitável</span><div class="codigo">${esc(b.linha)}</div>
+    <button class="btn" data-a="copiar" data-t="${esc(b.linha)}">Copiar linha digitável</button>
+    ${b.status==='registrado'?`<p class="aviso"><b>Simulação.</b> A linha acima não é um boleto válido. Use os botões abaixo para ver o pagamento e o cancelamento.</p>
+      <button class="btn cheio" data-a="simular-boleto-pago" data-id="${b.id}">Simular pagamento</button><button class="btn" data-a="cancelar-boleto" data-id="${b.id}">Cancelar boleto</button>`:''}`}},
+
+revisar:()=>{
+  const o=atual().op,n=(atual().senha||'').length;
+  return{titulo:'Confirmar',semNav:true,html:`<div class="pilha centro" style="gap:6px"><span class="apoio">${esc(o.titulo)}</span><span class="num" style="font-size:30px;font-weight:600">${brl(o.valor)}</span></div>
+  <div class="bloco" style="gap:0">${o.linhas.map(([r,v])=>dado(r,v)).join('')}</div>
+  <span class="rotulo" style="text-align:center">Digite a senha de confirmação</span>
+  <div class="senha" aria-label="${n} de 4 números digitados">${[0,1,2,3].map(i=>`<i class="${i<n?'cheio':''}"></i>`).join('')}</div>
+  ${erro()}
+  <div class="teclado">${[1,2,3,4,5,6,7,8,9].map(d=>`<button data-a="tecla" data-d="${d}">${d}</button>`).join('')}<button data-a="voltar" style="font-size:13px">Cancelar</button><button data-a="tecla" data-d="0">0</button><button data-a="tecla" data-d="x" aria-label="Apagar">⌫</button></div>`}},
+
+limites:()=>({titulo:'Limites',html:`<p class="apoio">Entre 20h e 6h vale o limite noturno. Reduzir um limite vale na hora; aumentar depende de análise da instituição.</p>
+  ${[['pix','Pix'],['pagamento','Pagamento de contas'],['transferencia','Transferência entre contas Celeiro']].map(([g,n])=>`<section class="bloco"><h3>${n}</h3><div class="lista">
+    ${['diurno','noturno'].map(p=>dado(p==='diurno'?'Dia · por operação':'Noite · por operação',brl(S.limites[g][p][0]))+dado(p==='diurno'?'Dia · total':'Noite · total',brl(S.limites[g][p][1]))).join('')}</div>
+    <button class="btn curto" style="align-self:flex-start" data-a="avisar" data-m="O ajuste de limite é enviado à instituição parceira. Entra junto com a integração.">Ajustar</button></section>`).join('')}`}),
+
+saldos:()=>({titulo:'Meus saldos',html:`<div class="bloco" style="gap:0">${dado('Disponível',val$(S.conta.disponivel))}${dado('Em processamento',val$(S.conta.bloqueado))}${dado('A receber de boletos',val$(S.boletos.filter(b=>b.status==='registrado').reduce((a,b)=>a+b.valor,0)))}</div>
+  <div class="bloco" style="gap:0">${dado('Agência',S.conta.agencia)}${dado('Conta',S.conta.numero)}${dado('Instituição','Instituição parceira (a definir)')}</div>
+  <p class="apoio">O saldo é o informado pela instituição financeira onde a conta é mantida.</p>`}),
+
+menu:()=>({titulo:'Menu',html:`<div class="lista">${[['pixEnviar','sai','Enviar Pix'],['pixReceber','entra','Receber Pix'],['chaves','chave','Minhas chaves Pix'],['transferir','transferir','Transferir entre contas Celeiro'],['pagar','pagar','Pagar conta'],['boletoNovo','cobrar','Emitir boleto'],['limites','limites','Limites'],['seguranca','seguranca','Segurança'],['saldos','extrato','Dados da conta'],['ajuda','ajuda','Ajuda']]
+  .map(([v,i,t])=>`<button class="linha" data-a="ir" data-v="${v}"><span class="ic-mov">${ic(i)}</span><span class="cresce">${t}</span>${ic('seta')}</button>`).join('')}</div>`}),
+
+seguranca:()=>({titulo:'Segurança',html:`<div class="lista">
+  <button class="linha" data-a="avisar" data-m="A troca da senha de confirmação entra com a integração."><span class="cresce"><b>Senha de confirmação</b><br><span class="apoio">Pedida em toda saída de dinheiro. Cinco erros bloqueiam por 30 minutos.</span></span>${ic('seta')}</button>
+  <div class="linha"><span class="cresce"><b>Limite noturno</b><br><span class="apoio">Das 20h às 6h, valores menores por operação.</span></span><span class="selo ok">Ativo</span></div>
+  <div class="linha"><span class="cresce"><b>Saída automática</b><br><span class="apoio">A sessão encerra depois de um tempo sem uso.</span></span><span class="selo ok">Ativo</span></div>
+  <button class="linha" data-a="avisar" data-m="O bloqueio temporário da conta é enviado à instituição parceira. Entra junto com a integração."><span class="cresce"><b>Bloquear a conta</b><br><span class="apoio">Use em caso de perda do aparelho ou suspeita de fraude.</span></span>${ic('seta')}</button></div>`}),
+
+ajuda:()=>({titulo:'Ajuda',html:`<h2>Como podemos ajudar?</h2><div class="lista">${['Como enviar um Pix','Como emitir um boleto','Quanto tempo leva para um boleto compensar','O que é o limite noturno','Não reconheço um lançamento'].map(q=>`<button class="linha" data-a="avisar" data-m="As respostas serão escritas com a regra de cada produto."><span class="cresce">${q}</span>${ic('seta')}</button>`).join('')}</div>`}),
+
+avisos:()=>({titulo:'Avisos',html:`<div class="lista"><div class="linha"><span class="ic-mov entrada">${ic('entra')}</span><span class="cresce"><b>Pix recebido</b><br><span class="apoio">Você recebeu ${val$(250000)} de Cliente de exemplo.</span></span></div>
+  <div class="linha"><span class="ic-mov">${ic('cobrar')}</span><span class="cresce"><b>Conta a vencer</b><br><span class="apoio">${esc(S.aPagar[0]?S.aPagar[0].benef+' vence em '+dataBR(S.aPagar[0].venc):'Nenhuma conta a vencer.')}</span></span></div></div>`})
+};
+
+/* ---------- Desenho ---------- */
+function desenhar(){
+  const a=atual(),t=T[a.v](),raiz=RAIZ.includes(a.v),topo=document.getElementById('topo'),tela=document.getElementById('tela'),nav=document.getElementById('nav');
+  topo.style.display=t.inicio?'none':'';
+  topo.innerHTML=`${raiz?'':`<button class="icone-btn" data-a="voltar" aria-label="Voltar">${ic('voltar')}</button>`}<h1>${esc(t.titulo||'')}</h1>${t.inicio?'':`<button class="icone-btn" data-a="olho" aria-label="${S.oculto?'Mostrar valores':'Ocultar valores'}">${ic(S.oculto?'olhoNao':'olho')}</button>`}`;
+  tela.innerHTML=t.html;tela.scrollTop=0;tela.classList.toggle('sem-nav',!!t.semNav);
+  nav.style.display=t.semNav?'none':'';
+  nav.innerHTML=[['inicio','Início','inicio'],['extrato','Extrato','extrato'],['pix','Pix','pix'],['cobrancas','Cobrar','cobrar'],['menu','Menu','menu']].map(([v,r,i])=>`<button data-a="aba" data-v="${v}" ${S.pilha[0].v===v?'aria-current="page"':''}>${ic(i)}${r}</button>`).join('');
+}
+const v$=i=>(document.getElementById(i)?.value||'').trim();
+function falhar(m){S.erro=m;const f={};document.querySelectorAll('#tela input,#tela select').forEach(e=>{if(e.id)f[e.id]=e.value});desenhar();for(const k in f){const e=document.getElementById(k);if(e)e.value=f[k]}document.querySelector('.erro')?.scrollIntoView({block:'center'})}
+// Abre a tela de senha para uma saída de dinheiro. `executar` devolve o lançamento.
+function pedirSenha(op){ir('revisar',{op,senha:''})}
+
+/* ---------- Ações ---------- */
+const A={
+  ir:d=>ir(d.v,d.id?{id:d.id}:{}), aba:d=>aba(d.v), voltar, avisar:d=>avisar(d.m),
+  olho:()=>{S.oculto=!S.oculto;desenhar()},
+  filtro:d=>{S.filtro=d.c;desenhar()},
+  'ver-boletos':()=>{S.verBoletos=!S.verBoletos;desenhar()},
+  comprovante:d=>ir('comprovante',{id:d.id}),
+  copiar:async d=>{try{await navigator.clipboard.writeText(d.t);avisar('Copiado')}catch(_){avisar('Não foi possível copiar. Selecione o texto e copie.')}},
+  'nova-chave':()=>{if(S.chaves.length>=5)return avisar('Limite de 5 chaves por conta.');S.chaves.push({tipo:'Chave aleatória',chave:'00000000-0000-4000-8000-'+Math.random().toString(16).slice(2,14).padEnd(12,'0')});desenhar();avisar('Chave cadastrada')},
+  'simular-pix-recebido':()=>{const c=atual().cobranca,m=Servidor.creditar('pix_recebido',c.valor||10000,'Pix recebido','Pagador de exemplo');S.pilha=[{v:'inicio'},{v:'comprovante',id:m.id,novo:true}];desenhar()},
+  'simular-boleto-pago':d=>{const b=S.boletos.find(x=>x.id===d.id);b.status='pago';const m=Servidor.creditar('boleto_recebido',b.valor,'Boleto recebido',b.pagador);S.pilha=[{v:'cobrancas'},{v:'comprovante',id:m.id,novo:true}];desenhar()},
+  'cancelar-boleto':d=>{S.boletos.find(x=>x.id===d.id).status='cancelado';desenhar();avisar('Boleto cancelado')},
+  'pagar-conhecido':d=>{const b=S.aPagar.find(x=>x.id===d.id);ir('pagar',{conta:{benef:b.benef,valor:b.valor,venc:b.venc,ref:b.id}})},
+  'pg-revisar':()=>{const c=atual().conta;pedirSenha({titulo:'Pagamento de conta',valor:c.valor,linhas:[['Beneficiário',c.benef],['Vencimento',dataBR(c.venc)]],executar(){const m=Servidor.confirmar(Servidor.reservar('pagamento_conta',c.valor,'Pagamento de conta',c.benef));S.aPagar=S.aPagar.filter(x=>x.id!==c.ref);return m}})},
+  tecla:d=>{
+    const a=atual();S.erro='';
+    if(d.d==='x'){a.senha=(a.senha||'').slice(0,-1);return desenhar()}
+    a.senha=((a.senha||'')+d.d).slice(0,4);
+    if(a.senha.length<4)return desenhar();
+    try{
+      if(!Servidor.conferirSenha(a.senha)){a.senha='';return falhar('Senha incorreta. Restam '+(5-S.conta.tentativas)+' tentativas.')}
+      const m=a.op.executar();S.pilha=[{v:'inicio'},{v:'comprovante',id:m.id,novo:true}];desenhar();
+    }catch(e){a.senha='';falhar(e.message)}
+  }
+};
+document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&A[el.dataset.a])A[el.dataset.a](el.dataset,el)});
+
+/* ---------- Formulários ---------- */
+const F={
+  colar(){const t=v$('colar');if(t.length<5)return avisar('Cole uma chave Pix ou um código copia e cola.');ir('pixEnviar',{chave:t});F.pixChave()},
+  pixChave(){const k=v$('px-chave');if(k.length<5)return falhar('Digite a chave Pix de quem vai receber.');
+    // No app publicado: Provedor.consultarChave (consulta ao diretório do Pix)
+    trocar('pixEnviar',{destino:{chave:k,nome:'Destinatário de exemplo',doc:'***.000.000-**',inst:'Instituição de exemplo'}})},
+  pixValor(){const d=atual().destino,valor=centavos(v$('px-valor')),msg=v$('px-desc');
+    if(!(valor>0))return falhar('Informe o valor do Pix.');
+    if(valor>S.conta.disponivel)return falhar('Saldo insuficiente.');
+    pedirSenha({titulo:'Pix para '+d.nome,valor,linhas:[['Para',d.nome],['Documento',d.doc],['Instituição',d.inst],['Chave',d.chave]].concat(msg?[['Mensagem',msg]]:[]),
+      executar(){const m=Servidor.reservar('pix_enviado',valor,'Pix enviado',d.nome);m.chave=d.chave;return Servidor.confirmar(m)}})},
+  pixCobrar(){const valor=centavos(v$('pr-valor'));
+    trocar('pixReceber',{cobranca:{valor,chave:v$('pr-chave'),codigo:'CODIGO-PIX-DE-DEMONSTRACAO-'+id('TX')+(valor?'-'+valor:'')}})},
+  trDestino(){const q=v$('tr-quem');if(q.length<5)return falhar('Digite o CPF, CNPJ ou e-mail do titular da conta.');
+    trocar('transferir',{destino:{nome:'Bia Rocha (exemplo)',conta:'0001 · 000001-0'}})},
+  trValor(){const d=atual().destino,valor=centavos(v$('tr-valor')),msg=v$('tr-desc');
+    if(!(valor>0))return falhar('Informe o valor da transferência.');
+    if(valor>S.conta.disponivel)return falhar('Saldo insuficiente.');
+    pedirSenha({titulo:'Transferência para '+d.nome,valor,linhas:[['Para',d.nome],['Conta',d.conta]].concat(msg?[['Mensagem',msg]]:[]),
+      executar(){return Servidor.confirmar(Servidor.reservar('transferencia_enviada',valor,'Transferência entre contas Celeiro',d.nome))}})},
+  pgLinha(){const l=soDig(v$('pg-linha'));if(l.length<44||l.length>48)return falhar('A linha digitável tem de 44 a 48 números. Confira e digite de novo.');
+    // No app publicado: Provedor.consultarLinhaDigitavel (valor do dia, com multa e juros)
+    const valor=parseInt(l.slice(-10),10)||15000;
+    trocar('pagar',{conta:{benef:'Beneficiário de exemplo',valor,venc:diasDe(3)}})},
+  boleto(){const nm=v$('bo-nome'),doc=soDig(v$('bo-doc')),valor=centavos(v$('bo-valor')),ve=v$('bo-venc');
+    if(nm.length<3)return falhar('Digite o nome do pagador.');
+    if(doc.length!==11&&doc.length!==14)return falhar('Digite o CPF (11 números) ou o CNPJ (14 números) do pagador.');
+    if(!(valor>0))return falhar('Informe o valor do boleto.');
+    if(!ve||new Date(ve+'T23:59:59')<new Date())return falhar('Escolha um vencimento a partir de hoje.');
+    // No app publicado: Provedor.emitirBoleto; a linha digitável vem da instituição
+    const b={id:id('BOL'),pagador:nm,doc:v$('bo-doc'),valor,venc:new Date(ve+'T12:00:00'),desc:v$('bo-desc'),status:'registrado',linha:'00000.00000 00000.000000 00000.000000 0 '+String(valor).padStart(14,'0')};
+    S.boletos.unshift(b);S.pilha=[{v:'cobrancas'},{v:'boleto',id:b.id,novo:true}];desenhar()}
+};
+document.addEventListener('submit',e=>{e.preventDefault();const f=e.target.dataset.form;if(F[f])F[f]()});
+desenhar();
+</script>
+</body>
+</html>
